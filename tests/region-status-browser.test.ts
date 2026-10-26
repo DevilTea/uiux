@@ -96,6 +96,8 @@ describe('translucent coverage in the Workbench (issue #106)', () => {
 		try {
 			const entry = page.locator('[data-facet="validation"] button', { hasText: `#${WIDGET_ID}` }).first()
 			await entry.waitFor({ timeout: 20_000 })
+			// A finding that names a Widget is never also shown as "Not linked to a Widget", with or without the marker.
+			expect(await page.getByText('Not linked to a Widget').count()).toBe(0)
 			await highlight(page).first().waitFor({ state: 'attached', timeout: 20_000 })
 			expect(await notice(page).count()).toBe(0)
 			expect(await marker(page).count()).toBe(0)

@@ -1286,6 +1286,32 @@ describe('Runtime DOM measurer: region status (#106)', () => {
 		}
 	})
 
+	it('counts only the opacity below the common ancestor: an opaque sibling in the same faded group is an exact cut and no translucent coverage', async () => {
+		const result = await measure(`
+			<div style="position:absolute;left:0;top:0;width:400px;height:200px;opacity:0.5">
+				<div data-widget-id="grouped" style="position:absolute;left:0;top:0;width:300px;height:100px;background:#eee"></div>
+				<div style="position:absolute;left:100px;top:0;width:50px;height:100px;background:#000"></div>
+			</div>
+			<div style="position:absolute;left:0;top:300px;width:400px;height:200px">
+				<div data-widget-id="plain-group" style="position:absolute;left:0;top:0;width:300px;height:100px;background:#eee"></div>
+				<div style="position:absolute;left:100px;top:0;width:50px;height:100px;opacity:0.5;background:#000"></div>
+			</div>`, ['grouped', 'plain-group'])
+		// Faded together, the opaque sibling still hides what it covers of the Widget.
+		expect(result.grouped!.regionStatus).toBeUndefined()
+		expect(area(result.grouped!)).toBe(300 * 100 - 50 * 100)
+		// Its own opacity below the common ancestor does make it translucent coverage.
+		expect(result['plain-group']!.regionStatus).toBe('translucent')
+		expect(area(result['plain-group']!)).toBe(300 * 100)
+	})
+
+	it('claims no coverage from an overlap that is only a sliver of rounding', async () => {
+		const result = await measure(`
+			<div data-widget-id="w" style="position:absolute;left:0;top:0;width:300px;height:100px;background:#eee"></div>
+			<div style="position:absolute;left:299.98px;top:99.98px;width:50px;height:50px;background:rgba(0,0,0,0.3)"></div>`, ['w'])
+		expect(result.w!.regionStatus).toBeUndefined()
+		expect(area(result.w!)).toBe(300 * 100)
+	})
+
 	it('never reports a status for a plain, uncovered Widget', async () => {
 		const result = await measure('<div data-widget-id="plain" style="position:absolute;left:0;top:0;width:100px;height:50px;background:#eee"></div>', ['plain'])
 		expect(result.plain!.regionStatus).toBeUndefined()

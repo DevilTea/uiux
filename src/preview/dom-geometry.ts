@@ -4,7 +4,7 @@ import { planOcclusion, type OcclusionEvidence, type ProvenOccluderShapeKind } f
 import type { ContourCommand, Point, VisibleRegion, WidgetRect } from './protocol/schema'
 import { subtractAxisAlignedRectangularOcclusion } from './rectangular-occlusion'
 import { basicShapePolygon, EMPTY_SHAPE, parseClipPath, roundedRectShape, svgPrimitiveShape, type ClipSide, type SvgPrimitive } from './clip-shapes'
-import { boundsOf, intersectShapes, MAX_CUT_SHAPES, MAX_CUT_VERTICES, outerRings, rectangleShape, subtractShapes, unionShapes, vertexCount, type PolygonShape } from './polygon-occlusion'
+import { areaOf, boundsOf, intersectShapes, MAX_CUT_SHAPES, MAX_CUT_VERTICES, outerRings, rectangleShape, subtractShapes, unionShapes, vertexCount, type PolygonShape } from './polygon-occlusion'
 import type { RoundedRectRadii } from './rounded-contour'
 
 /**
@@ -78,6 +78,9 @@ type Box = Readonly<{ left: number; top: number; right: number; bottom: number }
 type RoundedShape = Readonly<{ rect: WidgetRect; radii: RoundedRectRadii }>
 /** What an occluder removes: a rectangle, or polygons containing its true shape (a curve, a clip). */
 type CutShape = WidgetRect | PolygonShape
+
+/** The smallest area, in px², of an overlap that proves translucent coverage: less is a sliver of rounding. */
+const MIN_OVERLAP_AREA = 0.25
 
 /** The most cuts of any kind a curved subtraction takes on. */
 const MAX_TOTAL_CUTS = 400
@@ -612,7 +615,7 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 		for (const area of areas) {
 			if (area === 'everywhere') return true
 			const overlap = intersectShapes(remaining, [isPolygonCut(area) ? area : rectangleOf(area)])
-			if (overlap && overlap.polygons.length > 0) return true
+			if (overlap && areaOf(overlap.polygons) >= MIN_OVERLAP_AREA) return true
 		}
 		return false
 	}
@@ -787,6 +790,18 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 		}
 	}
 
+	/** The product of the opacities of an element and its ancestors below the nearest one that also holds the target. */
+	function opacityBelowCommonAncestor(candidate: Element, target: Element): number {
+		const shared = new Set<Element>()
+		for (let node: Element | null = target; node; node = flatTreeParent(node)) shared.add(node)
+		let opacity = 1
+		for (let node: Element | null = candidate; node && !shared.has(node); node = flatTreeParent(node)) {
+			const value = Number.parseFloat(styleOf(node).opacity)
+			opacity *= Number.isFinite(value) ? value : 1
+		}
+		return opacity
+	}
+
 	/** Classifies every element whose paint can reach the visible area and is not the Widget's own. */
 	function occlusionEvidence(target: Element, visible: Box): OcclusionEvidence<CutShape>[] | 'unsupported' {
 		const { elements, boxes } = candidateBoxes()
@@ -959,7 +974,9 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 		}
 		if (replaced || chain.compositing || chain.mask || !chain.transformOk || chain.reflect) return bounded()
 		// Under an opacity below 1 everything the element paints, text and borders included, lets the Widget show.
-		if (chain.opacity < 1) {
+		// Only the opacity below the nearest common ancestor counts: a group that holds both the element and
+		// the Widget fades them together, and the element stays opaque over the Widget inside it.
+		if (opacityBelowCommonAncestor(candidate, target) < 1) {
 			if (chain.clipPath) return bounded()
 			// The areas that the element's fill and borders paint; its text and other paint keep what they cover without a claim.
 			return translucentEvidence([...(fill === 'none' ? [] : [fillArea(candidate, style)]), ...visibleBorderAreas(candidate, style)], order === 'above')
