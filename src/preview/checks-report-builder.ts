@@ -1,6 +1,8 @@
 import type { Diagnostic } from '../domain/validation'
 import type { ChecksObservation } from './checks-observer'
 import {
+	jsonLength,
+	MAX_CHECKS_REPORT_LENGTH,
 	MAX_CHECKS_RUNTIME_ERRORS,
 	MAX_CHECKS_TEXT_LENGTH,
 	MAX_CHECKS_TRANSLATION_WARNINGS,
@@ -82,7 +84,10 @@ export function buildChecksReportBody(input: ChecksReportInput): ChecksReportBod
 			&& (warning.code !== 'missing-parameter' || admissible(warning.parameter))
 	})
 
-	const keptWarnings = warnings.slice(0, MAX_CHECKS_TRANSLATION_WARNINGS)
+	// The whole report stays within its size bound: the errors are bounded on their own, the warnings take the rest.
+	const budget = MAX_CHECKS_REPORT_LENGTH - jsonLength(errors) - 4096
+	let keptWarnings = warnings.slice(0, MAX_CHECKS_TRANSLATION_WARNINGS)
+	while (keptWarnings.length > 0 && jsonLength(keptWarnings) > budget) keptWarnings = keptWarnings.slice(0, Math.floor(keptWarnings.length * 0.9))
 	const warningsLeftOut = warnings.length - keptWarnings.length
 	const keptErrors = [...errors]
 	let errorsLeftOut = 0
@@ -117,6 +122,43 @@ type ChecksReportContextInput = Readonly<{
  * context, is not sent again. A report the bridge did not send (it is gated until the ACK) takes no
  * sequence, so the caller can offer it again.
  */
+/**
+ * A trailing debounce with a longest wait: every `schedule` pushes the run back by `delayMs`, but a run
+ * never waits longer than `maxWaitMs` after the first `schedule` since the last run, so a Preview that
+ * keeps recomputing its Properties still reports.
+ */
+export class MaxWaitDebouncer {
+	private timer?: unknown
+	private pendingSince?: number
+
+	constructor(
+		private readonly run: () => void,
+		private readonly delayMs: number,
+		private readonly maxWaitMs: number,
+		private readonly clock: Readonly<{ now: () => number; set: (callback: () => void, ms: number) => unknown; clear: (handle: unknown) => void }> = { now: () => Date.now(), set: (callback, ms) => setTimeout(callback, ms), clear: handle => clearTimeout(handle as ReturnType<typeof setTimeout>) },
+	) {}
+
+	schedule(): void {
+		const now = this.clock.now()
+		this.pendingSince ??= now
+		if (this.timer !== undefined) this.clock.clear(this.timer)
+		const remaining = this.maxWaitMs - (now - this.pendingSince)
+		this.timer = this.clock.set(() => this.fire(), Math.max(0, Math.min(this.delayMs, remaining)))
+	}
+
+	cancel(): void {
+		if (this.timer !== undefined) this.clock.clear(this.timer)
+		this.timer = undefined
+		this.pendingSince = undefined
+	}
+
+	private fire(): void {
+		this.timer = undefined
+		this.pendingSince = undefined
+		this.run()
+	}
+}
+
 export class ChecksReportPublisher {
 	private sequence = 0
 	private lastKey?: string

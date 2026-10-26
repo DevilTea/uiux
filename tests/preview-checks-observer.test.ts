@@ -51,8 +51,13 @@ const labelPlugin = createWidgetPlugin('Label')
 			registerDeps: ({ dep }) => ({
 				t: dep.root.methods.invoke('t').validate((value): value is TranslationResult => typeof value === 'object' && value !== null && typeof (value as { text?: unknown }).text === 'string'),
 			}),
-			compute: ({ config, deps }) => {
+			compute: ({ config, deps, addDiagnostic }) => {
 				if (config.titleKey === null) return { text: '', warnings: [] }
+				// `diag` has the Property report a diagnostic of its own, which widget-core records as a failed result.
+				if (config.titleKey === 'diag') {
+					addDiagnostic({ message: 'the compute rejected its input' } as never)
+					return { text: '', warnings: [] }
+				}
 				if (config.titleKey === 'shape') return { text: 5, warnings: [] } as unknown as TranslationResult
 				const translated = deps.t(config.titleKey, {})
 				return translated.ok && translated.value ? translated.value : { text: '', warnings: [] }
@@ -192,6 +197,19 @@ describe('RuntimeChecksObserver', () => {
 		expect(latest.propertyErrors.map(error => [error.widgetId, error.property])).toEqual([['a', 'titleResult']])
 		expect(latest.propertyErrors[0]!.detail).toContain('not a { text, warnings }')
 		expect(latest.translationWarnings).toEqual([])
+		controller.dispose()
+	})
+
+	it('reports a Property whose evaluation failed (ok: false) as a Property error with its first diagnostic', async () => {
+		const { controller, observer, observations, read } = await setup([label('a', 'diag'), label('b', 'greeting')])
+		observer.attach(controller.runtime)
+		expect(read('a', 'titleResult')).toMatchObject({ ok: false })
+		read('b', 'titleResult')
+		await tick()
+		const latest = observations.at(-1)!
+		expect(latest.propertyErrors).toHaveLength(1)
+		expect(latest.propertyErrors[0]).toMatchObject({ widgetId: 'a', property: 'titleResult' })
+		expect(latest.propertyErrors[0]!.detail).toContain('the compute rejected its input')
 		controller.dispose()
 	})
 

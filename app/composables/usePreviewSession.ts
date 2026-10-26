@@ -92,11 +92,14 @@ export type HoverCandidate = Readonly<{
  * and 01a115cd-bc5e-710e-bbe2-a3d5f51469fb). `not_checked`: no Preview generation of this session
  * reports to Checks, so nothing is known, which is never zero findings. `checking`: a Preview that
  * reports is open and has not reported for its current View, Variant and Locale yet. `completed`: the
- * latest report of the current generation is held.
+ * latest report of the open Preview is held. `stale`: the Preview document is gone (the person left the
+ * View) and the last report is kept, with when and under which Locale it was made; it may be out of
+ * date and is never shown as completed.
  */
 export type LivePreviewChecksState = Readonly<
 	| { state: 'not_checked' | 'checking'; report?: undefined }
 	| { state: 'completed'; report: LivePreviewChecks }
+	| { state: 'stale'; report: LivePreviewChecks; receivedAt: Date; locale?: string }
 >
 
 /** The measured canvas mapping, published by the canvas for pins and other overlay consumers. */
@@ -247,10 +250,16 @@ export function createPreviewSession(state: WorkbenchState) {
 	const checksReports = new PreviewChecksReports()
 	/** Bumps whenever `checksReports` changes, so `liveChecks` recomputes. */
 	const checksVersion = ref(0)
+	/** When the held report arrived and the Locale the Workbench rendered then. */
+	let checksReceived: { receivedAt: Date; locale?: string } | undefined
 	const liveChecks = computed<LivePreviewChecksState>(() => {
 		void checksVersion.value
 		const report = checksReports.current()
-		if (report) return { state: 'completed', report }
+		if (report) {
+			// Without its Preview document the report cannot follow later changes: it is the last one, not the current one.
+			if (!previewIframe.value) return { state: 'stale', report, receivedAt: checksReceived?.receivedAt ?? new Date(0), ...(checksReceived?.locale ? { locale: checksReceived.locale } : {}) }
+			return { state: 'completed', report }
+		}
 		const reporting = handshakePhase.value === 'open' && runtimeFeatures.value.includes(CHECKS_REPORTS_FEATURE) && !!previewIframe.value && !!state.selectedViewId.value
 		return { state: reporting ? 'checking' : 'not_checked' }
 	})
@@ -703,6 +712,7 @@ export function createPreviewSession(state: WorkbenchState) {
 		hoverWidgetId.value = undefined
 		hoverPurpose.value = undefined
 		checksReports.reset()
+		checksReceived = undefined
 		checksVersion.value++
 		navigationCoordinator?.onRuntimeGenerationBoundary()
 		resetSelectionGeometry()
@@ -891,7 +901,11 @@ export function createPreviewSession(state: WorkbenchState) {
 			...(variantId ? { variantId } : {}),
 			...(state.contextOptions.value.locales.selected ? { locale: state.contextOptions.value.locales.selected } : {}),
 		})
-		if (accepted.status === 'accepted') checksVersion.value++
+		if (accepted.status === 'accepted') {
+			const locale = state.contextOptions.value.locales.selected
+			checksReceived = { receivedAt: new Date(), ...(locale ? { locale } : {}) }
+			checksVersion.value++
+		}
 	}
 
 	/**
@@ -1126,6 +1140,7 @@ export function createPreviewSession(state: WorkbenchState) {
 		(next, previous) => {
 			if (previous && next.every((value, index) => value === previous[index])) return
 			checksReports.clear()
+			checksReceived = undefined
 			checksVersion.value++
 		},
 	)

@@ -10,7 +10,6 @@ import { resolveFrameContext } from '../../src/preview/version-frame-context'
 import type { WorkspaceManifest } from '../../src/domain/workspace/schema'
 import { RuntimePreviewProtocolBridge } from '../../src/preview/protocol/bridge'
 import { createRuntimeGenerationId } from '../../src/preview/protocol/generation-id'
-import { MULTI_TARGET_GEOMETRY_FEATURE } from '../../src/preview/protocol/schema'
 import { RuntimeGeometryProducer } from '../../src/preview/geometry-producer'
 import { createDomGeometryMeasurer } from '../../src/preview/dom-geometry'
 import { attachGeometrySignals, type GeometrySignalSubscription } from '../../src/preview/geometry-signals'
@@ -23,11 +22,10 @@ import {
 	type PreviewTargetingPurpose,
 } from '../../src/preview/protocol/transport'
 import type { TargetingContext, TargetingRuntimeMessage } from '../../src/preview/protocol/targeting'
-import { FAILURE_REPORTS_FEATURE } from '../../src/preview/protocol/failure-report'
-import { CHECKS_REPORTS_FEATURE } from '../../src/preview/protocol/checks-report'
+import { declaredRuntimeFeatures } from '../../src/preview/declared-features'
 import type { ChecksObservation } from '../../src/preview/checks-observer'
-import { buildChecksReportBody, ChecksReportPublisher } from '../../src/preview/checks-report-builder'
-import { WIDGET_EVENTS_FEATURE, type WidgetEventArmMessage } from '../../src/preview/protocol/widget-events'
+import { buildChecksReportBody, ChecksReportPublisher, MaxWaitDebouncer } from '../../src/preview/checks-report-builder'
+import type { WidgetEventArmMessage } from '../../src/preview/protocol/widget-events'
 import type { WidgetEventReport } from '../../src/preview/widget-event-observer'
 import type {
 	PreviewMaterializationResult,
@@ -275,16 +273,8 @@ function reportWidgetEvent(report: WidgetEventReport) {
 	})
 }
 
-/**
- * The capability features this runtime generation declares. `widget.events`, `failure.reports` and
- * `checks.reports` belong to a Workbench Preview (decision 10; issues #312 and #347): a formal
- * capture has no Workbench parent to arm it or to read a report, and a version frame is read-only
- * with no recovery of its own and never feeds Checks.
- */
 function declaredFeatures(): string[] {
-	const features = ['geometry', MULTI_TARGET_GEOMETRY_FEATURE]
-	if (!harnessMode.value && !versionId) features.push(WIDGET_EVENTS_FEATURE, FAILURE_REPORTS_FEATURE, CHECKS_REPORTS_FEATURE)
-	return features
+	return declaredRuntimeFeatures({ harness: harnessMode.value, version: !!versionId })
 }
 
 // ---- Checks reports (issue #347) --------------------------------------------------------------
@@ -301,11 +291,12 @@ let checksObservation: ChecksObservation | undefined
 /** The runtime context the reports are about; raised on every View, Variant, Locale or Runtime instance change. */
 let checksContextVersion = 0
 let lastObservationContext: number | undefined
-let checksTimer: ReturnType<typeof setTimeout> | undefined
 /** `evaluateRuntime` calls in flight, and Locale reads pending: the document is not settled meanwhile. */
 let evaluationsInFlight = 0
 let localeReadsPending = 0
 const CHECKS_REPORT_DELAY_MS = 100
+/** A Preview that keeps recomputing still reports at least this often. */
+const CHECKS_REPORT_MAX_WAIT_MS = 1000
 let checksPublisher: ChecksReportPublisher | undefined
 
 function bumpChecksContext(): void {
@@ -333,13 +324,12 @@ function checksSettled(): boolean {
 }
 
 function scheduleChecksReport(): void {
-	if (!checksReportsEnabled) return
-	if (checksTimer !== undefined) clearTimeout(checksTimer)
-	checksTimer = setTimeout(flushChecksReport, CHECKS_REPORT_DELAY_MS)
+	if (checksReportsEnabled) checksDebouncer.schedule()
 }
 
+const checksDebouncer = new MaxWaitDebouncer(() => flushChecksReport(), CHECKS_REPORT_DELAY_MS, CHECKS_REPORT_MAX_WAIT_MS)
+
 function flushChecksReport(): void {
-	checksTimer = undefined
 	const bridge = runtimeBridge
 	if (!bridge || handshakeStatus.value !== 'open' || !viewId.value || !checksSettled()) return
 	checksPublisher ??= new ChecksReportPublisher(message => bridge.sendChecksReport(message).status === 'sent' ? 'sent' : 'unsent')
@@ -836,7 +826,7 @@ onUnmounted(() => {
 	geometrySignals?.dispose()
 	geometryProducer?.dispose()
 	stopBlockedRecheck()
-	if (checksTimer !== undefined) clearTimeout(checksTimer)
+	checksDebouncer.cancel()
 	disposeCurrentRuntime()
 })
 </script>

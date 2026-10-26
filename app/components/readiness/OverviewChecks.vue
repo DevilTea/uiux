@@ -305,7 +305,7 @@ const previewText: PreviewFindingText = {
 /** The View the held report is about, as Checks names it. */
 const previewView = computed(() => {
 	const live = preview.liveChecks.value
-	if (live.state !== 'completed') return undefined
+	if (live.state !== 'completed' && live.state !== 'stale') return undefined
 	const view = views.value.find(entry => entry.key === live.report.viewId)
 	return { key: live.report.viewId, name: view?.summary.name || t('common.unnamed') }
 })
@@ -319,12 +319,12 @@ const previewView = computed(() => {
 const previewFindings = computed<readonly Finding[]>(() => {
 	const live = preview.liveChecks.value
 	const view = previewView.value
-	if (live.state !== 'completed' || !view) return []
+	if ((live.state !== 'completed' && live.state !== 'stale') || !view) return []
 	const report = live.report
 	const widgetTypes = selectedViewId.value === report.viewId && widgetTreeResult.value?.status === 'valid'
 		? new Map(flattenWidgetTree(widgetTreeResult.value.root).map(widget => [widget.id, widget.type] as const))
 		: undefined
-	const input = { resource: { kind: 'view', key: view.key, name: view.name } satisfies FindingResource, ...(widgetTypes ? { widgetTypes } : {}), text: previewText }
+	const input = { resource: { kind: 'view', key: view.key, name: view.name } satisfies FindingResource, ...(widgetTypes ? { widgetTypes } : {}), text: previewText, checkState: previewState.value }
 	return [...previewTranslationFindings(report, input), ...runtimeErrorFindings(report, input)]
 })
 
@@ -380,11 +380,24 @@ const kitState = computed<CheckState>(() => {
 	return kitError.value ? 'failed' : 'not_checked'
 })
 
+/** The check state of the Preview's sources: a report of a Preview that is gone is incomplete, never completed. */
+const previewState = computed<CheckState>(() => {
+	const live = preview.liveChecks.value
+	return live.state === 'stale' ? 'incomplete' : live.state
+})
+
 /** What the Preview's rows say about their scope: where they come from, or why nothing is known. */
 const previewNote = computed(() => {
-	const live = preview.liveChecks.value.state
-	if (live === 'not_checked') return t('checks.sources.previewNotOpen')
-	return live === 'completed' && previewView.value ? t('checks.sources.previewScope', { view: previewView.value.name }) : undefined
+	const live = preview.liveChecks.value
+	if (live.state === 'not_checked') return t('checks.sources.previewNotOpen')
+	if (!previewView.value || !live.report) return undefined
+	if (live.state === 'completed') return t('checks.sources.previewScope', { view: previewView.value.name })
+	return t('checks.sources.previewStale', {
+		view: previewView.value.name,
+		variant: live.report.variantId ?? t('ctx.base'),
+		locale: live.locale ?? '—',
+		time: fmt.time(live.receivedAt),
+	})
 })
 
 const sourceRows = computed<readonly SourceRow[]>(() => {
@@ -402,8 +415,8 @@ const sourceRows = computed<readonly SourceRow[]>(() => {
 		},
 		{ id: 'product-kit', state: kitState.value, count: countOf('product-kit'), ...(!canRunKitChecks.value ? { requiredKey: 'evidence.capture' } : {}) },
 		// The Preview's sources follow the live Preview, not Run Checks: no Preview reporting means not checked.
-		{ id: 'preview-translation', state: preview.liveChecks.value.state, count: countOf('preview-translation'), note: previewNote.value },
-		{ id: 'runtime', state: preview.liveChecks.value.state, count: countOf('runtime'), note: previewNote.value },
+		{ id: 'preview-translation', state: previewState.value, count: countOf('preview-translation'), note: previewNote.value },
+		{ id: 'runtime', state: previewState.value, count: countOf('runtime'), note: previewNote.value },
 	]
 })
 
@@ -518,12 +531,13 @@ async function open(finding: Finding): Promise<void> {
 /** A Widget finding's second line: its Variant, Property and component, when a check names them, then its sentence. */
 function findingDetail(finding: Finding): string {
 	// A Runtime error's sentence is the Preview's own account of what failed.
-	if (finding.source === 'runtime') return finding.message
 	const parts = [
 		...(finding.variantName ? [t('checks.kit.variant', { name: finding.variantName })] : []),
 		...(finding.property ? [t('checks.preview.property', { name: finding.property })] : []),
 		...(finding.component ? [t('checks.kit.component', { name: finding.component })] : []),
 	]
+	// A Runtime error's sentence is the Preview's own account of what failed, after its Variant.
+	if (finding.source === 'runtime') return (finding.widgetId ? [...parts, finding.message] : parts).join(' · ')
 	return parts.length ? parts.join(' · ') : diagnosticText(finding)
 }
 
@@ -567,7 +581,7 @@ function problemItems(list: readonly Finding[], prefix: string): CheckTreeItem[]
 					level: 'finding',
 					label: findingLabel(finding, group),
 					mono: !!finding.widgetId || finding.translationKey !== undefined,
-					detail: finding.widgetId ? findingDetail(finding) : finding.translationKey !== undefined ? diagnosticText(finding) : finding.source === 'runtime' ? '' : finding.path,
+					detail: finding.widgetId || finding.source === 'runtime' ? findingDetail(finding) : finding.translationKey !== undefined ? diagnosticText(finding) : finding.path,
 					meta: { severity: finding.severity, source: finding.source, state: finding.checkState, scope: findingScope(finding) },
 					action: finding.translationKey !== undefined ? t('checks.openCell') : finding.widgetId ? t('checks.openWidget') : t('checks.open'),
 					icon: finding.translationKey !== undefined ? 'i-lucide-table-cells-merge' : finding.widgetId ? 'i-lucide-crosshair' : 'i-lucide-arrow-up-right',

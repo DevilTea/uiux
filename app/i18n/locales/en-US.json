@@ -189,6 +189,7 @@
       "title": "Sources",
       "description": "Each source has its own state. A source that has not run, is running or did not finish is never zero findings.",
       "previewNotOpen": "No Preview is open, so this is not checked. Open a View's Preview to gather it.",
+      "previewStale": "From the last Preview, which is closed, so it may be out of date: {view} · {variant} · {locale} · {time}.",
       "previewScope": "From the Preview of {view}; only Properties it evaluated.",
       "catalogElsewhere": "{n} Catalog problem is outside the entries Views use; see the Product Kit page. | {n} Catalog problems are outside the entries Views use; see the Product Kit page."
     },

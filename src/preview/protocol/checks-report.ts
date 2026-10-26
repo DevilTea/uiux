@@ -27,6 +27,8 @@ export const CHECKS_REPORTS_FEATURE = 'checks.reports'
 export const MAX_CHECKS_TRANSLATION_WARNINGS = 500
 /** At most this many `runtimeErrors` in one report (Clause 01a17619-ab3f-797d-ae93-4038a48ee31f). */
 export const MAX_CHECKS_RUNTIME_ERRORS = 100
+/** At most this many characters of JSON in one report (Clause 01a17619-ab3f-797d-ae93-4038a48ee31f). */
+export const MAX_CHECKS_REPORT_LENGTH = 1_048_576
 /** Longest text member (a Widget identity, a Property name, a key or a parameter name) a decoder accepts. */
 export const MAX_CHECKS_TEXT_LENGTH = FAILURE_DETAIL_MAX_LENGTH
 
@@ -102,15 +104,19 @@ export function validateChecksReportMessage(input: unknown): ValidationResult<Ch
 	if (type !== undefined && type !== 'checks.report')
 		v.issue('protocol.unknown_message_type', '/type', 'This decoder accepts only checks.report.')
 	if (!context || !payload) return v.finish<ChecksReportMessage>(input)
+	if (jsonLength(input) > MAX_CHECKS_REPORT_LENGTH) {
+		v.issue('protocol.report_too_large', '', `A checks.report holds at most ${MAX_CHECKS_REPORT_LENGTH} characters of JSON.`)
+		return v.finish<ChecksReportMessage>(input)
+	}
 
 	for (const key of ['previewSessionId', 'runtimeGenerationId', 'viewId', 'runtimeContextVersion'] as const) {
 		if (!Object.hasOwn(context, key)) v.issue('protocol.missing_context_identity', `/context/${key}`, `checks.report requires context.${key}.`)
 	}
 	for (const key of ['previewSessionId', 'runtimeGenerationId'] as const) {
-		if (Object.hasOwn(context, key)) v.string(context[key], `/context/${key}`, true)
+		if (Object.hasOwn(context, key)) boundedText(context[key], `/context/${key}`, v, true)
 	}
 	if (Object.hasOwn(context, 'viewId')) validateUuid(context.viewId, '/context/viewId', v, 'View identity')
-	if (Object.hasOwn(context, 'variantId')) v.string(context.variantId, '/context/variantId', true)
+	if (Object.hasOwn(context, 'variantId')) boundedText(context.variantId, '/context/variantId', v, true)
 	if (Object.hasOwn(context, 'runtimeContextVersion')) validateCount(context.runtimeContextVersion, '/context/runtimeContextVersion', v)
 	for (const key of INAPPLICABLE_CONTEXT_KEYS) {
 		if (Object.hasOwn(context, key)) v.issue('protocol.inapplicable_context_identity', `/context/${key}`, `checks.report carries no ${key}.`)
@@ -210,4 +216,14 @@ function boundedText(value: unknown, path: string, v: Validator, nonEmpty: boole
 function validateCount(value: unknown, path: string, v: Validator): void {
 	if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0)
 		v.issue('protocol.invalid_sequence', path, 'Protocol sequence and revision values are non-negative JSON safe integers.')
+}
+
+/** The length of a value as JSON; a value that cannot be serialized is over any bound. */
+export function jsonLength(value: unknown): number {
+	try {
+		return JSON.stringify(value)?.length ?? 0
+	}
+	catch {
+		return Number.POSITIVE_INFINITY
+	}
 }

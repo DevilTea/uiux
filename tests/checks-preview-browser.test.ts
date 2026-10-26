@@ -106,8 +106,14 @@ describe('Checks gathers the live Preview (issue #347)', () => {
 			expect(warningsOf(report).every(entry => entry.warning.requestedLocale === 'zh-TW')).toBe(true)
 
 			await goToChecks(page)
-			expect(await stateOf(page, 'preview-translation')).toBe('completed')
-			expect(await stateOf(page, 'runtime')).toBe('completed')
+			// The Preview was left with the View: its last report is kept, labeled, and never shown as completed.
+			expect(await stateOf(page, 'preview-translation')).toBe('incomplete')
+			expect(await stateOf(page, 'runtime')).toBe('incomplete')
+			const note = await page.locator('[data-check-source="preview-translation"]').textContent()
+			expect(note).toContain('From the last Preview')
+			expect(note).toContain('may be out of date')
+			expect(note).toContain('zh-TW')
+			expect(note).toContain('UIUX Workbench')
 			expect(await countOf(page, 'preview-translation')).toBeGreaterThanOrEqual(1)
 			// A run was never asked for, and the Preview's findings are listed all the same, as live ones.
 			const problem = page.locator('[data-check-problem="i18n.missing_translation"]')
@@ -119,7 +125,7 @@ describe('Checks gathers the live Preview (issue #347)', () => {
 			expect(text).toContain('Property labelResult')
 			expect(text).toContain('Warning')
 			expect(text).toContain('Preview translation warnings')
-			expect(await finding.getAttribute('data-finding-state')).toBe('completed')
+			expect(await finding.getAttribute('data-finding-state')).toBe('incomplete')
 
 			// Selecting it opens its exact context: the View with the Widget selected.
 			await finding.click()
@@ -142,7 +148,7 @@ describe('Checks gathers the live Preview (issue #347)', () => {
 	}, 60_000)
 
 	it('lists a load error of the Adapters as a current Runtime error', async () => {
-		const { context, page } = await open(`/views/${VIEW_ID}`, {
+		const { context, page } = await open(`/views/${VIEW_ID}?variant=Quiet`, {
 			adaptersAnswer: { state: 'invalid', diagnostics: [{ code: 'adapter.bundle_invalid', path: '/adapters', message: 'The Adapter bundle has no mount function.' }], summaries: [] },
 		})
 		try {
@@ -153,13 +159,15 @@ describe('Checks gathers the live Preview (issue #347)', () => {
 			expect(warningsOf(report)).toEqual([])
 
 			await goToChecks(page)
-			expect(await stateOf(page, 'runtime')).toBe('completed')
+			expect(await stateOf(page, 'runtime')).toBe('incomplete')
 			expect(await countOf(page, 'runtime')).toBe(1)
 			const problem = page.locator('[data-check-problem="runtime.adapter_invalid"]')
 			await problem.first().waitFor()
 			expect(await problem.first().getAttribute('data-check-severity')).toBe('error')
 			const finding = page.locator('[data-finding-source="runtime"]')
 			expect(await finding.textContent()).toContain('The Adapter bundle has no mount function.')
+			// A Runtime error of a Variant names the Variant.
+			expect(await finding.textContent()).toContain('Variant Quiet')
 		}
 		finally { await context.close() }
 	}, 90_000)
@@ -197,7 +205,7 @@ describe('Checks gathers the live Preview (issue #347)', () => {
 			expect(warningsOf(en).some(entry => entry.warning.key === MISSING_KEY)).toBe(false)
 
 			await goToChecks(page)
-			expect(await stateOf(page, 'preview-translation')).toBe('completed')
+			expect(await stateOf(page, 'preview-translation')).toBe('incomplete')
 			expect(await page.locator('[data-finding-source="preview-translation"]', { hasText: WIDGET_ID }).count()).toBe(0)
 			expect(await page.locator('[data-check-problem="i18n.missing_translation"]').count()).toBe(0)
 		}

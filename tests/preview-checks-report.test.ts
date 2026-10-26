@@ -8,12 +8,14 @@ import {
 } from '../src/preview/protocol/bridge'
 import {
 	CHECKS_REPORTS_FEATURE,
+	MAX_CHECKS_REPORT_LENGTH,
 	MAX_CHECKS_RUNTIME_ERRORS,
 	MAX_CHECKS_TRANSLATION_WARNINGS,
 	validateChecksReportMessage,
 	type ChecksReportMessage,
 } from '../src/preview/protocol/checks-report'
-import { buildChecksReportBody, ChecksReportPublisher, displaySafe } from '../src/preview/checks-report-builder'
+import { declaredRuntimeFeatures } from '../src/preview/declared-features'
+import { buildChecksReportBody, ChecksReportPublisher, displaySafe, MaxWaitDebouncer } from '../src/preview/checks-report-builder'
 import { PreviewChecksReports } from '../src/preview/checks-reports'
 import type { ChecksObservation } from '../src/preview/checks-observer'
 
@@ -128,6 +130,18 @@ describe('checks.report decoder', () => {
 		expect(issues(report({ payload: { translationWarnings: warnings(MAX_CHECKS_TRANSLATION_WARNINGS + 1) } }))).toContain('protocol.too_many_translation_warnings')
 		expect(issues(report({ payload: { runtimeErrors: errors(MAX_CHECKS_RUNTIME_ERRORS) } }))).toEqual([])
 		expect(issues(report({ payload: { runtimeErrors: errors(MAX_CHECKS_RUNTIME_ERRORS + 1) } }))).toContain('protocol.too_many_runtime_errors')
+	})
+
+	it('bounds the session, generation and Variant identities and the size of the whole report', () => {
+		expect(issues(report({ context: { previewSessionId: 's'.repeat(501) } }))).toContain('protocol.unsafe_text')
+		expect(issues(report({ context: { runtimeGenerationId: 'g\u0000' } }))).toContain('protocol.unsafe_text')
+		expect(issues(report({ context: { variantId: 'v'.repeat(501) } }))).toContain('protocol.unsafe_text')
+		expect(issues(report({ context: { variantId: 'v'.repeat(500) } }))).toEqual([])
+		// 500 warnings of maximal text fit no report: the decoder refuses the total, not only the parts.
+		const long = (index: number) => ({ widgetId: 'w'.repeat(500) + index, resultProperty: 'p'.repeat(500), warning: { code: 'missing-parameter', key: 'k'.repeat(500), requestedLocale: 'en-US', parameter: 'a'.repeat(500) } })
+		const huge = report({ payload: { translationWarnings: Array.from({ length: 500 }, (_, index) => long(index)) } })
+		expect(JSON.stringify(huge).length).toBeGreaterThan(MAX_CHECKS_REPORT_LENGTH)
+		expect(issues(huge)).toContain('protocol.report_too_large')
 	})
 
 	it('decodes only checks.report', () => {
@@ -308,6 +322,27 @@ describe('what the runtime reports', () => {
 		expect(displaySafe('x'.repeat(600))).toHaveLength(500)
 	})
 
+	it('keeps a report of maximal warnings within the size bound and says it was cut', () => {
+		const entry = (index: number) => ({ widgetId: 'w'.repeat(497) + String(index).padStart(3, '0'), resultProperty: 'p'.repeat(500), warning: { code: 'missing-parameter', key: 'k'.repeat(500), requestedLocale: 'en-US', parameter: 'a'.repeat(500) } as const })
+		const body = buildChecksReportBody({ observation: observation({ translationWarnings: Array.from({ length: 500 }, (_, index) => entry(index)) }) })
+		expect(body.translationWarnings.length).toBeLessThan(500)
+		expect(body.runtimeErrors.at(-1)).toMatchObject({ reason: 'runtime.report_truncated' })
+		expect(issues({ ...report(), payload: { sequence: 0, ...body } })).toEqual([])
+	})
+
+	it('carries runtime.report_truncated over the wire to the Workbench', () => {
+		const { workbench, runtime } = openGeneration()
+		const warnings = Array.from({ length: MAX_CHECKS_TRANSLATION_WARNINGS + 5 }, (_, index) => ({ widgetId: `w${index}`, resultProperty: 'labelResult', warning: missingTranslation }))
+		const body = buildChecksReportBody({ observation: observation({ translationWarnings: warnings }) })
+		const message = decoded({ ...report(), payload: { sequence: 0, ...body } })
+		expect(runtime.sendChecksReport(message)).toEqual({ status: 'sent' })
+		const received = workbench.receive(message)
+		expect(received).toMatchObject({ status: 'accepted' })
+		const accepted = (received as { message: ChecksReportMessage }).message
+		expect(accepted.payload.translationWarnings).toHaveLength(MAX_CHECKS_TRANSLATION_WARNINGS)
+		expect(accepted.payload.runtimeErrors).toEqual([{ reason: 'runtime.report_truncated', detail: '5 translation warnings were left out.' }])
+	})
+
 	it('numbers the reports, sends a changed one and leaves a repeated one unsent', () => {
 		const sent: ChecksReportMessage[] = []
 		let accept = false
@@ -331,5 +366,57 @@ describe('what the runtime reports', () => {
 		expect(sent.map(message => message.payload.sequence)).toEqual([0, 1, 2])
 		expect(sent[2]!.context).toMatchObject({ variantId: 'Loading', runtimeContextVersion: 2 })
 		expect(sent.every(message => validateChecksReportMessage(message).ok)).toBe(true)
+	})
+})
+
+describe('the runtime declares checks.reports in a Workbench Preview only', () => {
+	it('declares it for a Workbench Preview, and not for the formal capture harness or a version frame', () => {
+		expect(declaredRuntimeFeatures({ harness: false, version: false })).toContain(CHECKS_REPORTS_FEATURE)
+		expect(declaredRuntimeFeatures({ harness: true, version: false })).not.toContain(CHECKS_REPORTS_FEATURE)
+		expect(declaredRuntimeFeatures({ harness: false, version: true })).not.toContain(CHECKS_REPORTS_FEATURE)
+	})
+})
+
+describe('reporting cannot be starved by continuous recomputation', () => {
+	it('runs a trailing debounce after the delay, and at the latest after the longest wait', () => {
+		let now = 0
+		const timers = new Map<number, { at: number; callback: () => void }>()
+		let next = 0
+		const clock = {
+			now: () => now,
+			set: (callback: () => void, ms: number) => { timers.set(++next, { at: now + ms, callback }); return next },
+			clear: (handle: unknown) => { timers.delete(handle as number) },
+		}
+		const advance = (to: number) => {
+			while (true) {
+				const due = [...timers.entries()].filter(([, timer]) => timer.at <= to).sort((a, b) => a[1].at - b[1].at)[0]
+				if (!due) break
+				timers.delete(due[0])
+				now = due[1].at
+				due[1].callback()
+			}
+			now = to
+		}
+		const runs: number[] = []
+		const debouncer = new MaxWaitDebouncer(() => runs.push(now), 100, 1000, clock)
+		// A change every 50 ms never lets the 100 ms delay elapse, yet the report goes out by 1000 ms.
+		for (let at = 0; at <= 2500; at += 50) {
+			advance(at)
+			debouncer.schedule()
+		}
+		expect(runs[0]).toBe(1000)
+		expect(runs.length).toBeGreaterThanOrEqual(2)
+		// Quiet after a change: it runs one delay later.
+		advance(10_000)
+		const before = runs.length
+		debouncer.schedule()
+		advance(10_099)
+		expect(runs.length).toBe(before)
+		advance(10_100)
+		expect(runs.length).toBe(before + 1)
+		debouncer.schedule()
+		debouncer.cancel()
+		advance(20_000)
+		expect(runs.length).toBe(before + 1)
 	})
 })
