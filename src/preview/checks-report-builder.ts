@@ -94,7 +94,7 @@ export function buildChecksReportBody(input: ChecksReportInput): ChecksReportBod
 			&& (warning.code !== 'missing-parameter' || admissible(warning.parameter))
 	})
 
-	// Identities are display-safe text the decoder admits; an entry cut by a bound still counts as not evaluated.
+	// Identities are display-safe text the decoder admits; `complete` follows the list that is sent, and a cut is said by `runtime.report_truncated`.
 	const declaredUnevaluated = input.observation?.unevaluated
 	let keptUnevaluated: readonly ChecksUnevaluated[] = []
 	if (declaredUnevaluated) {
@@ -137,7 +137,7 @@ export function buildChecksReportBody(input: ChecksReportInput): ChecksReportBod
 		translationWarnings: Object.freeze(keptWarnings),
 		runtimeErrors: Object.freeze(keptErrors),
 		...(declaredUnevaluated
-			? { coverage: Object.freeze({ complete: declaredUnevaluated.length === 0, unevaluated: Object.freeze(keptUnevaluated) }) }
+			? { coverage: Object.freeze({ complete: keptUnevaluated.length === 0, unevaluated: Object.freeze(keptUnevaluated) }) }
 			: {}),
 	})
 }

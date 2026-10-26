@@ -20,6 +20,7 @@ import {
 	FINDING_SOURCES,
 	GROUP_BYS,
 	groupFindings,
+	previewReportTruncated,
 	previewSourceStates,
 	previewTranslationFindings,
 	runtimeErrorFindings,
@@ -563,8 +564,11 @@ const previewNote = computed(() => {
 
 /** What the Preview's translation row adds: how many declared Properties its Runtime did not evaluate, whose warnings are unknown. */
 const previewCoverageNote = computed(() => {
-	const n = unevaluatedCount(preview.liveChecks.value.report)
-	return n > 0 ? t('checks.sources.previewUnevaluated', { n }, n) : undefined
+	const report = preview.liveChecks.value.report
+	const n = unevaluatedCount(report)
+	if (n === 0) return undefined
+	// A cut report names only some of them: the count is a lower bound.
+	return t(previewReportTruncated(report) ? 'checks.sources.previewUnevaluatedAtLeast' : 'checks.sources.previewUnevaluated', { n }, n)
 })
 
 const sourceRows = computed<readonly SourceRow[]>(() => {

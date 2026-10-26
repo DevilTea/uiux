@@ -410,11 +410,13 @@ const BLOCKING_RUNTIME_REASONS: ReadonlySet<string> = new Set(['runtime.view_loa
  * Rule 01a115cd-bb96-7131-99d9-a3882829590c, owner ruling 5 of Discussion #241, 2026-10-26):
  *
  * - Translation warnings are failed when the Preview could not evaluate anything (its View or
- *   Adapters did not load, or it is blocked), incomplete when its `coverage` says declared Properties
- *   were not evaluated, and completed when it says every one was. A report without `coverage` makes
- *   no claim, so it reads as before: completed.
- * - Runtime errors are completed, as every one the Preview knows is listed, except when the report
- *   says some were left out (`runtime.report_truncated`): incomplete.
+ *   Adapters did not load, or it is blocked), and completed only when its `coverage` says every
+ *   declared Property was evaluated. A report that names unevaluated Properties, or carries no
+ *   `coverage` (a Preview with no Runtime to inspect), is incomplete: an unverified check is never
+ *   zero findings.
+ * - Runtime errors are completed, as every one the Preview knows is listed.
+ * - A report that says it left entries out (`runtime.report_truncated`, whose detail is not normative
+ *   and cannot say which list was cut) makes both sources incomplete.
  * - A report of a Preview that is closed is the last one, never the current one: incomplete.
  *
  * Without a report the two follow the Preview: not checked, or checking until it has reported.
@@ -426,16 +428,21 @@ export function previewSourceStates(live: PreviewChecksHeld): Readonly<{ transla
 		return { translation: state, runtime: state }
 	}
 	if (live.state === 'stale') return { translation: 'incomplete', runtime: 'incomplete' }
+	const truncated = report.runtimeErrors.some(error => error.reason === 'runtime.report_truncated')
 	const translation: CheckState = report.runtimeErrors.some(error => BLOCKING_RUNTIME_REASONS.has(error.reason))
 		? 'failed'
-		: report.coverage?.complete === false ? 'incomplete' : 'completed'
-	const runtime: CheckState = report.runtimeErrors.some(error => error.reason === 'runtime.report_truncated') ? 'incomplete' : 'completed'
-	return { translation, runtime }
+		: truncated || report.coverage?.complete !== true ? 'incomplete' : 'completed'
+	return { translation, runtime: truncated ? 'incomplete' : 'completed' }
 }
 
-/** The declared translation Properties a report says the Runtime did not evaluate; 0 when it makes no claim. */
+/** The declared translation Properties a report says have no usable result; 0 when it names none. */
 export function unevaluatedCount(report: LivePreviewChecks | undefined): number {
 	return report?.coverage?.unevaluated.length ?? 0
+}
+
+/** Whether the report says it left entries out, so a count taken from it is a lower bound. */
+export function previewReportTruncated(report: LivePreviewChecks | undefined): boolean {
+	return !!report?.runtimeErrors.some(error => error.reason === 'runtime.report_truncated')
 }
 
 /** The Workbench's own sentences for a Preview finding, in the UI language. */

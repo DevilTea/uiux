@@ -198,7 +198,8 @@
       "previewNotOpen": "No Preview is open, so this is not checked. Open a View's Preview to gather it.",
       "previewStale": "From the last Preview, which is closed, so it may be out of date: {view} · {variant} · {locale} · {time}.",
       "previewScope": "From the Preview of {view}; only Properties it evaluated.",
-      "previewUnevaluated": "{n} declared translation Property was not evaluated, so its warnings are unknown. | {n} declared translation Properties were not evaluated, so their warnings are unknown.",
+      "previewUnevaluated": "{n} declared translation Property has no usable result, so its warnings are unknown. | {n} declared translation Properties have no usable result, so their warnings are unknown.",
+      "previewUnevaluatedAtLeast": "At least {n} declared translation Property has no usable result, so its warnings are unknown. | At least {n} declared translation Properties have no usable result, so their warnings are unknown.",
       "catalogElsewhere": "{n} Catalog problem is outside the entries Views use; see the Product Kit page. | {n} Catalog problems are outside the entries Views use; see the Product Kit page."
     },
     "preview": {

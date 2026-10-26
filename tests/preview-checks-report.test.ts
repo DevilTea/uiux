@@ -358,6 +358,16 @@ describe('what the runtime reports', () => {
 			expect(decoded({ ...report(), payload: { sequence: 0, ...body } }).payload.coverage).toEqual(body.coverage)
 		})
 
+		it('derives complete from the list that is sent', () => {
+			const body = buildChecksReportBody({ observation: observation({ unevaluated: [unevaluatedEntry(1)] }) })
+			expect(body.coverage?.complete).toBe(body.coverage!.unevaluated.length === 0)
+			expect(body.coverage).toEqual({ complete: false, unevaluated: [unevaluatedEntry(1)] })
+			// An entry with no identity is left out of the list, and what is sent still decodes.
+			const none = buildChecksReportBody({ observation: observation({ unevaluated: [{ ...unevaluatedEntry(1), widgetId: '' }] }) })
+			expect(none.coverage).toEqual({ complete: true, unevaluated: [] })
+			expect(issues({ ...report(), payload: { sequence: 0, ...none } })).toEqual([])
+		})
+
 		it('caps the list, keeps the coverage incomplete and says it cut it', () => {
 			const entries = Array.from({ length: MAX_CHECKS_UNEVALUATED + 7 }, (_, index) => unevaluatedEntry(index))
 			const body = buildChecksReportBody({ observation: observation({ unevaluated: entries }) })

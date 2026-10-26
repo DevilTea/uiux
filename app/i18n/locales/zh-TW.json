@@ -198,7 +198,8 @@
       "previewNotOpen": "目前沒有開啟預覽，所以尚未檢查。開啟 View 的預覽即可收集。",
       "previewStale": "來自最後一次預覽，該預覽已關閉，內容可能已過時：{view} · {variant} · {locale} · {time}。",
       "previewScope": "來自 {view} 的預覽，只含它已計算過的屬性。",
-      "previewUnevaluated": "有 {n} 個宣告的翻譯屬性尚未被評估，其警告未知。",
+      "previewUnevaluated": "有 {n} 個宣告的翻譯屬性沒有可用的結果，其警告未知。 | 有 {n} 個宣告的翻譯屬性沒有可用的結果，其警告未知。",
+      "previewUnevaluatedAtLeast": "至少有 {n} 個宣告的翻譯屬性沒有可用的結果，其警告未知。 | 至少有 {n} 個宣告的翻譯屬性沒有可用的結果，其警告未知。",
       "catalogElsewhere": "有 {n} 個型錄問題不在 View 使用的項目中，請見 Product Kit 頁面。 | 有 {n} 個型錄問題不在 View 使用的項目中，請見 Product Kit 頁面。"
     },
     "preview": {
