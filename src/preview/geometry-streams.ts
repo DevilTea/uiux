@@ -3,6 +3,7 @@ import {
 	type GeometryAcquireRequest,
 	type GeometryAcquireResponse,
 	type GeometryReleaseRequest,
+	type GeometryRevealRequest,
 	type VisibleRegion,
 	type WidgetRect,
 } from './protocol/schema'
@@ -68,6 +69,8 @@ export type GeometryReportOutcome = 'accepted' | 'no-context' | 'stale-context' 
 
 export type GeometryStreamDependencies = Readonly<{
 	send(message: GeometryAcquireRequest | GeometryReleaseRequest): void
+	/** Sends one `geometry.reveal` and says whether the bridge sent it. Without it no reveal is ever sent. */
+	sendReveal?(message: GeometryRevealRequest): boolean
 	mintId?: () => string
 	requestFrame?: (callback: () => void) => number
 	cancelFrame?: (handle: number) => void
@@ -100,6 +103,7 @@ export class GeometryStreamCoordinator {
 	private context?: GeometryStreamContext
 	private ready = false
 	private multiTarget = false
+	private revealSupported = false
 	private demands: readonly GeometryDemand[] = []
 	private readonly streams = new Map<string, OpenStream>()
 	private readonly reports = new Map<string, GeometryReport>()
@@ -154,6 +158,24 @@ export class GeometryStreamCoordinator {
 		if (this.multiTarget === enabled) return
 		this.multiTarget = enabled
 		this.reconcile()
+	}
+
+	/** Whether the runtime declared `geometry.reveal` (the feature is optional). Without it no reveal is ever sent. */
+	setRevealSupported(enabled: boolean): void {
+		this.revealSupported = enabled
+	}
+
+	/**
+	 * Asks the runtime to scroll the Widget of the open stream `navigationRequestId` into view, once,
+	 * one-way and best-effort (Clause 01a11a59-d8be-78aa-bdc7-28aa62bd9444). It is sent only in an
+	 * acknowledged generation that declared the feature, and only for the Widget's currently open
+	 * stream: a reveal opens no stream and has no identity of its own. Returns whether it was sent.
+	 */
+	reveal(widgetId: string, navigationRequestId: string): boolean {
+		if (!this.revealSupported || !this.deps.sendReveal || !this.ready || !this.context) return false
+		const stream = this.streams.get(widgetId)
+		if (!stream || stream.navigationRequestId !== navigationRequestId) return false
+		return this.deps.sendReveal({ type: 'geometry.reveal', context: this.baseContext(widgetId, navigationRequestId), payload: {} })
 	}
 
 	/** Replaces the whole demand. Called on filter, thread, status, selection or hover changes. */

@@ -7,6 +7,7 @@ import {
 	type GeometryAcquireRequest,
 	type GeometryAcquireResponse,
 	type GeometryReleaseRequest,
+	type GeometryRevealRequest,
 } from '../src/preview/protocol/schema'
 
 const viewId = '11111111-1111-4111-8111-111111111111'
@@ -25,7 +26,7 @@ function rectRegion(x: number, y: number, width: number, height: number) {
 	}
 }
 
-function fixture(maxStreams?: number) {
+function fixture(maxStreams?: number, reveal?: (widgetId: string) => boolean, revealReady?: () => boolean) {
 	const frames: Array<() => void> = []
 	const sent: GeometryAcquireResponse[] = []
 	const geometry = new Map<string, WidgetGeometry>()
@@ -44,6 +45,8 @@ function fixture(maxStreams?: number) {
 		requestFrame: (callback) => { frames.push(callback); return frames.length },
 		cancelFrame: (handle) => { frames[handle - 1] = () => {} },
 		...(maxStreams ? { maxStreams } : {}),
+		...(reveal ? { reveal } : {}),
+		...(revealReady ? { revealReady } : {}),
 	})
 	producer.setContext({ viewId })
 	const runFrames = () => {
@@ -72,6 +75,126 @@ function release(widgetId: string, navigationRequestId: string): GeometryRelease
 		payload: {},
 	}
 }
+
+function revealRequest(widgetId: string, navigationRequestId: string, extra: Record<string, unknown> = {}): GeometryRevealRequest {
+	return {
+		type: 'geometry.reveal',
+		context: { previewSessionId: 's', runtimeGenerationId: 'g', viewId, navigationRequestId, widgetId, ...extra },
+		payload: {},
+	}
+}
+
+// Clauses 01a11a59-d8be-78aa-bdc7-28aa62bd9444, 01a11a59-da48-7437-bee8-67787175cbda and 01a11a70-3d8d-7e52-9412-8a92797814e6.
+describe('Runtime geometry producer (geometry.reveal)', () => {
+	it('scrolls for a reveal that names the open stream of its Widget, and reports the moved Widget as the stream\'s next report', () => {
+		const revealed: string[] = []
+		let scrolled = false
+		const f = fixture(undefined, (widgetId) => { revealed.push(widgetId); scrolled = true; return true })
+		f.place('a', 0, 900)
+		f.producer.receive(acquire('a', 'n1'))
+		f.runFrames()
+		expect(f.sent).toHaveLength(1)
+		expect(f.sent[0]!.payload.rect.y).toBe(900)
+		expect(f.producer.receiveReveal(revealRequest('a', 'n1'))).toBe('revealed')
+		expect(revealed).toEqual(['a'])
+		// The scroll moved the Widget; no reply exists, so the stream reports it with an advanced revision.
+		expect(scrolled).toBe(true)
+		f.place('a', 0, 100)
+		f.runFrames()
+		expect(f.sent).toHaveLength(2)
+		expect(f.sent[1]!.context).toMatchObject({ navigationRequestId: 'n1', geometryRevision: 2 })
+		expect(f.sent[1]!.payload.rect.y).toBe(100)
+	})
+
+	it('does nothing, and sends nothing, when the reveal does not apply to the Widget', () => {
+		const f = fixture(undefined, () => false)
+		f.place('a', 0, 10)
+		f.producer.receive(acquire('a', 'n1'))
+		f.runFrames()
+		expect(f.producer.receiveReveal(revealRequest('a', 'n1'))).toBe('no-op')
+		expect(f.frames).toHaveLength(0)
+		expect(f.sent).toHaveLength(1)
+	})
+
+	it('ignores a reveal as stale unless it names the open stream of its Widget in that stream\'s context', () => {
+		const revealed: string[] = []
+		const f = fixture(undefined, (widgetId) => { revealed.push(widgetId); return true })
+		f.place('a', 0, 0)
+		f.producer.receive(acquire('a', 'n1'))
+		// Unknown Widget, superseded identity and released stream.
+		expect(f.producer.receiveReveal(revealRequest('b', 'n1'))).toBe('ignored-stale')
+		f.producer.receive(acquire('a', 'n2'))
+		expect(f.producer.receiveReveal(revealRequest('a', 'n1'))).toBe('ignored-stale')
+		// A context other than the one the stream was acquired for.
+		expect(f.producer.receiveReveal(revealRequest('a', 'n2', { runtimeContextVersion: 7 }))).toBe('ignored-stale')
+		expect(f.producer.receiveReveal(revealRequest('a', 'n2', { variantId: 'compact' }))).toBe('ignored-stale')
+		f.producer.receive(release('a', 'n2'))
+		expect(f.producer.receiveReveal(revealRequest('a', 'n2'))).toBe('ignored-stale')
+		expect(revealed).toEqual([])
+	})
+
+	it('ignores a reveal for a stream whose render context is not the one rendered, and for a stream ended by a context change', () => {
+		const revealed: string[] = []
+		const f = fixture(undefined, (widgetId) => { revealed.push(widgetId); return true })
+		f.producer.receive(acquire('a', 'n1', { variantId: 'compact' }))
+		expect(f.producer.receiveReveal(revealRequest('a', 'n1', { variantId: 'compact' }))).toBe('ignored-stale')
+		f.producer.setContext({ viewId, variantId: 'compact' })
+		expect(f.producer.receiveReveal(revealRequest('a', 'n1', { variantId: 'compact' }))).toBe('revealed')
+		f.producer.setContext({ viewId })
+		expect(f.producer.receiveReveal(revealRequest('a', 'n1', { variantId: 'compact' }))).toBe('ignored-stale')
+		expect(revealed).toEqual(['a'])
+	})
+
+	describe('a document that has not rendered yet', () => {
+		function loading() {
+			const revealed: string[] = []
+			let ready = false
+			const f = fixture(undefined, (widgetId) => { revealed.push(widgetId); return true }, () => ready)
+			return { f, revealed, settle: () => { ready = true; f.producer.releaseDeferredReveals() } }
+		}
+
+		it('holds a reveal until the document settles, then applies it to the stream that is open', () => {
+			const { f, revealed, settle } = loading()
+			f.place('a', 0, 900)
+			f.producer.receive(acquire('a', 'n1'))
+			expect(f.producer.receiveReveal(revealRequest('a', 'n1'))).toBe('deferred')
+			f.producer.releaseDeferredReveals()
+			expect(revealed).toEqual([])
+			settle()
+			expect(revealed).toEqual(['a'])
+			// Applied once: a second release finds nothing waiting.
+			settle()
+			expect(revealed).toEqual(['a'])
+		})
+
+		it('drops a held reveal whose stream ended or was superseded meanwhile', () => {
+			const { f, revealed, settle } = loading()
+			f.producer.receive(acquire('a', 'n1'))
+			f.producer.receive(acquire('b', 'm1'))
+			f.producer.receive(acquire('c', 'k1'))
+			expect(f.producer.receiveReveal(revealRequest('a', 'n1'))).toBe('deferred')
+			expect(f.producer.receiveReveal(revealRequest('b', 'm1'))).toBe('deferred')
+			expect(f.producer.receiveReveal(revealRequest('c', 'k1'))).toBe('deferred')
+			f.producer.receive(acquire('a', 'n2'))
+			f.producer.receive(release('b', 'm1'))
+			settle()
+			expect(revealed).toEqual(['c'])
+		})
+
+		it('does not hold a reveal that names no open stream', () => {
+			const { f, settle, revealed } = loading()
+			expect(f.producer.receiveReveal(revealRequest('a', 'n1'))).toBe('ignored-stale')
+			settle()
+			expect(revealed).toEqual([])
+		})
+	})
+
+	it('answers nothing without a reveal dependency (a runtime that does not support it)', () => {
+		const f = fixture()
+		f.producer.receive(acquire('a', 'n1'))
+		expect(f.producer.receiveReveal(revealRequest('a', 'n1'))).toBe('ignored-unsupported')
+	})
+})
 
 describe('Runtime geometry producer (multi-target streams)', () => {
 	it('answers a request with a complete baseline in the next frame, echoing the request context', () => {

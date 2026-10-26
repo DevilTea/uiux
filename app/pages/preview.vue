@@ -12,6 +12,7 @@ import { RuntimePreviewProtocolBridge } from '../../src/preview/protocol/bridge'
 import { createRuntimeGenerationId } from '../../src/preview/protocol/generation-id'
 import { RuntimeGeometryProducer } from '../../src/preview/geometry-producer'
 import { createDomGeometryMeasurer } from '../../src/preview/dom-geometry'
+import { revealWidget } from '../../src/preview/reveal'
 import { attachGeometrySignals, type GeometrySignalSubscription } from '../../src/preview/geometry-signals'
 import {
 	PREVIEW_WIRE_CHANNEL,
@@ -332,6 +333,8 @@ const checksDebouncer = new MaxWaitDebouncer(() => flushChecksReport(), CHECKS_R
 function flushChecksReport(): void {
 	const bridge = runtimeBridge
 	if (!bridge || handshakeStatus.value !== 'open' || !viewId.value || !checksSettled()) return
+	// The document has rendered what it shows: a reveal that arrived while it loaded can be answered now.
+	geometryProducer?.releaseDeferredReveals()
 	checksPublisher ??= new ChecksReportPublisher(message => bridge.sendChecksReport(message).status === 'sent' ? 'sent' : 'unsent')
 	const status = materializationResult.value
 	const body = buildChecksReportBody({
@@ -383,6 +386,10 @@ function initBridge() {
 				})
 			},
 			measurer: createDomGeometryMeasurer({ document }),
+			// A reveal scrolls only this document; the bridge passes one only when `geometry.reveal` was declared.
+			reveal: widgetId => revealWidget(document, widgetId) === 'scrolled',
+			// The Workbench asks right after it opens the stream, before a new document has rendered its View.
+			revealReady: () => checksSettled(),
 			requestFrame: callback => window.requestAnimationFrame(callback),
 			cancelFrame: handle => window.cancelAnimationFrame(handle),
 			now: () => performance.now(),
@@ -697,6 +704,7 @@ function receiveWire(input: unknown) {
 		geometryProducer.receive(message)
 		geometrySignals?.refreshObservedWidgets()
 	}
+	else if (message.type === 'geometry.reveal' && geometryProducer) geometryProducer.receiveReveal(message)
 	else if ((message.type === 'contour.full.request' || message.type === 'contour.partial.request' || message.type === 'contour.cancel') && geometryProducer) geometryProducer.receiveContour(message)
 	// A version frame is read-only: it enters no targeting interaction and takes no Widget Event arm.
 	else if (versionId && (message.type === 'targeting.enter' || message.type === 'widget.event.arm')) return

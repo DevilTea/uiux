@@ -11,6 +11,7 @@ import { PreviewSessionRegistry } from '../src/preview/protocol/session'
 import {
 	MAX_TRACKED_WIDGETS,
 	MULTI_TARGET_GEOMETRY_FEATURE,
+	REVEAL_GEOMETRY_FEATURE,
 	validateGeometryMessage,
 } from '../src/preview/protocol/schema'
 import type {
@@ -99,6 +100,74 @@ describe('Preview protocol bridge', () => {
 		const withoutStream: Record<string, unknown> = { ...release.context }
 		delete withoutStream.navigationRequestId
 		expect(validateGeometryMessage({ ...release, context: withoutStream }).ok).toBe(false)
+	})
+
+	// Clause 01a11a59-d8be-78aa-bdc7-28aa62bd9444 (`geometry.reveal`) and Clause 01a1161c-4246-708c-9ab9-60e079b9d475 (the feature).
+	describe('geometry.reveal', () => {
+		const reveal = { type: 'geometry.reveal', context: { ...acquireRequest().context, navigationRequestId: 'stream-1' }, payload: {} } as const
+
+		function open(features: readonly string[]) {
+			const workbenchOutbound: PreviewWireMessage[] = []
+			const runtimeOutbound: PreviewWireMessage[] = []
+			const workbench = new WorkbenchPreviewProtocolBridge('session-a', collector(workbenchOutbound), () => compatible)
+			const runtime = new RuntimePreviewProtocolBridge('session-a', 'generation-a', { protocolVersion: 1, features }, collector(runtimeOutbound))
+			workbench.admitGeneration('generation-a', 'initial')
+			workbench.receive(runtime.declareCapabilities())
+			runtime.receive(workbenchOutbound[0])
+			return { workbench, runtime, workbenchOutbound }
+		}
+
+		it('names the feature `geometry.reveal`', () => {
+			expect(REVEAL_GEOMETRY_FEATURE).toBe('geometry.reveal')
+		})
+
+		it('carries the command Workbench → runtime on the stream context with an empty payload, and only after the ACK', () => {
+			const workbenchOutbound: PreviewWireMessage[] = []
+			const workbench = new WorkbenchPreviewProtocolBridge('session-a', collector(workbenchOutbound), () => compatible)
+			const runtime = new RuntimePreviewProtocolBridge('session-a', 'generation-a', { protocolVersion: 1, features: ['geometry', REVEAL_GEOMETRY_FEATURE] }, collector([]))
+			workbench.admitGeneration('generation-a', 'initial')
+			expect(workbench.sendGeometry(reveal)).toEqual({ status: 'gated' })
+			workbench.receive(runtime.declareCapabilities())
+			expect(workbench.sendGeometry(reveal)).toEqual({ status: 'sent' })
+			expect(workbenchOutbound.at(-1)).toEqual(reveal)
+			expect(runtime.receive(workbenchOutbound[0])).toMatchObject({ status: 'accepted' })
+			expect(runtime.receive(reveal)).toMatchObject({ status: 'accepted', message: reveal })
+			// Reveal travels only Workbench → runtime.
+			expect(workbench.receive(reveal)).toEqual({ status: 'wrong-direction' })
+			expect(runtime.sendGeometry(reveal as never)).toEqual({ status: 'wrong-direction' })
+		})
+
+		it('names its stream and carries no geometryRevision, and ignores unknown additive members', () => {
+			expect(validateGeometryMessage(reveal).ok).toBe(true)
+			expect(validateGeometryMessage({ ...reveal, payload: { reason: 'checks' } }).ok).toBe(true)
+			expect(validateGeometryMessage({ ...reveal, context: { ...reveal.context, geometryRevision: 3 } }).ok).toBe(false)
+			const withoutStream: Record<string, unknown> = { ...reveal.context }
+			delete withoutStream.navigationRequestId
+			expect(validateGeometryMessage({ ...reveal, context: withoutStream }).ok).toBe(false)
+			const withoutWidget: Record<string, unknown> = { ...reveal.context }
+			delete withoutWidget.widgetId
+			expect(validateGeometryMessage({ ...reveal, context: withoutWidget }).ok).toBe(false)
+		})
+
+		it('is sent only to a generation that declared the feature', () => {
+			const without = open(['geometry', MULTI_TARGET_GEOMETRY_FEATURE])
+			expect(without.workbench.sendGeometry(reveal)).toEqual({ status: 'not-permitted' })
+			expect(without.workbenchOutbound).toHaveLength(1)
+			const withFeature = open(['geometry', REVEAL_GEOMETRY_FEATURE])
+			expect(withFeature.workbench.sendGeometry(reveal)).toEqual({ status: 'sent' })
+		})
+
+		it('is dropped by a runtime that did not declare it, without effect', () => {
+			const { runtime } = open(['geometry'])
+			expect(runtime.receive(reveal)).toEqual({ status: 'gated' })
+		})
+
+		it('is stale for another session or generation, outermost first', () => {
+			const { workbench, runtime } = open(['geometry', REVEAL_GEOMETRY_FEATURE])
+			expect(runtime.receive({ ...reveal, context: { ...reveal.context, previewSessionId: 'session-old' } })).toEqual({ status: 'stale-session' })
+			expect(runtime.receive({ ...reveal, context: { ...reveal.context, runtimeGenerationId: 'generation-old' } })).toEqual({ status: 'stale-generation' })
+			expect(workbench.sendGeometry({ ...reveal, context: { ...reveal.context, runtimeGenerationId: 'generation-old' } })).toEqual({ status: 'stale-generation' })
+		})
 	})
 
 	it('does not open the Workbench gate when ACK transport dispatch fails and can retry the pinned declaration', () => {

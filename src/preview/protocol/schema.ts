@@ -42,6 +42,11 @@ export type GeometryAcquireContext = ProtocolContext & Readonly<{ geometryRevisi
  * (Part 2, 2026-10-05 multi-target decision group, decision 5). Optional for Workbench.
  */
 export const MULTI_TARGET_GEOMETRY_FEATURE = 'geometry.multi-target'
+/**
+ * Capability feature of `geometry.reveal`, the one-way command that asks the runtime to scroll its
+ * own document to a Widget (Clause 01a11a59-d8be-78aa-bdc7-28aa62bd9444; Discussion #131 decision 2).
+ */
+export const REVEAL_GEOMETRY_FEATURE = 'geometry.reveal'
 /** Open geometry streams per runtime generation, counting every consumer (decision 6). */
 export const MAX_TRACKED_WIDGETS = 64
 export type ProtocolEnvelope<
@@ -67,6 +72,12 @@ type PathSegment =
 	| Readonly<{ kind: 'cubic'; from: Point; c1: Point; c2: Point; to: Point }>
 
 export type GeometryAcquireRequest = ProtocolEnvelope<Record<string, never>, GeometryAcquireContext> & Readonly<{ type: 'geometry.acquire.request' }>
+/**
+ * Asks the runtime to scroll the Widget of an open geometry stream into view (Workbench → runtime).
+ * One-way, unacknowledged and best-effort, with no identity of its own: its context is the stream's
+ * acquisition context and its payload is `{}`.
+ */
+export type GeometryRevealRequest = ProtocolEnvelope<Record<string, never>, GeometryAcquireContext> & Readonly<{ type: 'geometry.reveal' }>
 /** Ends one geometry stream (Workbench → runtime). One-way and best-effort, like `contour.cancel`. */
 export type GeometryReleaseRequest = ProtocolEnvelope<Record<string, never>, GeometryAcquireContext> & Readonly<{ type: 'geometry.release' }>
 export type GeometryAcquireResponse = ProtocolEnvelope<{ rect: WidgetRect; regions: readonly VisibleRegion[] }, GeometryRevisionContext> & Readonly<{ type: 'geometry.acquire.response' }>
@@ -75,8 +86,8 @@ export type FullContourResponse = ProtocolEnvelope<{ sequence: number; regions: 
 export type PartialContourRequest = ProtocolEnvelope<{ sequence: number; baseSnapshotVersion: number; regionIds: readonly string[]; targetMaxError: number }, GeometryRevisionContext> & Readonly<{ type: 'contour.partial.request' }>
 export type PartialContourResponse = ProtocolEnvelope<{ sequence: number; baseSnapshotVersion: number; regions: readonly VisibleRegion[] }, GeometryRevisionContext> & Readonly<{ type: 'contour.partial.response' }>
 export type ContourCancel = ProtocolEnvelope<{ sequence: number }, GeometryRevisionContext> & Readonly<{ type: 'contour.cancel' }>
-export type GeometryMessage = GeometryAcquireRequest | GeometryReleaseRequest | GeometryAcquireResponse | FullContourRequest | FullContourResponse | PartialContourRequest | PartialContourResponse | ContourCancel
-export type GeometryRequestMessage = GeometryAcquireRequest | GeometryReleaseRequest | FullContourRequest | PartialContourRequest | ContourCancel
+export type GeometryMessage = GeometryAcquireRequest | GeometryReleaseRequest | GeometryRevealRequest | GeometryAcquireResponse | FullContourRequest | FullContourResponse | PartialContourRequest | PartialContourResponse | ContourCancel
+export type GeometryRequestMessage = GeometryAcquireRequest | GeometryReleaseRequest | GeometryRevealRequest | FullContourRequest | PartialContourRequest | ContourCancel
 export type GeometryResponseMessage = GeometryAcquireResponse | FullContourResponse | PartialContourResponse
 
 export type FailureReasonCode = string
@@ -153,7 +164,7 @@ export function validateGeometryMessage(input: unknown): ValidationResult<Geomet
 	const envelope = v.object(input, '')
 	if (!envelope) return v.finish<GeometryMessage>(input)
 	const type = v.string(envelope.type, '/type', true)
-	validateGeometryContext(envelope.context, '/context', v, type === 'geometry.acquire.request' || type === 'geometry.release' ? 'forbidden' : 'required')
+	validateGeometryContext(envelope.context, '/context', v, type === 'geometry.acquire.request' || type === 'geometry.release' || type === 'geometry.reveal' ? 'forbidden' : 'required')
 	const payload = v.object(envelope.payload, '/payload')
 	if (!payload || !type) return v.finish<GeometryMessage>(input)
 
@@ -165,6 +176,12 @@ export function validateGeometryMessage(input: unknown): ValidationResult<Geomet
 			// Payload `{}`; unknown additive fields are ignored (decision 3.4).
 			if (isRecord(envelope.context) && !Object.hasOwn(envelope.context, 'navigationRequestId'))
 				v.issue('protocol.missing_context_identity', '/context/navigationRequestId', 'geometry.release names the stream it ends by context.navigationRequestId.')
+			break
+		case 'geometry.reveal':
+			// A reveal names the open stream it acts on by that stream's acquisition context (Clause
+			// 01a11a59-d8be-78aa-bdc7-28aa62bd9444). Payload `{}`; unknown additive fields are ignored.
+			if (isRecord(envelope.context) && !Object.hasOwn(envelope.context, 'navigationRequestId'))
+				v.issue('protocol.missing_context_identity', '/context/navigationRequestId', 'geometry.reveal names the stream it acts on by context.navigationRequestId.')
 			break
 		case 'geometry.acquire.response':
 			forbidRuntimeSnapshotVersion(payload, '/payload', v)

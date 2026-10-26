@@ -12,7 +12,11 @@ export type Workbench = WorkbenchState & Readonly<{
 	selectView: (id: string) => Promise<void>
 	/** Opens a View with an explicit render context, e.g. from a deep link. */
 	openView: (id: string, context: ViewRouteContext) => Promise<void>
-	selectWidget: (id: string) => void
+	/**
+	 * Selects a Widget. `reveal: true` marks a Checks navigation, the only selection that asks the Preview
+	 * to scroll a visible but offscreen Widget into view (Rule 01a11a59-ea08-74ff-8a88-6e70b4fa3a84).
+	 */
+	selectWidget: (id: string, options?: Readonly<{ reveal?: boolean }>) => void
 	refreshAll: () => Promise<void>
 	/**
 	 * Applies a batch of change events: re-reads what changed and, when what the canvas renders
@@ -49,6 +53,7 @@ export function provideWorkbench(): Workbench {
 		state.selectedViewId.value = id
 		state.selectedWidgetId.value = 'root'
 		state.selectedVariant.value = ''
+		preview.noteOpenedContext({ viewId: id, widgetId: 'root' })
 		saveLastView(id)
 		// The Preview renders from the Product Kit file as it is now: its revision is the baseline.
 		void productKit.startPreview()
@@ -63,6 +68,8 @@ export function provideWorkbench(): Workbench {
 		state.selectedViewportId.value = context.viewport
 		state.selectedThemeId.value = context.theme
 		state.selectedWidgetId.value = context.widget || 'root'
+		// A Checks navigation that waits for its stream belongs to the address it opened, and to no other.
+		preview.noteOpenedContext({ viewId: id, variantId: context.variant, widgetId: context.widget })
 		saveLastView(id)
 		if (!changingView) return
 		void productKit.startPreview()

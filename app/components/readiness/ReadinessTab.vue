@@ -77,7 +77,8 @@ async function followFinding(widgetId: string, openInspect: boolean): Promise<vo
 		feedback.notice(t('checks.viewGone.title'), t('checks.viewGone.description', { name }))
 		return
 	}
-	workbench.selectWidget(widgetId)
+	// A Checks navigation: the only selection that asks the Preview to reveal a Widget scrolled out of view.
+	workbench.selectWidget(widgetId, { reveal: true })
 	if (openInspect) emit('openInspect')
 }
 function selectFinding(widgetId: string): void {

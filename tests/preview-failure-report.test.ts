@@ -295,7 +295,7 @@ describe('Runtime bridge: sending failure.report', () => {
 	it('never reports an unknown additive message type of its own generation, which is dropped without effect', () => {
 		const { runtime, runtimeOutbound } = openGeneration()
 		const count = runtimeOutbound.length
-		const unknown = { type: 'geometry.reveal', context: { previewSessionId: 'session-a', runtimeGenerationId: 'generation-a', viewId: VIEW_ID, widgetId: 'widget-a' }, payload: {} }
+		const unknown = { type: 'geometry.nudge', context: { previewSessionId: 'session-a', runtimeGenerationId: 'generation-a', viewId: VIEW_ID, widgetId: 'widget-a' }, payload: {} }
 		const result = runtime.receive(unknown)
 		expect(result.status).toBe('invalid')
 		expect(runtime.reportInvalidTraffic(unknown, result.status === 'invalid' ? result.diagnostics : [])).toEqual({ status: 'not-permitted' })

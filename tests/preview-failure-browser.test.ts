@@ -560,7 +560,7 @@ describe('Runtime-reported Preview failures (issue #312)', () => {
 			const live = await expectLive(page)
 			const before = await documentParam(page)
 			const session = await sessionOf(page)
-			await sendIntoRuntime(page, { type: 'geometry.reveal', context: { previewSessionId: session, runtimeGenerationId: live, viewId: VIEW_ID, widgetId: WIDGET_ID }, payload: {} })
+			await sendIntoRuntime(page, { type: 'geometry.nudge', context: { previewSessionId: session, runtimeGenerationId: live, viewId: VIEW_ID, widgetId: WIDGET_ID }, payload: {} })
 			await page.waitForTimeout(1_500)
 			expect(await failureReports(page)).toEqual([])
 			expect(await page.locator('[data-preview-failure]').count()).toBe(0)
