@@ -57,8 +57,8 @@ const WORK_CONTEXT_KEYS = ['viewId', 'variantId', 'runtimeContextVersion', 'navi
 /** Identities that sit in a payload, never in shared context. */
 const PAYLOAD_ONLY_IDENTITIES = ['sequence', 'baseSnapshotVersion', 'snapshotVersion', 'regionId', 'regionIds', 'regions', 'category', 'reason', 'detail'] as const
 /** Longest `reason` a decoder accepts, so a report stays bounded and display-safe. */
-const MAX_REASON_LENGTH = 100
-const RUNTIME_REASON_PATTERN = /^runtime\.[a-z0-9_]+(?:\.[a-z0-9_]+)*$/u
+export const MAX_REASON_LENGTH = 100
+export const RUNTIME_REASON_PATTERN = /^runtime\.[a-z0-9_]+(?:\.[a-z0-9_]+)*$/u
 
 export function isFailureReportMessageType(type: unknown): type is FailureReportMessage['type'] {
 	return type === 'failure.report'

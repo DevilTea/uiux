@@ -1,5 +1,6 @@
-import type { I18nResource } from '../../src/domain/i18n/schema'
+import type { I18nResource, I18nWarning } from '../../src/domain/i18n/schema'
 import { inspectTranslationResources } from '../../src/i18n/runtime'
+import type { LivePreviewChecks } from '../../src/preview/checks-reports'
 
 /**
  * Pure helpers of Overview › Checks (Feature "Checks", Rule 01a115cd-bb33-70a8-a09f-999e06ce38ed
@@ -17,10 +18,11 @@ import { inspectTranslationResources } from '../../src/i18n/runtime'
  * Where a finding comes from. `validation` is the structural and schema findings each canonical
  * resource read returns; `translation` the empty and whitespace-only reminders of the Locale
  * files; `catalog` the Catalog problems of entries a View uses; `product-kit` the Product Kit
- * findings. The Preview's translation warnings and Runtime errors are sources of their own when
- * they are gathered (issue #95, follow-up).
+ * findings. `preview-translation` is the translation warnings of the Properties the live Preview
+ * evaluated, and `runtime` the Preview's current load and Runtime errors; both come from the
+ * Preview's `checks.report` (issue #347), never from a read Checks makes itself.
  */
-export const FINDING_SOURCES = ['validation', 'translation', 'catalog', 'product-kit'] as const
+export const FINDING_SOURCES = ['validation', 'translation', 'catalog', 'product-kit', 'preview-translation', 'runtime'] as const
 export type FindingSource = typeof FINDING_SOURCES[number]
 
 /** A finding's own severity: an `error` is a problem that breaks or blocks, a `warning` a reminder or non-blocking finding. */
@@ -30,14 +32,17 @@ export type FindingSeverity = typeof FINDING_SEVERITIES[number]
 /**
  * The Workbench's severity derivation, no wire change (owner ruling 3 of Discussion #241,
  * issue #349): resource-read diagnostics (structural and schema, including the missing default
- * Locale) and Catalog problems are errors; translation reminders and Product Kit findings are
- * warnings. The single place that fixes these values: every finding takes its severity from here.
+ * Locale), Catalog problems and the Preview's current Runtime errors are errors; translation
+ * reminders, the Preview's translation warnings and Product Kit findings are warnings. The single
+ * place that fixes these values: every finding takes its severity from here.
  */
 export const SOURCE_SEVERITY: Readonly<Record<FindingSource, FindingSeverity>> = {
 	validation: 'error',
 	catalog: 'error',
 	translation: 'warning',
 	'product-kit': 'warning',
+	'preview-translation': 'warning',
+	runtime: 'error',
 }
 
 /** The severity a finding of this source lists with. */
@@ -79,7 +84,9 @@ export type Finding = Readonly<{
 	widgetId?: string
 	/** The resolved Widget's type, for the blueprint label. */
 	widgetType?: string
-	/** The Variant a Product Kit capture finding concerns; absent for the base state. */
+	/** The result Property a Preview translation warning was evaluated in, or the Property whose evaluation failed. */
+	property?: string
+	/** The Variant a Product Kit capture finding or a Preview finding concerns; absent for the base state. */
 	variantName?: string
 	/** The registry component a Product Kit finding concerns. */
 	component?: string
@@ -385,4 +392,90 @@ export function catalogProblems(
 		}
 	}
 	return { findings, elsewhere }
+}
+
+// ---------------------------------------------------------------------------------------------
+// The live Preview's report (issue #347; Rules 01a115cd-bde8-736b-9153-7baaedf24f98 and
+// 01a115cd-be1d-74aa-8639-23f43671e86d, Clause 01a17619-ab3f-797d-ae93-4038a48ee31f)
+// ---------------------------------------------------------------------------------------------
+
+/** The Workbench's own sentences for a Preview finding, in the UI language. */
+export type PreviewFindingText = Readonly<{
+	/** The sentence for one translation warning: its key, Locale and, for a missing parameter, the parameter. */
+	warning: (warning: I18nWarning) => string
+	/** The plain title of a Runtime error reason. */
+	runtimeReason: (reason: string) => string
+}>
+
+type PreviewFindingInput = Readonly<{
+	/** The View the report is about. */
+	resource: FindingResource
+	/** The Widget types of that View, when its tree is known. */
+	widgetTypes?: ReadonlyMap<string, string>
+	text: PreviewFindingText
+	checkState?: CheckState
+}>
+
+/** The finding code of each translation warning code: the warning's own code, in the `i18n` category with the reminders. */
+const WARNING_FINDING_CODE: Readonly<Record<I18nWarning['code'], string>> = {
+	'missing-translation': 'i18n.missing_translation',
+	'unresolved-key': 'i18n.unresolved_key',
+	'missing-parameter': 'i18n.missing_parameter',
+}
+
+/**
+ * The translation warnings of the live Preview as findings. One problem is one warning code with one
+ * key and, for a missing parameter, one parameter, so findings group by code, then key and parameter
+ * (Rule 01a115cd-bde8-736b-9153-7baaedf24f98); a warning is one occurrence of it, on its Widget and
+ * result Property, and the same problem in another Widget or Property stays separate (Rule
+ * 01a115cd-ba33-7f4f-afd5-a421c890bfee). Occurrences are ordered by View, Variant, Widget and
+ * Property (Rule 01a115cd-be1d-74aa-8639-23f43671e86d) by the default order.
+ */
+export function previewTranslationFindings(report: LivePreviewChecks, input: PreviewFindingInput): Finding[] {
+	const checkState = input.checkState ?? 'completed'
+	return report.translationWarnings.map(({ widgetId, resultProperty, warning }) => {
+		const widgetType = input.widgetTypes?.get(widgetId)
+		const code = WARNING_FINDING_CODE[warning.code]
+		const message = input.text.warning(warning)
+		const problem = JSON.stringify([warning.key, warning.code === 'missing-parameter' ? warning.parameter : null])
+		return {
+			code,
+			message,
+			path: `/widgets/${widgetId}/properties/${resultProperty}`,
+			resource: input.resource,
+			source: 'preview-translation',
+			severity: severityOf('preview-translation'),
+			checkState,
+			...(report.variantId ? { variantName: report.variantId } : {}),
+			widgetId,
+			...(widgetType ? { widgetType } : {}),
+			property: resultProperty,
+			problem,
+			group: { key: `${code}:${problem}`, title: message },
+		}
+	})
+}
+
+/**
+ * The current Runtime errors of the live Preview as findings, one per report entry: a load error
+ * of the View or Adapters has no Widget, a failed Property has one. They group by reason.
+ */
+export function runtimeErrorFindings(report: LivePreviewChecks, input: PreviewFindingInput): Finding[] {
+	const checkState = input.checkState ?? 'completed'
+	return report.runtimeErrors.map((error) => {
+		const widgetType = error.widgetId ? input.widgetTypes?.get(error.widgetId) : undefined
+		return {
+			code: error.reason,
+			message: error.detail ?? input.text.runtimeReason(error.reason),
+			path: error.widgetId ? `/widgets/${error.widgetId}` : '/preview',
+			resource: input.resource,
+			source: 'runtime',
+			severity: severityOf('runtime'),
+			checkState,
+			...(report.variantId ? { variantName: report.variantId } : {}),
+			...(error.widgetId ? { widgetId: error.widgetId } : {}),
+			...(widgetType ? { widgetType } : {}),
+			group: { key: error.reason, title: input.text.runtimeReason(error.reason) },
+		}
+	})
 }

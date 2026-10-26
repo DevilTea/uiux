@@ -9,6 +9,12 @@ import {
 	type GeometryResponseMessage,
 } from './schema'
 import {
+	CHECKS_REPORTS_FEATURE,
+	isChecksReportMessageType,
+	validateChecksReportMessage,
+	type ChecksReportMessage,
+} from './checks-report'
+import {
 	FAILURE_REPORTS_FEATURE,
 	failureReportScope,
 	isFailureReportMessageType,
@@ -39,7 +45,7 @@ import {
 	type RetryAuthorizationResult,
 } from './session'
 
-export type PreviewWireMessage = CapabilityDeclareMessage | CapabilityAckMessage | GeometryMessage | TargetingMessage | WidgetEventMessage | FailureReportMessage
+export type PreviewWireMessage = CapabilityDeclareMessage | CapabilityAckMessage | GeometryMessage | TargetingMessage | WidgetEventMessage | FailureReportMessage | ChecksReportMessage
 export type PreviewProtocolTransport = Readonly<{ send(message: PreviewWireMessage): void }>
 
 export type BridgeReceiveResult =
@@ -164,6 +170,7 @@ export class WorkbenchPreviewProtocolBridge {
 			return { status: 'accepted', message: targeting.value }
 		}
 		if (isFailureReportMessageType(type)) return this.receiveFailureReport(input)
+		if (isChecksReportMessageType(type)) return this.receiveChecksReport(input)
 		if (isWidgetEventMessageType(type)) {
 			// Workbench accepts only occurrences inbound; the decoded copy carries known members only.
 			const decoded = validateWidgetEventMessage(input)
@@ -295,6 +302,26 @@ export class WorkbenchPreviewProtocolBridge {
 		return { status: 'generation-failed', message }
 	}
 
+	/**
+	 * A runtime's `checks.report`. Like any runtime traffic it is accepted only for the current
+	 * generation after its capability ACK was dispatched, and only when that generation declared
+	 * `checks.reports` (Clauses 01a1161c-4283-70b7-b487-e81bc28ce875 and 01a17619-ab3f-797d-ae93-4038a48ee31f);
+	 * the correlation check before the decode already dropped a report of another session or generation.
+	 * Whether the report is current for the View and Variant the Workbench renders, and whether it
+	 * replaces the previous one, is the caller's (`PreviewChecksReports`).
+	 */
+	private receiveChecksReport(input: unknown): BridgeReceiveResult {
+		const decoded = validateChecksReportMessage(input)
+		if (!decoded.ok) return { status: 'invalid', diagnostics: decoded.diagnostics }
+		const message = decoded.value
+		const { previewSessionId, runtimeGenerationId } = message.context
+		const gate = this.classify(previewSessionId, runtimeGenerationId)
+		if (gate) return { status: gate }
+		if (!this.session.currentGenerationDeclares(runtimeGenerationId, CHECKS_REPORTS_FEATURE))
+			return { status: 'invalid', diagnostics: [{ code: 'protocol.feature_not_declared', path: '/type', message: 'checks.report needs the generation to declare checks.reports.' }] }
+		return { status: 'accepted', message }
+	}
+
 	/** A declaration is stale when its session is not this one or its generation is retired. */
 	private staleDeclaration(input: unknown): 'stale-session' | 'stale-generation' | undefined {
 		const correlation = envelopeCorrelation(input)
@@ -343,6 +370,8 @@ export class RuntimePreviewProtocolBridge {
 	/** A generation-scoped `failure.report` was sent: it is the generation's last envelope. */
 	private generationEnded = false
 	private readonly reportedWorkSequences = new Set<number>()
+	/** The highest `checks.report` `sequence` sent: each report of a generation carries a higher one. */
+	private lastChecksSequence?: number
 
 	constructor(
 		previewSessionId: string,
@@ -391,7 +420,7 @@ export class RuntimePreviewProtocolBridge {
 			if (gate) return { status: gate }
 			return { status: 'accepted', message: targeting.value }
 		}
-		if (isFailureReportMessageType(type)) return { status: 'wrong-direction' }
+		if (isFailureReportMessageType(type) || isChecksReportMessageType(type)) return { status: 'wrong-direction' }
 		if (isWidgetEventMessageType(type)) {
 			// The runtime accepts only arms inbound.
 			const decoded = validateWidgetEventMessage(input)
@@ -459,6 +488,25 @@ export class RuntimePreviewProtocolBridge {
 	}
 
 	/**
+	 * Sends one `checks.report`; nothing crosses before the capability ACK, and only a generation
+	 * that declared `checks.reports` may send one. A report whose `sequence` is not higher than the
+	 * last one sent is not sent (Clause 01a17619-ab3f-797d-ae93-4038a48ee31f), and a generation that
+	 * ended with a `failure.report` sends nothing more.
+	 */
+	sendChecksReport(message: ChecksReportMessage): BridgeSendResult {
+		const decoded = validateChecksReportMessage(message)
+		if (!decoded.ok) return { status: 'invalid', diagnostics: decoded.diagnostics }
+		const gate = this.runtimeGate(decoded.value)
+		if (gate) return { status: gate }
+		if (!this.declaration.features.includes(CHECKS_REPORTS_FEATURE)) return { status: 'not-permitted' }
+		const { sequence } = decoded.value.payload
+		if (this.lastChecksSequence !== undefined && sequence <= this.lastChecksSequence) return { status: 'not-permitted' }
+		this.lastChecksSequence = sequence
+		this.transport.send(decoded.value)
+		return { status: 'sent' }
+	}
+
+	/**
 	 * Reports an established violation in the Workbench's traffic as a generation-scoped
 	 * `protocol.invalid_message`: an envelope of this session and generation, which therefore is no
 	 * stale traffic (Clause 01a11a70-4261-7155-8aed-28bed7a89064), that failed to decode. The detail
@@ -509,7 +557,7 @@ export class RuntimePreviewProtocolBridge {
 		return { status: 'accepted', message: decoded.value }
 	}
 
-	private runtimeGate(message: GeometryMessage | TargetingMessage | WidgetEventMessage | FailureReportMessage): 'gated' | 'stale-session' | 'stale-generation' | undefined {
+	private runtimeGate(message: GeometryMessage | TargetingMessage | WidgetEventMessage | FailureReportMessage | ChecksReportMessage): 'gated' | 'stale-session' | 'stale-generation' | undefined {
 		if (message.context.previewSessionId !== this.previewSessionId) return 'stale-session'
 		if (message.context.runtimeGenerationId !== this.runtimeGenerationId) return 'stale-generation'
 		if (!this.ackObserved || this.generationEnded) return 'gated'
@@ -539,6 +587,11 @@ export function isCapabilityDeclaration(input: unknown): boolean {
 /** Whether an envelope, before any decode, is a `failure.report`. */
 export function isFailureReport(input: unknown): boolean {
 	return messageType(input) === 'failure.report'
+}
+
+/** Whether an envelope, before any decode, is a `checks.report`. */
+export function isChecksReport(input: unknown): boolean {
+	return messageType(input) === 'checks.report'
 }
 
 /** The `runtimeGenerationId` an envelope's context names, read without decoding the message. */

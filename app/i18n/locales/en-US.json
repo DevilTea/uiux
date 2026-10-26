@@ -188,8 +188,26 @@
     "sources": {
       "title": "Sources",
       "description": "Each source has its own state. A source that has not run, is running or did not finish is never zero findings.",
-      "notGathered": "The Preview does not report to Checks yet.",
+      "previewNotOpen": "No Preview is open, so this is not checked. Open a View's Preview to gather it.",
+      "previewScope": "From the Preview of {view}; only Properties it evaluated.",
       "catalogElsewhere": "{n} Catalog problem is outside the entries Views use; see the Product Kit page. | {n} Catalog problems are outside the entries Views use; see the Product Kit page."
+    },
+    "preview": {
+      "property": "Property {name}",
+      "warning": {
+        "missingTranslation": "\"{key}\" has no translation in {locale}; the {fallback} text is shown.",
+        "unresolvedKey": "\"{key}\" is not in the Locale files; the key is shown.",
+        "missingParameter": "\"{key}\" is missing the parameter {parameter}."
+      },
+      "runtime": {
+        "view_load_failed": "The View could not be loaded",
+        "adapter_invalid": "The Adapters could not be used",
+        "adapter_unavailable": "The View uses Widgets the Adapters do not provide",
+        "preview_blocked": "The Preview is blocked",
+        "property_failed": "A Property failed to evaluate",
+        "report_truncated": "The report was cut short",
+        "other": "The Preview reported an error"
+      }
     },
     "catalog": {
       "entry": "{type}: {text}",

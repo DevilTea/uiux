@@ -20,6 +20,8 @@ import {
 	FINDING_SOURCES,
 	GROUP_BYS,
 	groupFindings,
+	previewTranslationFindings,
+	runtimeErrorFindings,
 	sectionFindings,
 	severityOf,
 	translationReminders,
@@ -32,10 +34,11 @@ import {
 	type FindingSeverity,
 	type FindingSource,
 	type GroupBy,
+	type PreviewFindingText,
 	type ViewUsage,
 } from '../../utils/checks'
 import { flowPath, localeCellLocation, viewLocation } from '../../utils/workbench-routes'
-import type { I18nResource } from '../../../src/domain/i18n/schema'
+import type { I18nResource, I18nWarning } from '../../../src/domain/i18n/schema'
 import WbErrorDescription from '../workbench/WbErrorDescription.vue'
 import { diagnosticText } from '../../utils/diagnostic-copy'
 import { missingDefaultLocaleDiagnostic } from '../../../src/i18n/runtime'
@@ -64,7 +67,7 @@ const access = useAccess()
 const uiux = useUiuxClient()
 const fmt = useWorkbenchFormat()
 const feedback = useWorkbenchFeedback()
-const { views, flows, workspace, workspaceFindingCount, missingDefaultLocale } = useWorkbench()
+const { views, flows, workspace, workspaceFindingCount, missingDefaultLocale, preview, selectedViewId, widgetTreeResult } = useWorkbench()
 
 type ResourceRead = Readonly<{ key: string; revision: string; diagnostics?: readonly Diagnostic[]; resource?: Record<string, unknown> }>
 
@@ -282,9 +285,52 @@ function kitFinding(finding: KitFinding): Finding {
 	}
 }
 
+// ---- The live Preview's report (issue #347) -----------------------------------------------------
+
+const RUNTIME_REASONS: ReadonlySet<string> = new Set(['view_load_failed', 'adapter_invalid', 'adapter_unavailable', 'preview_blocked', 'property_failed', 'report_truncated'])
+
+/** The Workbench's sentences for the Preview's findings, in the UI language. */
+const previewText: PreviewFindingText = {
+	warning(warning: I18nWarning): string {
+		if (warning.code === 'missing-translation') return t('checks.preview.warning.missingTranslation', { key: warning.key, locale: warning.requestedLocale, fallback: warning.fallbackLocale })
+		if (warning.code === 'missing-parameter') return t('checks.preview.warning.missingParameter', { key: warning.key, parameter: warning.parameter })
+		return t('checks.preview.warning.unresolvedKey', { key: warning.key })
+	},
+	runtimeReason(reason: string): string {
+		const name = reason.startsWith('runtime.') ? reason.slice('runtime.'.length) : ''
+		return t(`checks.preview.runtime.${RUNTIME_REASONS.has(name) ? name : 'other'}`)
+	},
+}
+
+/** The View the held report is about, as Checks names it. */
+const previewView = computed(() => {
+	const live = preview.liveChecks.value
+	if (live.state !== 'completed') return undefined
+	const view = views.value.find(entry => entry.key === live.report.viewId)
+	return { key: live.report.viewId, name: view?.summary.name || t('common.unnamed') }
+})
+
+/**
+ * The Preview's findings, from the report the live Preview made last (never from a read Checks makes,
+ * and never forcing a Property to evaluate or invoking `t`): its translation warnings of the Properties
+ * it evaluated, and its current load and Runtime errors. Each is attributed to its View, Variant,
+ * Widget and Property. They exist only while the report of the current generation is held.
+ */
+const previewFindings = computed<readonly Finding[]>(() => {
+	const live = preview.liveChecks.value
+	const view = previewView.value
+	if (live.state !== 'completed' || !view) return []
+	const report = live.report
+	const widgetTypes = selectedViewId.value === report.viewId && widgetTreeResult.value?.status === 'valid'
+		? new Map(flattenWidgetTree(widgetTreeResult.value.root).map(widget => [widget.id, widget.type] as const))
+		: undefined
+	const input = { resource: { kind: 'view', key: view.key, name: view.name } satisfies FindingResource, ...(widgetTypes ? { widgetTypes } : {}), text: previewText }
+	return [...previewTranslationFindings(report, input), ...runtimeErrorFindings(report, input)]
+})
+
 const findings = computed<readonly Finding[]>(() => {
 	const kit = kitResult.value && 'findings' in kitResult.value ? kitResult.value.findings.map(kitFinding) : []
-	return [...resourceFindings.value, ...translationFindings.value, ...catalogFindings.value, ...kit]
+	return [...resourceFindings.value, ...translationFindings.value, ...catalogFindings.value, ...kit, ...previewFindings.value]
 })
 
 /**
@@ -314,9 +360,8 @@ const KIT_STATE_ICON: Record<string, string> = {
 
 // ---- Sources and their check states ------------------------------------------------------------
 
-/** The sources the page lists, with what each one reports. The Preview's translation warnings and Runtime errors are not gathered yet. */
-type SourceId = FindingSource | 'preview-translation' | 'runtime'
-type SourceRow = Readonly<{ id: SourceId; state: CheckState; count: number; note?: string; requiredKey?: string }>
+/** The sources the page lists, with what each one reports. */
+type SourceRow = Readonly<{ id: FindingSource; state: CheckState; count: number; note?: string; requiredKey?: string }>
 
 const SOURCE_STATE_ICON: Record<CheckState, string> = {
 	not_checked: 'i-lucide-circle',
@@ -335,6 +380,13 @@ const kitState = computed<CheckState>(() => {
 	return kitError.value ? 'failed' : 'not_checked'
 })
 
+/** What the Preview's rows say about their scope: where they come from, or why nothing is known. */
+const previewNote = computed(() => {
+	const live = preview.liveChecks.value.state
+	if (live === 'not_checked') return t('checks.sources.previewNotOpen')
+	return live === 'completed' && previewView.value ? t('checks.sources.previewScope', { view: previewView.value.name }) : undefined
+})
+
 const sourceRows = computed<readonly SourceRow[]>(() => {
 	const countOf = (source: FindingSource): number => findings.value.filter(finding => finding.source === source).length
 	const read = readStates.value
@@ -349,8 +401,9 @@ const sourceRows = computed<readonly SourceRow[]>(() => {
 			...(failedCatalog ? { note: failedCatalog } : catalogElsewhere.value ? { note: t('checks.sources.catalogElsewhere', catalogElsewhere.value) } : {}),
 		},
 		{ id: 'product-kit', state: kitState.value, count: countOf('product-kit'), ...(!canRunKitChecks.value ? { requiredKey: 'evidence.capture' } : {}) },
-		{ id: 'preview-translation', state: 'not_checked', count: 0, note: t('checks.sources.notGathered') },
-		{ id: 'runtime', state: 'not_checked', count: 0, note: t('checks.sources.notGathered') },
+		// The Preview's sources follow the live Preview, not Run Checks: no Preview reporting means not checked.
+		{ id: 'preview-translation', state: preview.liveChecks.value.state, count: countOf('preview-translation'), note: previewNote.value },
+		{ id: 'runtime', state: preview.liveChecks.value.state, count: countOf('runtime'), note: previewNote.value },
 	]
 })
 
@@ -462,10 +515,13 @@ async function open(finding: Finding): Promise<void> {
 	else void navigateTo('/workspace/settings')
 }
 
-/** A Widget finding's second line: its Variant and component, when a Product Kit check names them, then its sentence. */
+/** A Widget finding's second line: its Variant, Property and component, when a check names them, then its sentence. */
 function findingDetail(finding: Finding): string {
+	// A Runtime error's sentence is the Preview's own account of what failed.
+	if (finding.source === 'runtime') return finding.message
 	const parts = [
 		...(finding.variantName ? [t('checks.kit.variant', { name: finding.variantName })] : []),
+		...(finding.property ? [t('checks.preview.property', { name: finding.property })] : []),
 		...(finding.component ? [t('checks.kit.component', { name: finding.component })] : []),
 	]
 	return parts.length ? parts.join(' · ') : diagnosticText(finding)
@@ -480,6 +536,7 @@ function findingScope(finding: Finding): string {
 function findingLabel(finding: Finding, group: ReturnType<typeof groupFindings>[number]): string {
 	if (finding.translationKey !== undefined) return finding.translationKey
 	if (finding.widgetId) return `${finding.widgetType ? `${finding.widgetType} · ` : ''}#${finding.widgetId}`
+	if (finding.source === 'runtime') return finding.message
 	return group.code ? diagnosticText(finding) : finding.message
 }
 
@@ -510,7 +567,7 @@ function problemItems(list: readonly Finding[], prefix: string): CheckTreeItem[]
 					level: 'finding',
 					label: findingLabel(finding, group),
 					mono: !!finding.widgetId || finding.translationKey !== undefined,
-					detail: finding.widgetId ? findingDetail(finding) : finding.translationKey !== undefined ? diagnosticText(finding) : finding.path,
+					detail: finding.widgetId ? findingDetail(finding) : finding.translationKey !== undefined ? diagnosticText(finding) : finding.source === 'runtime' ? '' : finding.path,
 					meta: { severity: finding.severity, source: finding.source, state: finding.checkState, scope: findingScope(finding) },
 					action: finding.translationKey !== undefined ? t('checks.openCell') : finding.widgetId ? t('checks.openWidget') : t('checks.open'),
 					icon: finding.translationKey !== undefined ? 'i-lucide-table-cells-merge' : finding.widgetId ? 'i-lucide-crosshair' : 'i-lucide-arrow-up-right',
@@ -612,7 +669,7 @@ const items = computed<CheckTreeItem[]>(() => sectionFindings(filtered.value, gr
     </section>
 
     <div
-      v-if="lastRun && findings.length"
+      v-if="findings.length"
       class="flex flex-wrap items-center gap-2"
       data-check-filters
     >
@@ -767,7 +824,7 @@ const items = computed<CheckTreeItem[]>(() => sectionFindings(filtered.value, gr
     </section>
 
     <div
-      v-if="running && !lastRun"
+      v-if="running && !lastRun && !findings.length"
       class="space-y-2"
     >
       <USkeleton
@@ -779,7 +836,7 @@ const items = computed<CheckTreeItem[]>(() => sectionFindings(filtered.value, gr
     </div>
 
     <UEmpty
-      v-else-if="!lastRun"
+      v-else-if="!lastRun && !findings.length"
       icon="i-lucide-list-checks"
       variant="naked"
       :title="t('checks.notRunTitle')"
