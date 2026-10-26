@@ -79,7 +79,7 @@ export function createInteractionEvidenceService(
 			if (target.widgetIds) {
 				const known = target.widgetIds
 				command.steps.forEach((step, index) => {
-					if (!known.has(step.target.widgetId)) diagnostics.push({ code: 'interaction.unknown_widget', path: jsonPointer(jsonPointer('/steps', index), 'target/widgetId'), message: `The View has no Widget ${step.target.widgetId}.` })
+					if (!known.has(step.target.widgetId)) diagnostics.push({ code: 'interaction.unknown_widget', path: `${jsonPointer('/steps', index)}/target/widgetId`, message: `The View has no Widget ${step.target.widgetId}.` })
 				})
 				command.assertions.forEach((assertion, index) => {
 					const widgetId = assertionWidgetId(assertion.expect, command.steps)

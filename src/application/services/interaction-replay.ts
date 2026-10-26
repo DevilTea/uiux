@@ -25,6 +25,9 @@ export function widgetSelector(widgetId: string): string {
 	return `[data-widget-id="${widgetId.replace(/["\\]/g, '\\$&')}"]`
 }
 
+/** What takes keyboard focus: a `type` or `press` step goes to the Widget's element when it matches, else to its first descendant that does. */
+const FOCUSABLE_SELECTOR = 'input:not([type="hidden"]), textarea, select, button, a[href], [contenteditable="true"], [tabindex]:not([tabindex="-1"])'
+
 const failed = (code: string, path: string, message: string): InteractionReplayOutcome => ({ status: 'failed', diagnostics: [{ code, path, message }] })
 
 /** Whether the Event occurrences hold one of `widgetId`'s Event `name`, with `payload` as its arguments when given. */
@@ -66,8 +69,13 @@ export async function replayInteractions(
 			try {
 				if (step.action === 'click') await locator.click({ timeout: stepTimeout })
 				else if (step.action === 'hover') await locator.hover({ timeout: stepTimeout })
-				else if (step.action === 'type') await locator.pressSequentially(step.text!, { timeout: stepTimeout })
-				else await locator.press(step.key!, { timeout: stepTimeout })
+				else {
+					// Keys go to the focused element, which a Widget's own element (a wrapper) is often not.
+					const own = await locator.evaluate((element, selector) => element.matches(selector), FOCUSABLE_SELECTOR, { timeout: stepTimeout })
+					const target = own ? locator : locator.locator(FOCUSABLE_SELECTOR).first()
+					if (step.action === 'type') await target.pressSequentially(step.text!, { timeout: stepTimeout })
+					else await target.press(step.key!, { timeout: stepTimeout })
+				}
 			}
 			catch (cause) {
 				const reason = cause instanceof Error ? cause.message.split('\n')[0]! : String(cause)

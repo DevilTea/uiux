@@ -78,11 +78,11 @@ export function changeAffectsFormalCapture(scope: ChangeScope, capture: FormalCa
 function domainAffectsFormalCapture(domain: string, scope: ChangeScope, capture: FormalCaptureFacts): boolean {
 	switch (domain) {
 		// `spec` and `metadata` (a View's `name`, `feature` and other fields outside its Spec and its
-		// render input) affect no Evidence; `flow` only Flow Evidence.
+		// render input) affect no Evidence; `flow` only Flow Evidence; `interaction` only the interaction
+		// replay Evidence of the submission's Views (owner ruling 2 of #89).
 		case 'spec':
 		case 'metadata':
 		case 'flow':
-		// `interaction` only the interaction replay Evidence of the submission's Views (owner ruling 2, #89).
 		case 'interaction':
 			return false
 		// Any View that binds a changed Asset, named by the change or not.
