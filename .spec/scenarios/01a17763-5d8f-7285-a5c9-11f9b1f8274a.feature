@@ -1,6 +1,7 @@
 Feature: An interaction change domain affects only interaction Evidence
   # Source: Discussion #241 owner rulings 2026-10-26 (#89 replayable interaction Evidence) https://github.com/DevilTea/uiux/discussions/241#discussioncomment-19191424, ruling 2.
-  # Status: Not built as of de3052a.
+  # Test: code@f56a91c `tests/change-domains.test.ts#L78` "interaction affects only the interaction Evidence of the change's Views and no formal capture". https://github.com/DevilTea/uiux/blob/f56a91c/tests/change-domains.test.ts#L78
+  # Status: built as of f56a91c.
   @spec:id:01a17763-5d8f-7961-bd68-2b387df6e462
   @spec:demonstrates:01a14e30-2dce-7b09-8688-4413e1433f3a
   @spec:demonstrates:01a14e30-2e43-75a7-aca8-c8df28915f4e

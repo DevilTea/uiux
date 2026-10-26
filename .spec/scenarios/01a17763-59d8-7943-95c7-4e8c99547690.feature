@@ -1,6 +1,7 @@
 Feature: A replay clicks a Button and asserts its declared Widget Event
   # Source: Discussion #241 owner rulings 2026-10-26 (#89 replayable interaction Evidence) https://github.com/DevilTea/uiux/discussions/241#discussioncomment-19191424, ruling 1.
-  # Status: Not built as of de3052a.
+  # Test: code@f56a91c `tests/interaction-evidence-browser.test.ts#L71` "clicks the real Button and records that the declared Widget Event was observed, with its capture". https://github.com/DevilTea/uiux/blob/f56a91c/tests/interaction-evidence-browser.test.ts#L71
+  # Status: built as of f56a91c.
   @spec:id:01a17763-59d7-7459-abec-7c876d9a8b71
   @spec:demonstrates:01a11544-66d9-7fcd-8400-93516ddf2857
   @spec:demonstrates:01a115cd-c507-738d-abd7-7a4194761319
