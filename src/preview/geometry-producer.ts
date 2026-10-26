@@ -67,6 +67,12 @@ export type GeometryProducerDependencies = Readonly<{
 	sendContour?(response: FullContourResponse | PartialContourResponse): void
 	/** Reports contour work that failed for good; that work ends without a response. */
 	reportWorkFailure?(failure: ContourWorkFailure): void
+	/**
+	 * Reports that the producer itself failed for good: a frame pass threw, so its state can no longer
+	 * be trusted. The producer has stopped by then (the whole generation is unavailable, not one Widget).
+	 * Without it the exception propagates to the caller of the frame.
+	 */
+	reportFailure?(detail: string): void
 	measurer: WidgetMeasurer
 	/**
 	 * Scrolls the Preview document to the Widget when a reveal applies to it (see `reveal.ts`) and says
@@ -350,6 +356,22 @@ export class RuntimeGeometryProducer {
 
 	private runFrame(): void {
 		if (this.disposed) return
+		if (!this.deps.reportFailure) {
+			this.runPass()
+			return
+		}
+		try {
+			this.runPass()
+		}
+		catch (cause) {
+			// A frame pass that throws leaves streams half-updated: the producer stops for good and the
+			// runtime reports itself unavailable (Clause 01a11a70-4261-7155-8aed-28bed7a89064).
+			this.dispose()
+			this.deps.reportFailure(cause instanceof Error ? cause.name : 'Error')
+		}
+	}
+
+	private runPass(): void {
 		const now = this.deps.now
 		const started = now?.()
 		let measured = false

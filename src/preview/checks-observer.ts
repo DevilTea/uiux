@@ -3,7 +3,7 @@ import { inspectRuntime, WidgetInspectionError, type RuntimePropertyInspection }
 
 import type { AdapterWidgetCatalogEntry } from '../domain/adapters/schema'
 import { resolveI18nPropertyNames, validateTranslationResult } from '../domain/i18n/schema'
-import type { ChecksTranslationWarning } from './protocol/checks-report'
+import type { ChecksTranslationWarning, ChecksUnevaluated } from './protocol/checks-report'
 
 /** A Property whose latest completed result failed. */
 export type ObservedPropertyError = Readonly<{
@@ -15,15 +15,26 @@ export type ObservedPropertyError = Readonly<{
 
 /**
  * What the observer saw of one Runtime instance: the warnings of the translation-result Properties
- * it evaluated and the Properties whose evaluation failed. Never anything about a Property that was
- * not evaluated.
+ * it evaluated and the Properties whose evaluation failed, and which declared translation-result
+ * Properties it did not evaluate (coverage, issue #95). Never the result of a Property that was not
+ * evaluated.
  */
 export type ChecksObservation = Readonly<{
 	/** Counts the Runtime instances attached and the observation resets: it never decreases. */
 	context: number
 	translationWarnings: readonly ChecksTranslationWarning[]
 	propertyErrors: readonly ObservedPropertyError[]
+	/**
+	 * The Catalog-declared translation-result Properties of the mounted Widgets that have no usable
+	 * completed result: never evaluated (or not since the last reset), absent at runtime, failed, or
+	 * evaluated to something that is no translation result. Absent when the Runtime cannot be inspected,
+	 * which is no claim of coverage either way.
+	 */
+	unevaluated?: readonly ChecksUnevaluated[]
 }>
+
+/** A translation-result Property the Catalog declares for a mounted Widget; `tracked` is absent when the Runtime has no such Property. */
+type Declared = Readonly<{ widgetId: string; resultProperty: string; catalogField: string; tracked?: Tracked }>
 
 type Tracked = {
 	readonly widgetId: string
@@ -51,6 +62,9 @@ type Tracked = {
 export class RuntimeChecksObserver {
 	private runtime?: WidgetSystemRuntime
 	private tracked: Tracked[] = []
+	private declared: Declared[] = []
+	/** Whether the attached Runtime could be inspected at all. */
+	private inspectable = false
 	private detachers: Array<() => void> = []
 	private context = 0
 	private disposed = false
@@ -67,6 +81,8 @@ export class RuntimeChecksObserver {
 		this.unsubscribeAll()
 		this.runtime = runtime
 		this.tracked = []
+		this.declared = []
+		this.inspectable = false
 		this.context++
 		if (this.disposed || runtime.isDisposed) return
 		let inspection: ReturnType<typeof inspectRuntime>
@@ -80,18 +96,28 @@ export class RuntimeChecksObserver {
 			this.requestObservation()
 			return
 		}
+		this.inspectable = true
 		for (const node of inspection.blueprint.nodes) {
 			if (!node.resolved) continue
 			const widgetId = node.node.id
 			const fields = this.catalogByType.get(node.node.type)?.i18n?.fields
-			const translationProperties = new Set(Object.entries(fields ?? {}).map(([field, mapping]) => resolveI18nPropertyNames(field, mapping).resultProperty))
+			const resolved = Object.entries(fields ?? {}).map(([catalogField, mapping]) => ({ catalogField, resultProperty: resolveI18nPropertyNames(catalogField, mapping).resultProperty }))
+			const translationProperties = new Set(resolved.map(entry => entry.resultProperty))
 			const widget = inspection.getWidget(node.nodeId)
+			const byName = new Map<string, Tracked>()
 			for (const member of node.properties) {
 				const observable = widget?.getProperty(member.name)
 				if (!observable) continue
 				const entry: Tracked = { widgetId, property: member.name, translation: translationProperties.has(member.name), inspection: observable }
 				this.tracked.push(entry)
+				byName.set(member.name, entry)
 				this.detachers.push(observable.subscribe(() => this.requestObservation()))
+			}
+			// The order of the formal evaluation (Clause 01a115cd-cfb1-7b51-8730-6418d218eb51): by Widget in tree order, then result Property name.
+			resolved.sort((a, b) => compareCodeUnits(a.resultProperty, b.resultProperty) || compareCodeUnits(a.catalogField, b.catalogField))
+			for (const { catalogField, resultProperty } of resolved) {
+				const tracked = byName.get(resultProperty)
+				this.declared.push({ widgetId, resultProperty, catalogField, ...(tracked ? { tracked } : {}) })
 			}
 		}
 		this.requestObservation()
@@ -102,6 +128,8 @@ export class RuntimeChecksObserver {
 		this.unsubscribeAll()
 		this.runtime = undefined
 		this.tracked = []
+		this.declared = []
+		this.inspectable = false
 	}
 
 	/** The Locale of the attached Runtime changed: nothing evaluated so far counts any more. */
@@ -143,7 +171,22 @@ export class RuntimeChecksObserver {
 			for (const warning of validation.value.warnings)
 				translationWarnings.push({ widgetId: entry.widgetId, resultProperty: entry.property, warning: { ...warning } })
 		}
-		return Object.freeze({ context: this.context, translationWarnings, propertyErrors })
+		return Object.freeze({
+			context: this.context,
+			translationWarnings,
+			propertyErrors,
+			...(this.inspectable ? { unevaluated: this.unevaluated() } : {}),
+		})
+	}
+
+	/** The declared translation-result Properties without a usable completed result, in the order they were declared. */
+	private unevaluated(): readonly ChecksUnevaluated[] {
+		const list: ChecksUnevaluated[] = []
+		for (const { widgetId, resultProperty, catalogField, tracked } of this.declared) {
+			const reason = tracked ? unevaluatedReason(tracked) : 'The result Property is absent at runtime.'
+			if (reason) list.push({ widgetId, resultProperty, catalogField, reason })
+		}
+		return Object.freeze(list)
 	}
 
 	private requestObservation(): void {
@@ -174,4 +217,17 @@ export class RuntimeChecksObserver {
 			}
 		}
 	}
+}
+
+/** Why a declared Property has no usable completed result, or undefined when it has one. */
+function unevaluatedReason(entry: Tracked): string | undefined {
+	const snapshot = entry.inspection.getSnapshot()
+	if (snapshot.status !== 'completed' || snapshot.result === entry.ignored) return 'The Property was not evaluated.'
+	const result = snapshot.result
+	if (!result.ok) return 'The evaluation failed.'
+	return validateTranslationResult(result.value).ok ? undefined : 'The result is not a { text, warnings } translation result.'
+}
+
+function compareCodeUnits(a: string, b: string): number {
+	return a < b ? -1 : a > b ? 1 : 0
 }

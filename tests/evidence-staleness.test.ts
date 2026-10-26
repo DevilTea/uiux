@@ -8,6 +8,12 @@ import {
 	ADAPTER_PROVENANCE_MISSING_REASON,
 	ADAPTER_PROVENANCE_UNAVAILABLE_REASON,
 	evaluateEvidenceStaleness,
+	evaluateFlowTraceStaleness,
+	FLOW_CHANGED_REASON,
+	FLOW_PROVENANCE_MISSING_REASON,
+	FLOW_REMOVED_REASON,
+	FLOW_TRACE_CAPTURE_MISSING_REASON,
+	FLOW_TRACE_FLOW_MISSING_REASON,
 	isCompleteEvidenceForRenderInput,
 	PRODUCT_KIT_PROVENANCE_MISSING_REASON,
 	provenanceFreshness,
@@ -308,5 +314,92 @@ describe('Adapter provenance in formal Evidence (issue #57)', () => {
 		expect(codes([{ ...counter, moduleIdentity: 'file:///host/kit/adapters/counter.mjs' }])).toEqual(['schema.unknown_field /provenance/adapters/0/moduleIdentity'])
 		expect(codes([{ moduleSpecifier: './a.mjs', adapterId: 'a', apiVersion: '1' }])).toEqual(['adapter.provenance_unverifiable /provenance/adapters/0'])
 		expect(codes([counter, { ...counter }])).toEqual(['evidence.duplicate_adapter /provenance/adapters/1/adapterId'])
+	})
+})
+
+// Rule 01a11544-6760-… and Clause 01a14e30-2e43-…: freshness of the Flow and interaction Evidence kinds.
+describe('Flow and interaction Evidence freshness (issue #88)', () => {
+	const FLOW = '22222222-2222-4222-8222-222222222222'
+	const captureDigest = `sha256:${'c'.repeat(64)}`
+	const otherDigest = `sha256:${'d'.repeat(64)}`
+	const workspace = { resource: { i18n: { defaultLocale: 'en-US' }, viewports: { desktop: { dimensions: { width: 1280, height: 800 } } } } }
+	const capture = (provenance: Partial<FormalEvidenceRecord['provenance']> = {}): FormalEvidenceRecord => ({
+		schemaVersion: 1,
+		kind: 'formal_capture',
+		executionContext: { viewId: 'v1', locale: 'en-US', viewportId: 'desktop', viewport: { width: 1280, height: 800 }, themeId: 'light' },
+		coverage: { complete: true },
+		provenance: { workspaceSchemaVersion: 6, resources: [{ identity: { type: 'view', id: 'v1' }, revision: 'r1' }], versions: { uiux: '0.1.0' }, renderInputDigest: DIGEST, ...provenance },
+		artifactRefs: [],
+	})
+	const trace = (patch: Partial<FormalEvidenceRecord> = {}): FormalEvidenceRecord => ({
+		schemaVersion: 1,
+		kind: 'flow_trace',
+		executionContext: { flowId: FLOW, locale: 'en-US', viewportId: 'desktop', themeId: 'light' },
+		coverage: { complete: true },
+		provenance: { workspaceSchemaVersion: 6, resources: [{ identity: { type: 'flow', id: FLOW }, revision: 'f1' }], versions: { uiux: '0.1.0' } },
+		artifactRefs: [],
+		evidenceRefs: [{ kind: 'formal_capture', evidence: captureDigest }],
+		...patch,
+	})
+	const judged = (overrides: Record<string, unknown> = {}) => ({
+		allViews: [{ key: 'v1', renderInputDigest: DIGEST }],
+		workspace,
+		discoveredLocales: ['en-US'],
+		flows: [{ key: FLOW, revision: 'f1' }],
+		captures: new Map([[captureDigest, capture()]]),
+		...overrides,
+	})
+
+	describe('flow_trace', () => {
+		it('is fresh while its Flow has the recorded revision and every capture it references is fresh', () => {
+			expect(evaluateFlowTraceStaleness(trace(), judged())).toEqual({ isStale: false })
+		})
+
+		it('is stale once its Flow changed or no longer exists, or the trace records no Flow', () => {
+			expect(evaluateFlowTraceStaleness(trace(), judged({ flows: [{ key: FLOW, revision: 'f2' }] }))).toEqual({ isStale: true, reason: FLOW_CHANGED_REASON })
+			expect(evaluateFlowTraceStaleness(trace(), judged({ flows: [] }))).toEqual({ isStale: true, reason: FLOW_REMOVED_REASON })
+			expect(evaluateFlowTraceStaleness(trace({ provenance: { workspaceSchemaVersion: 6, resources: [], versions: { uiux: '0.1.0' } } }), judged())).toEqual({ isStale: true, reason: FLOW_PROVENANCE_MISSING_REASON })
+			expect(evaluateFlowTraceStaleness(trace({ executionContext: {} }), judged())).toEqual({ isStale: true, reason: FLOW_TRACE_FLOW_MISSING_REASON })
+		})
+
+		it('is stale once a capture it references is stale (View render input) or missing', () => {
+			const changed = renderInputDigest({ ...view, variants: { Empty: { state: { count: 9 } } } })
+			expect(evaluateFlowTraceStaleness(trace(), judged({ allViews: [{ key: 'v1', renderInputDigest: changed }] }))).toEqual({ isStale: true, reason: `Capture ${captureDigest}: ${RENDER_INPUT_CHANGED_REASON}` })
+			expect(evaluateFlowTraceStaleness(trace(), judged({ captures: new Map() }))).toEqual({ isStale: true, reason: FLOW_TRACE_CAPTURE_MISSING_REASON })
+		})
+
+		it('stays fresh after a Spec-only edit of a View it enters, since its captures do', () => {
+			const edited = { ...view, spec: { intent: 'Another intent.' } }
+			expect(evaluateFlowTraceStaleness(trace(), judged({ allViews: [{ key: 'v1', renderInputDigest: renderInputDigest(edited) }] }))).toEqual({ isStale: false })
+		})
+
+		it('has unknown freshness, not fresh, when a referenced capture records no Adapter provenance, and a definite stale outranks it', () => {
+			const context = (captures: ReadonlyMap<string, FormalEvidenceRecord>) => ({ ...judged({ captures }), ...adapterFreshnessContext({ state: 'available', adapters: [] }) })
+			const unknown = evaluateFlowTraceStaleness(trace(), context(new Map([[captureDigest, capture()]])))
+			expect(unknown).toEqual({ isStale: true, unknown: true, reason: `Capture ${captureDigest}: ${ADAPTER_PROVENANCE_MISSING_REASON}` })
+			const both = trace({ evidenceRefs: [{ kind: 'formal_capture', evidence: captureDigest }, { kind: 'formal_capture', evidence: otherDigest }] })
+			const changed = capture({ renderInputDigest: renderInputDigest({ ...view, variants: {} }), adapters: [] })
+			const mixed = evaluateFlowTraceStaleness(both, context(new Map([[captureDigest, capture()], [otherDigest, changed]])))
+			expect(mixed).toEqual({ isStale: true, reason: `Capture ${otherDigest}: ${RENDER_INPUT_CHANGED_REASON}` })
+		})
+	})
+
+	describe('interaction_replay', () => {
+		// It copies the executionContext and provenance of the one capture it references (Clause 01a17762-b293-…).
+		const replay = (provenance: Partial<FormalEvidenceRecord['provenance']> = {}): FormalEvidenceRecord => ({ ...capture(provenance), kind: 'interaction_replay' })
+
+		it('is fresh and stale by the conditions of the capture it copies', () => {
+			expect(evaluateEvidenceStaleness(replay(), { allViews: [{ key: 'v1', renderInputDigest: DIGEST }], workspace, discoveredLocales: ['en-US'] })).toEqual({ isStale: false })
+			expect(evaluateEvidenceStaleness(replay(), { allViews: [{ key: 'v1', renderInputDigest: renderInputDigest({ ...view, ir: { ...view.ir, props: { title: 'New' } } }) }], workspace })).toEqual({ isStale: true, reason: RENDER_INPUT_CHANGED_REASON })
+			expect(evaluateEvidenceStaleness(replay(), { allViews: [], workspace })).toEqual({ isStale: true, reason: 'View no longer exists' })
+		})
+
+		it('is stale once an Adapter changed since it was replayed, and unknown without Adapter provenance', () => {
+			const counter: EvidenceAdapterProvenance = { moduleSpecifier: './adapters/counter.mjs', adapterId: 'counter', apiVersion: '1', contentDigest: `sha256:${'1'.repeat(64)}` }
+			const current = { allViews: [{ key: 'v1', renderInputDigest: DIGEST }], ...adapterFreshnessContext({ state: 'available', adapters: [counter] }) }
+			expect(evaluateEvidenceStaleness(replay({ adapters: [counter] }), current)).toEqual({ isStale: false })
+			expect(evaluateEvidenceStaleness(replay({ adapters: [] }), current)).toEqual({ isStale: true, reason: ADAPTER_CHANGED_REASON })
+			expect(evaluateEvidenceStaleness(replay(), current)).toMatchObject({ isStale: true, unknown: true })
+		})
 	})
 })

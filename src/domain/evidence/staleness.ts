@@ -102,6 +102,13 @@ export function isCompleteEvidenceForRenderInput(
 	})
 }
 
+/**
+ * The freshness of a formal capture and, unchanged, of an `interaction_replay` record: that record
+ * copies the `executionContext` and `provenance` of the one capture it references (Clause
+ * 01a17762-b293-7157-aa2f-39a9c2ffbab5), so every condition below (View, render-input digest, Locale,
+ * viewport, theme, Adapter, Product Kit) judges it as it judges that capture (Clause
+ * 01a14e30-2e43-75a7-aca8-c8df28915f4e). A `flow_trace` is judged by {@link evaluateFlowTraceStaleness}.
+ */
 export function evaluateEvidenceStaleness(
 	record: FormalEvidenceRecord,
 	context: EvidenceStalenessContext,
@@ -176,6 +183,71 @@ export function evaluateEvidenceStaleness(
 	}
 
 	return provenanceFreshness(record, context) ?? { isStale: false }
+}
+
+/** A Flow as freshness sees it: its key and its current revision. */
+export type FlowTraceStalenessFlow = Readonly<{ key: string; revision: string }>
+
+export type FlowTraceStalenessContext = EvidenceStalenessContext & Readonly<{
+	/** Every Flow the Workspace holds, with its current revision. */
+	flows: readonly FlowTraceStalenessFlow[]
+	/** The formal capture records a trace may reference, by `sha256:` identity; a reference absent here is missing. */
+	captures: ReadonlyMap<string, FormalEvidenceRecord>
+}>
+
+/** The reason a trace without a Flow reference is stale (Clause 01a14e30-2e43-75a7-aca8-c8df28915f4e). */
+export const FLOW_TRACE_FLOW_MISSING_REASON = 'Missing executionContext.flowId'
+
+/** The reason a trace is stale once its Flow no longer exists. */
+export const FLOW_REMOVED_REASON = 'Flow no longer exists'
+
+/** The reason a trace that records no Flow revision is stale. */
+export const FLOW_PROVENANCE_MISSING_REASON = 'Trace records no Flow revision; capture it again'
+
+/** The reason a trace is stale once its Flow changed. */
+export const FLOW_CHANGED_REASON = 'Flow changed since trace'
+
+/** The reason a trace is stale when a capture it references is not in the store. */
+export const FLOW_TRACE_CAPTURE_MISSING_REASON = 'A capture the trace references no longer exists'
+
+/**
+ * Freshness of a `flow_trace` record (Rule 01a11544-6760-7ec2-8430-0f7cc5807259, Clause
+ * 01a14e30-2e43-75a7-aca8-c8df28915f4e: the `flow` change domain affects Flow Evidence). A trace
+ * records the Flow's revision and references the formal captures of every View and Variant its
+ * recipe enters, so it is stale once its Flow no longer exists or no longer has the recorded
+ * revision, or once a capture it references is missing or stale by the conditions of a formal
+ * capture ({@link evaluateEvidenceStaleness}); it has unknown freshness, which counts as not fresh,
+ * when no condition makes it stale and a referenced capture's freshness is unknown (Rule
+ * 01a1161b-ff68-76af-8237-dbc8ef2c27d1). A definite stale outranks an unknown, as for a capture.
+ */
+export function evaluateFlowTraceStaleness(
+	record: FormalEvidenceRecord,
+	context: FlowTraceStalenessContext,
+): EvidenceStalenessAssessment {
+	const flowId = (record.executionContext as Record<string, unknown> | undefined)?.flowId
+	if (typeof flowId !== 'string' || flowId.length === 0) return { isStale: true, reason: FLOW_TRACE_FLOW_MISSING_REASON }
+	const flow = context.flows.find(candidate => candidate.key === flowId)
+	if (!flow) return { isStale: true, reason: FLOW_REMOVED_REASON }
+	const recorded = record.provenance?.resources?.find((resource) => {
+		const identity = resource.identity as Record<string, unknown>
+		return identity?.type === 'flow' && identity.id === flowId
+	})
+	if (!recorded || typeof recorded.revision !== 'string' || recorded.revision.length === 0)
+		return { isStale: true, reason: FLOW_PROVENANCE_MISSING_REASON }
+	if (recorded.revision !== flow.revision) return { isStale: true, reason: FLOW_CHANGED_REASON }
+
+	let unknown: EvidenceStalenessAssessment | undefined
+	for (const ref of record.evidenceRefs ?? []) {
+		if (ref.kind !== 'formal_capture') continue
+		const capture = context.captures.get(ref.evidence)
+		if (!capture) return { isStale: true, reason: FLOW_TRACE_CAPTURE_MISSING_REASON }
+		const assessment = evaluateEvidenceStaleness(capture, context)
+		if (!assessment.isStale) continue
+		const reason = `Capture ${ref.evidence}: ${assessment.reason ?? 'stale'}`
+		if (!assessment.unknown) return { isStale: true, reason }
+		unknown ??= { isStale: true, unknown: true, reason }
+	}
+	return unknown ?? { isStale: false }
 }
 
 /**

@@ -2,14 +2,15 @@ import type { GeometryReport, GeometryStreamContext } from './geometry-streams'
 import { affineAmplificationUpperBound, evaluateSnapshotPrecision, type OuterErrorMapping, type SnapshotPrecisionEvaluation } from './outer-precision'
 import { ContourCacheController } from './protocol/contour-cache'
 import type { FailureReportMessage } from './protocol/failure-report'
-import type {
-	ContourCancel,
-	FullContourRequest,
-	FullContourResponse,
-	PartialContourRequest,
-	PartialContourResponse,
-	VisibleRegion,
-	WidgetRect,
+import {
+	PARTIAL_CONTOUR_RESPONSE_TIMEOUT_MS,
+	type ContourCancel,
+	type FullContourRequest,
+	type FullContourResponse,
+	type PartialContourRequest,
+	type PartialContourResponse,
+	type VisibleRegion,
+	type WidgetRect,
 } from './protocol/schema'
 
 /**
@@ -30,6 +31,10 @@ import type {
  *   retried at once with the full original region set, then a complete regeneration follows. A
  *   regeneration that fails leaves the highlight unavailable for that precision until the geometry
  *   changes.
+ * - A partial request still without a verifiable response when `PARTIAL_CONTOUR_RESPONSE_TIMEOUT_MS`
+ *   (Clause 01a178bc-6de6-7baa-8e4a-a00a0c73f378) ends counts as an interruption: that work ends, is
+ *   canceled best effort, and the same recovery follows (Rule 01a11687-3543-7738-a0bc-690610c77148).
+ *   A complete regeneration is never timed.
  * - A work-scoped `failure.report` that names the work in flight is a non-recoverable refinement
  *   failure: that work ends, nothing starts again within the same geometry revision, and no
  *   regeneration follows. Scale changes alone never clear it; a new geometry revision, another
@@ -91,6 +96,8 @@ type Entry = {
 	readonly widgetId: string
 	readonly controller: ContourCacheController
 	work?: Work
+	/** The wait limit of the partial request in flight. */
+	timer?: ReturnType<typeof setTimeout>
 	/** A complete regeneration for this target failed within the revision: nothing finer is asked for. */
 	exhausted?: Readonly<{ geometryRevision: number; targetMaxError: number }>
 }
@@ -181,7 +188,7 @@ export class ContourRefinement {
 		if (result.status !== 'committed') return
 		// Work for the superseded revision is void; the runtime may still stop it.
 		if (entry.work) this.cancel(entry, entry.work)
-		entry.work = undefined
+		this.setWork(entry, undefined)
 		entry.exhausted = undefined
 		// A newer geometry revision ends the latch unless the geometry is the same: a reopened stream
 		// reports its baseline under a new revision even when nothing moved.
@@ -199,7 +206,7 @@ export class ContourRefinement {
 		const entry = this.entry
 		if (!entry || entry.widgetId !== widgetId) return
 		if (entry.work) this.cancel(entry, entry.work)
-		entry.work = undefined
+		this.setWork(entry, undefined)
 		entry.exhausted = undefined
 		entry.controller.endAcquisition()
 		this.publish()
@@ -216,7 +223,7 @@ export class ContourRefinement {
 			case 'wrong-work-kind':
 				return 'stale'
 			case 'committed':
-				entry.work = undefined
+				this.setWork(entry, undefined)
 				entry.exhausted = undefined
 				this.evaluate()
 				this.publish()
@@ -224,7 +231,7 @@ export class ContourRefinement {
 			default:
 				// Rejected whole: a precision miss, an invalid, missing or duplicated region result, a base that
 				// is no longer the cache, regions that no longer match by identity.
-				entry.work = undefined
+				this.setWork(entry, undefined)
 				this.recover(entry, work)
 				this.publish()
 				return 'rejected'
@@ -250,7 +257,7 @@ export class ContourRefinement {
 			|| message.payload.sequence !== work.sequence
 			|| message.payload.baseSnapshotVersion !== work.baseSnapshotVersion) return 'stale'
 		entry.controller.endWork(work.sequence)
-		entry.work = undefined
+		this.setWork(entry, undefined)
 		const snapshot = entry.controller.currentSnapshot()
 		this.latches.set(entry.widgetId, { revision: work.geometryRevision, key: snapshot ? geometryKey(snapshot) : '', report: message })
 		this.emitLatch()
@@ -327,9 +334,33 @@ export class ContourRefinement {
 		}
 	}
 
+	/** Records the work in flight; a partial request also starts its wait limit, and any other change of the work ends it. */
+	private setWork(entry: Entry, work: Work | undefined): void {
+		if (entry.timer !== undefined) clearTimeout(entry.timer)
+		entry.timer = undefined
+		entry.work = work
+		if (work?.kind !== 'partial') return
+		entry.timer = setTimeout(() => {
+			entry.timer = undefined
+			this.interrupt(entry, work)
+		}, PARTIAL_CONTOUR_RESPONSE_TIMEOUT_MS)
+	}
+
+	/** The wait limit of a partial request ended: the unanswered request is an interruption, a recoverable failure. */
+	private interrupt(entry: Entry, work: Work): void {
+		if (this.entry !== entry || entry.work !== work) return
+		entry.controller.endWork(work.sequence)
+		this.setWork(entry, undefined)
+		this.cancel(entry, work)
+		this.recover(entry, work)
+		this.publish()
+	}
+
 	private dropEntry(cancelWork: boolean): void {
 		const entry = this.entry
 		if (!entry) return
+		if (entry.timer !== undefined) clearTimeout(entry.timer)
+		entry.timer = undefined
 		if (cancelWork && entry.work) this.cancel(entry, entry.work)
 		this.entry = undefined
 	}
@@ -479,10 +510,10 @@ export class ContourRefinement {
 		if (previous) this.cancel(entry, previous)
 		if (!this.deps.send(request)) {
 			entry.controller.endWork(work.sequence)
-			entry.work = undefined
+			this.setWork(entry, undefined)
 			return false
 		}
-		entry.work = work
+		this.setWork(entry, work)
 		return true
 	}
 
@@ -490,7 +521,7 @@ export class ContourRefinement {
 		const work = entry.work
 		if (!work) return
 		entry.controller.endWork(work.sequence)
-		entry.work = undefined
+		this.setWork(entry, undefined)
 		this.cancel(entry, work)
 	}
 

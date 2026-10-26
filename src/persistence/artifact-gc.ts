@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import * as fs from 'node:fs/promises'
 
 import { canonicalJsonStringify } from '../domain/canonical-json'
+import { CHECKS_RUN_KIND } from '../domain/evidence/checks-run'
 import { validateFormalEvidenceRecord, type FormalEvidenceRecord } from '../domain/evidence/schema'
 import type { HostVersionRecord, VersionRecord } from '../domain/history/schema'
 import { validateReviewThread, type ReviewSubmission } from '../domain/reviews/schema'
@@ -23,6 +24,11 @@ import { readActiveServerHold } from './server-hold'
  * the latest Evidence record. Handoff blobs are not roots. Owner decisions of 2026-10-18
  * (https://github.com/DevilTea/uiux/discussions/241#discussioncomment-19019221):
  *
+ * - A `checks_run` record names no View, so it has no "latest" per View: the CHECKS_RUN_RETENTION
+ *   records with the newest `executionContext.ranAt` are roots, and an older one is collectable unless
+ *   a Review submission, a Checkpoint, a host version or the open autosave references it (owner ruling
+ *   of 2026-10-26, https://github.com/DevilTea/uiux/discussions/241#discussioncomment-19197851, item 1;
+ *   no time window).
  * - "Latest" follows the version timeline, never a file time: an Evidence record names the View
  *   revision it shows, and that revision's place is the latest time a Checkpoint, a host version
  *   (or one of its write events), the open autosave or a Review submission records it; the View's
@@ -47,6 +53,9 @@ import { readActiveServerHold } from './server-hold'
  *   Review threads, Checkpoints and host history, and only removes candidate blobs, each with one
  *   atomic unlink.
  */
+/** How many of the newest `checks_run` records (by `ranAt`) a cleanup keeps; Clause 01a178bb-cffc-7de1-93da-18431060d9b1 owns the value. */
+export const CHECKS_RUN_RETENTION = 20
+
 export type ArtifactGcBlob = Readonly<{ identity: string; bytes: number }>
 
 export type ArtifactGcResult = Readonly<{
@@ -305,13 +314,35 @@ function viewIdOf(identity: unknown): string | undefined {
 }
 
 /**
+ * The `checks_run` records a cleanup keeps: the CHECKS_RUN_RETENTION with the newest `ranAt` (ties
+ * by identity), and every record whose `ranAt` cannot be parsed, which cannot be ranked and takes no slot.
+ */
+export function keptChecksRuns(records: readonly Readonly<{ identity: string; ranAt: unknown }>[]): string[] {
+	const unplaced: string[] = []
+	const ranked: { identity: string; ranAt: number }[] = []
+	for (const record of records) {
+		const ranAt = typeof record.ranAt === 'string' ? Date.parse(record.ranAt) : Number.NaN
+		if (Number.isNaN(ranAt)) unplaced.push(record.identity)
+		else ranked.push({ identity: record.identity, ranAt })
+	}
+	ranked.sort((left, right) => (left.ranAt === right.ranAt ? 0 : right.ranAt > left.ranAt ? 1 : -1) || compareIdentity(left.identity, right.identity))
+	return [...unplaced, ...ranked.slice(0, CHECKS_RUN_RETENTION).map(record => record.identity)]
+}
+
+/**
  * For each Evidence kind and execution context, the records whose View revision is the newest on
- * the timeline, or every record of the group when that cannot be decided.
+ * the timeline, or every record of the group when that cannot be decided; for `checks_run`, the
+ * newest CHECKS_RUN_RETENTION records by `ranAt`.
  */
 async function latestEvidenceUnlocked(persistence: FileNativePersistence, blobs: Iterable<StoredBlob>, timeline: RevisionTimeline): Promise<string[]> {
 	const groups = new Map<string, { viewId?: string; records: { identity: string; revision?: string }[] }>()
+	const checksRuns: { identity: string; ranAt: unknown }[] = []
 	for (const blob of blobs) {
 		if (!blob.evidence) continue
+		if (blob.evidence.kind === CHECKS_RUN_KIND) {
+			checksRuns.push({ identity: blob.identity, ranAt: blob.evidence.executionContext.ranAt })
+			continue
+		}
 		const { kind, executionContext, provenance } = blob.evidence
 		const key = canonicalJsonStringify({ kind, executionContext })
 		const viewId = typeof executionContext.viewId === 'string' ? executionContext.viewId : undefined
@@ -322,7 +353,7 @@ async function latestEvidenceUnlocked(persistence: FileNativePersistence, blobs:
 		groups.set(key, group)
 	}
 	const current = new Map<string, string | undefined>()
-	const kept: string[] = []
+	const kept: string[] = keptChecksRuns(checksRuns)
 	for (const { viewId, records } of groups.values()) {
 		if (viewId === undefined) {
 			kept.push(...records.map(record => record.identity))

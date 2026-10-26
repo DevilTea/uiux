@@ -316,3 +316,110 @@ describe('Runtime bridge: sending failure.report', () => {
 		expect(runtime.receive(generationReport())).toEqual({ status: 'wrong-direction' })
 	})
 })
+
+/**
+ * The two producers of the runtime (issue #339, Clause 01a11a70-4261-7155-8aed-28bed7a89064):
+ * `protocol.invalid_state` for an established violation of the generation's state, and
+ * `runtime.unavailable` for the runtime's own permanent failure.
+ */
+describe('Runtime bridge: producing protocol.invalid_state', () => {
+	const request = (generation = 'generation-a', session = 'session-a') => ({
+		type: 'geometry.acquire.request',
+		context: { previewSessionId: session, runtimeGenerationId: generation, viewId: VIEW_ID, navigationRequestId: 'nav-1', widgetId: 'widget-a' },
+		payload: {},
+	})
+
+	function declared(payload: typeof WITH_REPORTS | typeof WITHOUT_REPORTS = WITH_REPORTS) {
+		const workbenchOutbound: PreviewWireMessage[] = []
+		const runtimeOutbound: PreviewWireMessage[] = []
+		const workbench = new WorkbenchPreviewProtocolBridge('session-a', collector(workbenchOutbound), () => compatible)
+		const runtime = new RuntimePreviewProtocolBridge('session-a', 'generation-a', payload, collector(runtimeOutbound))
+		expect(workbench.receive(runtime.declareCapabilities()).status).toBe('ack-dispatched')
+		return { workbench, runtime, workbenchOutbound, runtimeOutbound }
+	}
+
+	it('takes traffic of its own generation before the acknowledgement for an out-of-order violation, and holds the report until the ACK', () => {
+		const { workbench, runtime, workbenchOutbound, runtimeOutbound } = declared()
+		const early = runtime.receive(request())
+		expect(early).toEqual({ status: 'invalid-state', detail: 'geometry.acquire.request before capability.ack' })
+		if (early.status !== 'invalid-state') return
+		const declarationCount = runtimeOutbound.length
+		expect(runtime.reportInvalidState(early.detail)).toEqual({ status: 'gated' })
+		expect(runtimeOutbound).toHaveLength(declarationCount)
+
+		// The acknowledgement completes the handshake, and the held report follows it once.
+		expect(runtime.receive(workbenchOutbound[0])).toMatchObject({ status: 'accepted' })
+		const sent = runtimeOutbound.at(-1) as FailureReportMessage
+		expect(sent).toEqual({
+			type: 'failure.report',
+			context: { previewSessionId: 'session-a', runtimeGenerationId: 'generation-a' },
+			payload: { category: 'protocol', reason: 'protocol.invalid_state', detail: 'geometry.acquire.request before capability.ack' },
+		})
+		expect(failureReportScope(sent)).toBe('generation')
+		expect(runtime.reportInvalidState('again')).toEqual({ status: 'gated' })
+		expect(runtimeOutbound).toHaveLength(declarationCount + 1)
+
+		// The Workbench makes the generation protocol-invalid, which leaves the one automatic recovery.
+		expect(workbench.receive(sent).status).toBe('generation-failed')
+		expect(workbench.snapshot().session).toMatchObject({ recoveryNeeded: true, recoveryExhausted: false })
+	})
+
+	it('takes a capability.declare of its own generation after the acknowledgement for a violation and reports it at once', () => {
+		const { workbench, runtime, workbenchOutbound, runtimeOutbound } = declared()
+		expect(runtime.receive(workbenchOutbound[0])).toMatchObject({ status: 'accepted' })
+		const again = runtime.receive(declare('generation-a'))
+		expect(again).toEqual({ status: 'invalid-state', detail: 'capability.declare after capability.ack' })
+		if (again.status !== 'invalid-state') return
+		expect(runtime.reportInvalidState(again.detail)).toEqual({ status: 'sent' })
+		const sent = runtimeOutbound.at(-1) as FailureReportMessage
+		expect(sent.payload).toMatchObject({ category: 'protocol', reason: 'protocol.invalid_state' })
+		expect(workbench.receive(sent).status).toBe('generation-failed')
+		// It is the generation's last envelope.
+		expect(runtime.reportInvalidState('again')).toEqual({ status: 'gated' })
+	})
+
+	it('treats a duplicate matching ACK as idempotent, and stale or wrong-direction traffic as no violation', () => {
+		const { runtime, workbenchOutbound, runtimeOutbound } = declared()
+		expect(runtime.receive(workbenchOutbound[0])).toMatchObject({ status: 'accepted' })
+		expect(runtime.receive(workbenchOutbound[0])).toMatchObject({ status: 'accepted' })
+		// A declaration of another generation is not this runtime's traffic, and stale traffic is discarded.
+		expect(runtime.receive(declare('generation-old'))).toEqual({ status: 'wrong-direction' })
+		expect(runtime.receive(request('generation-old'))).toEqual({ status: 'stale-generation' })
+		expect(runtime.receive(request('generation-a', 'session-old'))).toEqual({ status: 'stale-session' })
+		const fresh = new RuntimePreviewProtocolBridge('session-a', 'generation-b', WITH_REPORTS, collector([]))
+		expect(fresh.receive(request('generation-a'))).toEqual({ status: 'stale-generation' })
+		expect(fresh.receive(declare('generation-b'))).toEqual({ status: 'wrong-direction' })
+		expect(runtimeOutbound.filter(message => message.type === 'failure.report')).toHaveLength(0)
+	})
+
+	it('reports nothing for a generation that did not declare failure.reports', () => {
+		const { runtime, workbenchOutbound, runtimeOutbound } = declared(WITHOUT_REPORTS)
+		expect(runtime.reportInvalidState('geometry.acquire.request before capability.ack')).toEqual({ status: 'gated' })
+		expect(runtime.receive(workbenchOutbound[0])).toMatchObject({ status: 'accepted' })
+		expect(runtime.reportInvalidState('capability.declare after capability.ack')).toEqual({ status: 'not-permitted' })
+		expect(runtimeOutbound.filter(message => message.type === 'failure.report')).toHaveLength(0)
+	})
+})
+
+describe('Runtime bridge: producing runtime.unavailable', () => {
+	it('sends one generation-scoped runtime report that ends the generation without automatic recovery', () => {
+		const { workbench, runtime, runtimeOutbound } = openGeneration()
+		expect(runtime.reportRuntimeUnavailable('geometry producer failed: TypeError')).toEqual({ status: 'sent' })
+		const sent = runtimeOutbound.at(-1) as FailureReportMessage
+		expect(sent).toEqual({
+			type: 'failure.report',
+			context: { previewSessionId: 'session-a', runtimeGenerationId: 'generation-a' },
+			payload: { category: 'runtime', reason: 'runtime.unavailable', detail: 'geometry producer failed: TypeError' },
+		})
+		expect(runtime.reportRuntimeUnavailable()).toEqual({ status: 'gated' })
+		expect(workbench.receive(sent).status).toBe('generation-failed')
+		expect(workbench.snapshot().session).toMatchObject({ recoveryNeeded: false, recoveryExhausted: true })
+	})
+
+	it('sends nothing for a generation that did not declare failure.reports', () => {
+		const { runtime, runtimeOutbound } = openGeneration(WITHOUT_REPORTS)
+		const count = runtimeOutbound.length
+		expect(runtime.reportRuntimeUnavailable('geometry producer failed: TypeError')).toEqual({ status: 'not-permitted' })
+		expect(runtimeOutbound).toHaveLength(count)
+	})
+})

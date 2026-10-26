@@ -1911,3 +1911,105 @@ describe('Adapter-driven Evidence freshness (issue #57)', { timeout: HEAVY_SERVE
 		})
 	})
 })
+
+// Rule 01a11544-6734-7a24-a957-e23ddeb3e396: the manifest references Flow traces and their captures as derived artifacts.
+describe('Flow traces in a Handoff (issue #88)', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS }, () => {
+	const STEP_ID = '55555555-5555-4555-8555-555555555555'
+
+	async function flowTraceWorkspace(): Promise<{ persistence: FileNativePersistence; capture: string; flowRevision: string }> {
+		const { root, persistence } = await createTestWorkspace([{ moduleSpecifier: './adapters/counter.mjs' }])
+		await mkdir(join(root, 'kit', 'adapters'), { recursive: true })
+		await writeFile(join(root, 'kit', 'adapters', 'counter.mjs'), makeCounterAdapterSource())
+		const viewRevision = await persistence.views.create(VIEW_1_ID, createSampleView(VIEW_1_ID, 'Traced View'))
+		const capture = await putFormalEvidence(persistence, VIEW_1_ID, viewRevision, true)
+		const flowRevision = await persistence.flows.create(FLOW_1_ID, { ...createSampleFlow(FLOW_1_ID, VIEW_1_ID), entryStepId: STEP_ID, steps: { [STEP_ID]: { target: { viewId: VIEW_1_ID }, transitions: [] } } })
+		return { persistence, capture, flowRevision: flowRevision as string }
+	}
+
+	/** A `flow_trace` as the Flow Evidence service records it for the one-step Flow, referencing `capture`. */
+	async function putFlowTrace(persistence: FileNativePersistence, input: Readonly<{ flowRevision: string; capture: string }>): Promise<string> {
+		const record: FormalEvidenceRecord = {
+			schemaVersion: 1,
+			kind: 'flow_trace',
+			executionContext: { flowId: FLOW_1_ID, locale: 'en-US', viewportId: 'desktop', themeId: 'light' },
+			coverage: { complete: true },
+			provenance: {
+				workspaceSchemaVersion: 6,
+				resources: [{ identity: { type: 'flow', id: FLOW_1_ID }, revision: input.flowRevision }, { identity: { type: 'view', id: VIEW_1_ID }, revision: 'r1' }],
+				versions: { uiux: '0.1.0' },
+			},
+			artifactRefs: [],
+			evidenceRefs: [{ kind: 'formal_capture', evidence: input.capture }],
+			data: {
+				recipe: { actions: [{ type: 'enter', stepId: STEP_ID, expect: { viewId: VIEW_1_ID } }] },
+				steps: [{ stepId: STEP_ID, viewId: VIEW_1_ID, valid: true, captureRef: input.capture }],
+			},
+		}
+		return (await persistence.artifacts.put(canonicalJsonBytes(record))).identity
+	}
+
+	const flowRoot = [{ type: 'flow' as const, flowId: FLOW_1_ID }]
+
+	it('references a fresh trace and its captures as derived artifacts', async () => {
+		const { persistence, capture, flowRevision } = await flowTraceWorkspace()
+		const trace = await putFlowTrace(persistence, { flowRevision, capture })
+		const exported = await currentSchemaHandoff(persistence).exportHandoff({ roots: flowRoot })
+		expect(exported.status).toBe('exported')
+		const manifest = exported.manifest!
+		expect(manifest.evidenceRefs).toContainEqual({ kind: 'flow_trace', evidence: trace })
+		expect(manifest.evidenceRefs).toContainEqual({ kind: 'formal_capture', evidence: capture })
+		expect(manifest.artifactRefs).toContainEqual({ kind: 'flow-trace-record', artifact: trace, context: { flowId: FLOW_1_ID } })
+		expect(manifest.artifactRefs).toContainEqual({ kind: 'formal-evidence-record', artifact: capture, context: { viewId: VIEW_1_ID } })
+		// The canonical Flow stays an authored resource of the bundle.
+		expect(manifest.resources.some(resource => resource.type === 'flow')).toBe(true)
+		expect(manifest.readiness.implementationReady).toBe(true)
+	})
+
+	it('adds no trace reference and no diagnostic for a Flow without traces, so readiness is as before', async () => {
+		const { persistence, capture } = await flowTraceWorkspace()
+		const exported = await currentSchemaHandoff(persistence).exportHandoff({ roots: flowRoot })
+		const manifest = exported.manifest!
+		expect(manifest.resources.some(resource => resource.type === 'flow')).toBe(true)
+		expect(manifest.evidenceRefs).toEqual([{ kind: 'formal_capture', evidence: capture }])
+		expect(manifest.artifactRefs.some(ref => ref.kind === 'flow-trace-record')).toBe(false)
+		expect(manifest.readiness.blockingDiagnostics).toEqual([])
+		expect(manifest.readiness.implementationReady).toBe(true)
+	})
+
+	it('leaves out a trace once its Flow changed', async () => {
+		const { persistence, capture, flowRevision } = await flowTraceWorkspace()
+		const trace = await putFlowTrace(persistence, { flowRevision, capture })
+		const flow = (await persistence.flows.readInspected(FLOW_1_ID))!
+		const edited = await persistence.flows.compareAndSwap({ key: FLOW_1_ID, expectedRevision: flow.revision, resource: { ...flow.resource!, name: 'Renamed Flow' } })
+		expect(edited.ok).toBe(true)
+		const exported = await currentSchemaHandoff(persistence).exportHandoff({ roots: flowRoot })
+		const manifest = exported.manifest!
+		expect(manifest.evidenceRefs.some(ref => ref.evidence === trace)).toBe(false)
+		expect(manifest.artifactRefs.some(ref => ref.artifact === trace)).toBe(false)
+	})
+
+	it('leaves out a trace once a capture it references is stale, or no longer in the store', async () => {
+		const { persistence, capture, flowRevision } = await flowTraceWorkspace()
+		const trace = await putFlowTrace(persistence, { flowRevision, capture })
+		const orphan = await putFlowTrace(persistence, { flowRevision, capture: `sha256:${'e'.repeat(64)}` })
+		const exportedBefore = await currentSchemaHandoff(persistence).exportHandoff({ roots: flowRoot })
+		expect(exportedBefore.manifest!.evidenceRefs.map(ref => ref.evidence)).toContain(trace)
+		expect(exportedBefore.manifest!.evidenceRefs.map(ref => ref.evidence)).not.toContain(orphan)
+
+		// An IR change of the entered View makes its capture, hence the trace, stale.
+		const read = (await persistence.views.readInspected(VIEW_1_ID))!
+		const view = read.resource!
+		const changed = await persistence.views.compareAndSwap({ key: VIEW_1_ID, expectedRevision: read.revision, resource: { ...view, variants: { alt: { state: { 'counter-1': { count: 1 } } } } } })
+		expect(changed.ok).toBe(true)
+		const exportedAfter = await currentSchemaHandoff(persistence).exportHandoff({ roots: flowRoot })
+		expect(exportedAfter.manifest!.evidenceRefs.map(ref => ref.evidence)).not.toContain(trace)
+	})
+
+	it('references no trace of a Flow outside the closure', async () => {
+		const { persistence, capture, flowRevision } = await flowTraceWorkspace()
+		const trace = await putFlowTrace(persistence, { flowRevision, capture })
+		const exported = await currentSchemaHandoff(persistence).exportHandoff({ roots: [{ type: 'view', viewId: VIEW_1_ID }] })
+		expect(exported.manifest!.evidenceRefs.map(ref => ref.evidence)).toEqual([capture])
+		expect(exported.manifest!.artifactRefs.some(ref => ref.artifact === trace)).toBe(false)
+	})
+})

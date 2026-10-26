@@ -104,6 +104,9 @@ describe('Checks gathers the live Preview (issue #347)', () => {
 				warning: { code: 'missing-translation', key: MISSING_KEY, requestedLocale: 'zh-TW', fallbackLocale: 'en-US' },
 			})
 			expect(warningsOf(report).every(entry => entry.warning.requestedLocale === 'zh-TW')).toBe(true)
+			// The report also says which declared Properties it did not evaluate (issue #95), never forcing one to evaluate.
+			const coverage = report.payload.coverage as { complete: boolean; unevaluated: readonly Record<string, unknown>[] }
+			expect(coverage).toEqual({ complete: true, unevaluated: [] })
 
 			await goToChecks(page)
 			// The Preview was left with the View: its last report is kept, labeled, and never shown as completed.
@@ -114,6 +117,8 @@ describe('Checks gathers the live Preview (issue #347)', () => {
 			expect(note).toContain('may be out of date')
 			expect(note).toContain('zh-TW')
 			expect(note).toContain('UIUX Workbench')
+			// Its coverage was complete, so no Property is named as unevaluated.
+			expect(note).not.toContain('not evaluated')
 			expect(await countOf(page, 'preview-translation')).toBeGreaterThanOrEqual(1)
 			// A run was never asked for, and the Preview's findings are listed all the same, as live ones.
 			const problem = page.locator('[data-check-problem="i18n.missing_translation"]')

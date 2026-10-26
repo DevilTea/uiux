@@ -29,6 +29,8 @@ export const MAX_CHECKS_TRANSLATION_WARNINGS = 500
 export const MAX_CHECKS_RUNTIME_ERRORS = 100
 /** At most this many characters of JSON in one report (Clause 01a17619-ab3f-797d-ae93-4038a48ee31f). */
 export const MAX_CHECKS_REPORT_LENGTH = 1_048_576
+/** At most this many `coverage.unevaluated` entries in one report (Clause 01a17619-ab3f-797d-ae93-4038a48ee31f). */
+export const MAX_CHECKS_UNEVALUATED = 500
 /** Longest text member (a Widget identity, a Property name, a key or a parameter name) a decoder accepts. */
 export const MAX_CHECKS_TEXT_LENGTH = FAILURE_DETAIL_MAX_LENGTH
 
@@ -68,10 +70,34 @@ export type ChecksRuntimeError = Readonly<{
 	widgetId?: string
 }>
 
+/**
+ * One declared translation-result Property the runtime did not evaluate (issue #95; Clause
+ * 01a17619-ab3f-797d-ae93-4038a48ee31f): the Widget, result Property and Catalog field of the
+ * Discussion #5 `missing` list, with a short non-normative `reason`. The View and Variant are those of
+ * the report's context.
+ */
+export type ChecksUnevaluated = Readonly<{
+	widgetId: string
+	resultProperty: string
+	catalogField: string
+	reason: string
+}>
+
+/**
+ * What the runtime knows it declared but did not evaluate. `complete` is true exactly when
+ * `unevaluated` is empty. Hidden Properties are never forced to evaluate to make it so.
+ */
+export type ChecksCoverage = Readonly<{
+	complete: boolean
+	unevaluated: readonly ChecksUnevaluated[]
+}>
+
 export type ChecksReportPayload = Readonly<{
 	sequence: number
 	translationWarnings: readonly ChecksTranslationWarning[]
 	runtimeErrors: readonly ChecksRuntimeError[]
+	/** Absent when the runtime cannot say what it declared; then nothing is claimed about coverage. */
+	coverage?: ChecksCoverage
 }>
 
 export type ChecksReportMessage = Readonly<{
@@ -81,7 +107,7 @@ export type ChecksReportMessage = Readonly<{
 }>
 
 /** Identities that sit in a payload, never in shared context. */
-const PAYLOAD_ONLY_IDENTITIES = ['sequence', 'translationWarnings', 'runtimeErrors'] as const
+const PAYLOAD_ONLY_IDENTITIES = ['sequence', 'translationWarnings', 'runtimeErrors', 'coverage'] as const
 /** Context identities of other work, which this message never carries. */
 const INAPPLICABLE_CONTEXT_KEYS = ['navigationRequestId', 'widgetId', 'geometryRevision'] as const
 
@@ -152,6 +178,7 @@ export function validateChecksReportMessage(input: unknown): ValidationResult<Ch
 			if (entry) errors.push(entry)
 		})
 	}
+	const coverage = Object.hasOwn(payload, 'coverage') ? decodeCoverage(payload.coverage, '/payload/coverage', v) : undefined
 	if (v.diagnostics.length) return v.finish<ChecksReportMessage>(input)
 
 	return v.finish<ChecksReportMessage>(Object.freeze({
@@ -167,6 +194,7 @@ export function validateChecksReportMessage(input: unknown): ValidationResult<Ch
 			sequence: payload.sequence as number,
 			translationWarnings: Object.freeze(warnings),
 			runtimeErrors: Object.freeze(errors),
+			...(coverage ? { coverage } : {}),
 		}),
 	}))
 }
@@ -186,6 +214,44 @@ function decodeTranslationWarning(item: unknown, path: string, v: Validator): Ch
 	}
 	if (v.diagnostics.length > before || !warning.ok || widgetId === undefined || resultProperty === undefined) return undefined
 	return Object.freeze({ widgetId, resultProperty, warning: Object.freeze({ ...warning.value }) })
+}
+
+function decodeCoverage(item: unknown, path: string, v: Validator): ChecksCoverage | undefined {
+	const entry = v.object(item, path)
+	if (!entry) return undefined
+	const before = v.diagnostics.length
+	let complete: boolean | undefined
+	if (typeof entry.complete !== 'boolean') v.issue('protocol.invalid_coverage', `${path}/complete`, 'coverage.complete is a boolean.')
+	else complete = entry.complete
+	const unevaluated: ChecksUnevaluated[] = []
+	const list = v.array(entry.unevaluated, `${path}/unevaluated`)
+	if (list && list.length > MAX_CHECKS_UNEVALUATED)
+		v.issue('protocol.too_many_unevaluated', `${path}/unevaluated`, `A checks.report lists at most ${MAX_CHECKS_UNEVALUATED} unevaluated Properties.`)
+	else {
+		list?.forEach((value, index) => {
+			const decoded = decodeUnevaluated(value, jsonPointer(`${path}/unevaluated`, index), v)
+			if (decoded) unevaluated.push(decoded)
+		})
+		// A complete report names nothing it missed, and an incomplete one names at least one.
+		if (list && complete === true && list.length > 0)
+			v.issue('protocol.invalid_coverage', `${path}/unevaluated`, 'Complete coverage lists no unevaluated Property.')
+		if (list && complete === false && list.length === 0)
+			v.issue('protocol.invalid_coverage', `${path}/unevaluated`, 'Incomplete coverage lists at least one unevaluated Property.')
+	}
+	if (v.diagnostics.length > before || complete === undefined) return undefined
+	return Object.freeze({ complete, unevaluated: Object.freeze(unevaluated) })
+}
+
+function decodeUnevaluated(item: unknown, path: string, v: Validator): ChecksUnevaluated | undefined {
+	const entry = v.object(item, path)
+	if (!entry) return undefined
+	const before = v.diagnostics.length
+	const widgetId = boundedText(entry.widgetId, `${path}/widgetId`, v, true)
+	const resultProperty = boundedText(entry.resultProperty, `${path}/resultProperty`, v, true)
+	const catalogField = boundedText(entry.catalogField, `${path}/catalogField`, v, true)
+	const reason = boundedText(entry.reason, `${path}/reason`, v, true)
+	if (v.diagnostics.length > before || widgetId === undefined || resultProperty === undefined || catalogField === undefined || reason === undefined) return undefined
+	return Object.freeze({ widgetId, resultProperty, catalogField, reason })
 }
 
 function decodeRuntimeError(item: unknown, path: string, v: Validator): ChecksRuntimeError | undefined {
