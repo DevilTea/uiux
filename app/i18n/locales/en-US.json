@@ -2520,6 +2520,7 @@
       "recipe_assertion_failed": "The recipe asserts something the Flow does not hold.",
       "recipe_invalid_shape": "The recipe is not in the expected shape.",
       "recipe_orphan_trigger": "A trigger must directly follow an enter of the same step.",
+      "recipe_perform_required": "A trigger must state the browser action that causes its Event (perform).",
       "recipe_unknown_step": "The recipe names a step the Flow does not have.",
       "recipe_unknown_trigger": "The recipe names a trigger the step does not have.",
       "ambiguous_trigger": "Two transitions from this step use the same trigger.",

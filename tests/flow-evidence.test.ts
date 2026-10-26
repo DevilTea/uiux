@@ -6,6 +6,8 @@ import { afterEach, describe, expect, it } from 'vitest'
 
 import { createLeaseManager } from '../src/application/access/leases'
 import { createFlowEvidenceService } from '../src/application/services/flow-evidence'
+import type { CaptureFormalEvidenceCommand, CaptureFormalEvidenceResult, ReplayInteractionsCommand } from '../src/application/services/formal-capture'
+import type { InteractionReplayOutcome } from '../src/application/services/interaction-replay'
 import { createWorkspaceApplicationSession } from '../src/application/services/workspace-session'
 import { canonicalJsonBytes } from '../src/domain/canonical-json'
 import { validateFormalEvidenceRecord } from '../src/domain/evidence/schema'
@@ -55,7 +57,10 @@ describe('Flow replay recipe (Clauses 01a172cc-d6f0-714d-b2fb-bd66e13c73a5 and 0
 			},
 		}
 		const recipe = deriveFlowRecipe(flow)
-		expect(validateFlowRecipe(recipe, flow)).toEqual([])
+		// Only a press trigger defaults to a click (owner ruling 4 of #241 comment 19197851): the `back` trigger states no perform, so the derived recipe is refused.
+		expect(validateFlowRecipe(recipe, flow).map(item => [item.code, item.path])).toEqual([['flow.recipe_perform_required', '/recipe/actions/5/perform']])
+		const performed = { actions: recipe.actions.map(action => action.type === 'trigger' && action.trigger.event === 'back' ? { ...action, perform: { action: 'hover' } } : action) }
+		expect(validateFlowRecipe(performed, flow)).toEqual([])
 		expect(recipe.actions.map(action => [action.type, action.stepId, action.type === 'trigger' ? action.trigger.widgetId : ''])).toEqual([
 			['enter', STEP_A, ''], ['trigger', STEP_A, 'a'],
 			['enter', STEP_A, ''], ['trigger', STEP_A, 'z'],
@@ -63,8 +68,8 @@ describe('Flow replay recipe (Clauses 01a172cc-d6f0-714d-b2fb-bd66e13c73a5 and 0
 			['enter', STEP_C, ''],
 		])
 		expect(flowRecipeEntries(recipe)).toEqual([
-			{ stepId: STEP_A, viewId: VIEW_A, trigger: { widgetId: 'a', event: 'press' }, resultStepId: STEP_B },
-			{ stepId: STEP_A, viewId: VIEW_A, trigger: { widgetId: 'z', event: 'press' }, resultStepId: STEP_C },
+			{ stepId: STEP_A, viewId: VIEW_A, trigger: { widgetId: 'a', event: 'press' }, perform: { action: 'click' }, resultStepId: STEP_B },
+			{ stepId: STEP_A, viewId: VIEW_A, trigger: { widgetId: 'z', event: 'press' }, perform: { action: 'click' }, resultStepId: STEP_C },
 			{ stepId: STEP_B, viewId: VIEW_B, variantName: 'done', trigger: { widgetId: 'a', event: 'back' }, resultStepId: STEP_A },
 			{ stepId: STEP_C, viewId: VIEW_B },
 		])
@@ -74,7 +79,7 @@ describe('Flow replay recipe (Clauses 01a172cc-d6f0-714d-b2fb-bd66e13c73a5 and 0
 	it('refuses a recipe that names what the Flow lacks or asserts what it does not hold', () => {
 		const flow = twoStepFlow()
 		const enter = { type: 'enter', stepId: STEP_A, expect: { viewId: VIEW_A } }
-		const trigger = { type: 'trigger', stepId: STEP_A, trigger: { widgetId: 'root', event: 'press' }, expect: { resultStepId: STEP_B } }
+		const trigger = { type: 'trigger', stepId: STEP_A, trigger: { widgetId: 'root', event: 'press' }, perform: { action: 'click' }, expect: { resultStepId: STEP_B } }
 		const codes = (recipe: unknown) => validateFlowRecipe(recipe, flow).map(item => item.code)
 		expect(codes({ actions: [enter, trigger] })).toEqual([])
 		expect(codes(undefined)).toEqual(['flow.recipe_invalid_shape'])
@@ -87,6 +92,25 @@ describe('Flow replay recipe (Clauses 01a172cc-d6f0-714d-b2fb-bd66e13c73a5 and 0
 		expect(codes({ actions: [enter, { ...trigger, trigger: { widgetId: 'root', event: 'other' } }] })).toEqual(['flow.recipe_unknown_trigger'])
 		expect(codes({ actions: [enter, { ...trigger, expect: { resultStepId: STEP_A } }] })).toEqual(['flow.recipe_assertion_failed'])
 		expect(codes({ actions: [enter], extra: 1 })).toEqual(['flow.recipe_invalid_shape'])
+	})
+
+	it('requires every trigger of a given recipe to state a perform shaped as an interaction replay step', () => {
+		const flow = twoStepFlow()
+		const enter = { type: 'enter', stepId: STEP_A, expect: { viewId: VIEW_A } }
+		const withPerform = (perform?: unknown) => ({ actions: [enter, { type: 'trigger', stepId: STEP_A, trigger: { widgetId: 'root', event: 'press' }, ...(perform === undefined ? {} : { perform }), expect: { resultStepId: STEP_B } }] })
+		const found = (perform?: unknown) => validateFlowRecipe(withPerform(perform), flow).map(item => [item.code, item.path])
+		// A given recipe never defaults, not even a press trigger.
+		expect(found()).toEqual([['flow.recipe_perform_required', '/recipe/actions/1/perform']])
+		for (const action of ['click', 'hover']) expect(found({ action })).toEqual([])
+		expect(found({ action: 'type', text: 'hello' })).toEqual([])
+		expect(found({ action: 'press', key: 'Enter' })).toEqual([])
+		expect(found({ action: 'tap' })).toEqual([['flow.recipe_invalid_shape', '/recipe/actions/1/perform/action']])
+		expect(found('click')).toEqual([['flow.recipe_invalid_shape', '/recipe/actions/1/perform']])
+		expect(found({ action: 'type' })).toEqual([['flow.recipe_invalid_shape', '/recipe/actions/1/perform/text']])
+		expect(found({ action: 'press' })).toEqual([['flow.recipe_invalid_shape', '/recipe/actions/1/perform/key']])
+		expect(found({ action: 'click', text: 'x' })).toEqual([['flow.recipe_invalid_shape', '/recipe/actions/1/perform/text']])
+		expect(found({ action: 'click', key: 'x' })).toEqual([['flow.recipe_invalid_shape', '/recipe/actions/1/perform/key']])
+		expect(found({ action: 'click', extra: 1 })).toEqual([['flow.recipe_invalid_shape', '/recipe/actions/1/perform/extra']])
 	})
 })
 
@@ -181,6 +205,7 @@ describe('validate_flow and capture_flow_evidence refusals', () => {
 		const first = await persistence.artifacts.put(new TextEncoder().encode('a formal capture recorded before the failure'))
 		const service = createFlowEvidenceService(persistence, {
 			readFlow: async () => ({ resource: twoStepFlow(), revision: 'r_flow', diagnostics: [] }),
+			replay: async () => { throw new Error('The replay is not reached after a failed capture.') },
 			captureFormal: async ({ contexts }) => ({
 				status: 'incomplete',
 				executedAt: new Date().toISOString(),
@@ -236,6 +261,100 @@ describe('validate_flow and capture_flow_evidence refusals', () => {
 		expect(blocking).toContain('flow.missing_variant')
 		expect(blocking).toContain(`/flows/${FLOW_ID}/steps/${STEP_B}/target/variantName`)
 		expect(JSON.stringify((await (await seededSession(twoStepFlow())).app.assessHandoffReadiness({ roots: [{ type: 'flow', flowId: FLOW_ID }] })))).not.toContain('flow.missing')
+	})
+})
+
+describe('replaying each trigger as a browser action (Rule 01a11544-66d9-7fcd-8400-93516ddf2857, owner ruling 4 of #241 comment 19197851)', () => {
+	const renderContext = { locale: 'en-US', viewportId: 'desktop', themeId: 'light' }
+
+	/** The service over fakes: every context is captured, and every replay is answered by `answer`. */
+	async function serviceOver(flow: FlowResource, answer: (command: ReplayInteractionsCommand) => InteractionReplayOutcome) {
+		const { persistence } = await seededSession(flow)
+		const captured: CaptureFormalEvidenceCommand[] = []
+		const replayed: ReplayInteractionsCommand[] = []
+		const service = createFlowEvidenceService(persistence, {
+			readFlow: async () => ({ resource: flow, revision: 'r_flow', diagnostics: [] }),
+			captureFormal: async (command) => {
+				captured.push(command)
+				const results = await Promise.all(command.contexts.map(async (context, index) => {
+					const stored = await persistence.artifacts.put(new TextEncoder().encode(`capture ${index}`))
+					return { context, status: 'captured' as const, evidenceDigest: stored.identity, screenshotDigest: stored.identity, evidence: { schemaVersion: 1, kind: 'formal_capture', executionContext: {}, coverage: { complete: true }, provenance: { workspaceSchemaVersion: 6, resources: [], versions: { uiux: '0.1.0' } }, artifactRefs: [] } }
+				}))
+				return { status: 'captured', executedAt: new Date().toISOString(), summary: { total: results.length, captured: results.length, failed: 0 }, results } as unknown as CaptureFormalEvidenceResult
+			},
+			replay: async (command) => {
+				replayed.push(command)
+				return answer(command)
+			},
+		})
+		return { persistence, service, captured, replayed }
+	}
+	const pass: InteractionReplayOutcome = { status: 'replayed', results: ['pass'] }
+
+	it('performs a derived press trigger as a click and asserts its Event exactly once, then records the replay as valid', async () => {
+		const { service, replayed, persistence } = await serviceOver(twoStepFlow(), () => pass)
+		const outcome = await service.capture({ flowId: FLOW_ID, renderContext })
+		expect(outcome.status, JSON.stringify(outcome)).toBe('captured')
+		if (outcome.status !== 'captured') return
+		// The trigger is replayed once, in the Preview of the step's View in the render context, as the interaction replay engine's step and assertion.
+		expect(replayed).toHaveLength(1)
+		expect(replayed[0]).toMatchObject({
+			context: { viewId: VIEW_A, locale: 'en-US', viewportId: 'desktop', themeId: 'light' },
+			steps: [{ action: 'click', target: { viewId: VIEW_A, widgetId: 'root' } }],
+			assertions: [{ expect: { widgetEvent: { widgetId: 'root', name: 'press', count: 1 } } }],
+		})
+		expect(outcome.evidence.data?.steps).toMatchObject([{ stepId: STEP_A, valid: true }, { stepId: STEP_B, valid: true }])
+		// The stored recipe is the derived one with the default perform, so that replaying it is deterministic.
+		expect(JSON.stringify(outcome.evidence.data?.recipe)).toContain('"perform":{"action":"click"}')
+		expect(await persistence.artifacts.read(outcome.evidenceDigest)).toBeDefined()
+	})
+
+	it('replays the given perform on the entered Variant, and records an Event that did not occur exactly once as invalid', async () => {
+		const flow: FlowResource = { ...twoStepFlow(), steps: { ...twoStepFlow().steps, [STEP_A]: { target: { viewId: VIEW_A, variantName: 'x' }, transitions: [{ trigger: { widgetId: 'name', event: 'change' }, targetStepId: STEP_B }] } } }
+		const { service, replayed } = await serviceOver(flow, () => ({ status: 'replayed', results: ['fail'] }))
+		const recipe = { actions: [
+			{ type: 'enter', stepId: STEP_A, expect: { viewId: VIEW_A, variantName: 'x' } },
+			{ type: 'trigger', stepId: STEP_A, trigger: { widgetId: 'name', event: 'change' }, perform: { action: 'type', text: 'hello' }, expect: { resultStepId: STEP_B } },
+			{ type: 'enter', stepId: STEP_B, expect: { viewId: VIEW_B } },
+		] }
+		const outcome = await service.capture({ flowId: FLOW_ID, renderContext, recipe })
+		expect(outcome.status, JSON.stringify(outcome)).toBe('captured')
+		if (outcome.status !== 'captured') return
+		expect(replayed[0]).toMatchObject({
+			context: { viewId: VIEW_A, variantName: 'x' },
+			steps: [{ action: 'type', text: 'hello', target: { viewId: VIEW_A, variant: 'x', widgetId: 'name' } }],
+			assertions: [{ expect: { widgetEvent: { widgetId: 'name', name: 'change', count: 1 } } }],
+		})
+		expect(outcome.evidence.data?.steps).toMatchObject([{ stepId: STEP_A, valid: false }, { stepId: STEP_B, valid: true }])
+		expect(validateFormalEvidenceRecord(outcome.evidence).diagnostics).toEqual([])
+	})
+
+	it('fails the run, recording no trace, when a replay cannot run', async () => {
+		const { service, persistence } = await serviceOver(twoStepFlow(), () => ({ status: 'failed', diagnostics: [{ code: 'interaction.step_failed', path: '/steps/0', message: 'The click could not be performed.' }] }))
+		const before = await persistence.artifacts.listIdentities()
+		const outcome = await service.capture({ flowId: FLOW_ID, renderContext })
+		expect(outcome).toMatchObject({ status: 'failed', flowId: FLOW_ID, diagnostics: [{ code: 'interaction.step_failed' }] })
+		// Only the formal captures the run had already stored remain.
+		const added = (await persistence.artifacts.listIdentities()).filter(identity => !before.includes(identity))
+		expect(added).toHaveLength(2)
+	})
+
+	it('refuses a derived recipe with a non-press trigger before any capture or replay, and records nothing', async () => {
+		const flow: FlowResource = { ...twoStepFlow(), steps: { ...twoStepFlow().steps, [STEP_A]: { target: { viewId: VIEW_A }, transitions: [{ trigger: { widgetId: 'root', event: 'click' }, targetStepId: STEP_B }] } } }
+		const { service, persistence, captured, replayed } = await serviceOver(flow, () => pass)
+		const before = await persistence.artifacts.listIdentities()
+		expect(await service.capture({ flowId: FLOW_ID, renderContext })).toMatchObject({ status: 'invalid', diagnostics: [{ code: 'flow.recipe_perform_required', path: '/recipe/actions/1/perform' }] })
+		expect(captured).toEqual([])
+		expect(replayed).toEqual([])
+		expect(await persistence.artifacts.listIdentities()).toEqual(before)
+		// The same Flow runs once its recipe states the perform.
+		const recipe = { actions: [
+			{ type: 'enter', stepId: STEP_A, expect: { viewId: VIEW_A } },
+			{ type: 'trigger', stepId: STEP_A, trigger: { widgetId: 'root', event: 'click' }, perform: { action: 'click' }, expect: { resultStepId: STEP_B } },
+			{ type: 'enter', stepId: STEP_B, expect: { viewId: VIEW_B } },
+		] }
+		expect(await service.capture({ flowId: FLOW_ID, renderContext, recipe })).toMatchObject({ status: 'captured' })
+		expect(replayed).toHaveLength(1)
 	})
 })
 
