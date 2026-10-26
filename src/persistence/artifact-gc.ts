@@ -53,7 +53,7 @@ import { readActiveServerHold } from './server-hold'
  *   Review threads, Checkpoints and host history, and only removes candidate blobs, each with one
  *   atomic unlink.
  */
-/** How many of the newest `checks_run` records (by `ranAt`) a cleanup keeps; Clause 01a14e30-30de-70c3-888f-63e8982353d7 owns the value. */
+/** How many of the newest `checks_run` records (by `ranAt`) a cleanup keeps; Clause 01a178bb-cffc-7de1-93da-18431060d9b1 owns the value. */
 export const CHECKS_RUN_RETENTION = 20
 
 export type ArtifactGcBlob = Readonly<{ identity: string; bytes: number }>
@@ -314,19 +314,33 @@ function viewIdOf(identity: unknown): string | undefined {
 }
 
 /**
+ * The `checks_run` records a cleanup keeps: the CHECKS_RUN_RETENTION with the newest `ranAt` (ties
+ * by identity), and every record whose `ranAt` cannot be parsed, which cannot be ranked and takes no slot.
+ */
+export function keptChecksRuns(records: readonly Readonly<{ identity: string; ranAt: unknown }>[]): string[] {
+	const unplaced: string[] = []
+	const ranked: { identity: string; ranAt: number }[] = []
+	for (const record of records) {
+		const ranAt = typeof record.ranAt === 'string' ? Date.parse(record.ranAt) : Number.NaN
+		if (Number.isNaN(ranAt)) unplaced.push(record.identity)
+		else ranked.push({ identity: record.identity, ranAt })
+	}
+	ranked.sort((left, right) => (left.ranAt === right.ranAt ? 0 : right.ranAt > left.ranAt ? 1 : -1) || compareIdentity(left.identity, right.identity))
+	return [...unplaced, ...ranked.slice(0, CHECKS_RUN_RETENTION).map(record => record.identity)]
+}
+
+/**
  * For each Evidence kind and execution context, the records whose View revision is the newest on
  * the timeline, or every record of the group when that cannot be decided; for `checks_run`, the
  * newest CHECKS_RUN_RETENTION records by `ranAt`.
  */
 async function latestEvidenceUnlocked(persistence: FileNativePersistence, blobs: Iterable<StoredBlob>, timeline: RevisionTimeline): Promise<string[]> {
 	const groups = new Map<string, { viewId?: string; records: { identity: string; revision?: string }[] }>()
-	const checksRuns: { identity: string; ranAt: number }[] = []
+	const checksRuns: { identity: string; ranAt: unknown }[] = []
 	for (const blob of blobs) {
 		if (!blob.evidence) continue
 		if (blob.evidence.kind === CHECKS_RUN_KIND) {
-			// An unparseable `ranAt` cannot be placed; the record is kept rather than ranked.
-			const ranAt = typeof blob.evidence.executionContext.ranAt === 'string' ? Date.parse(blob.evidence.executionContext.ranAt) : Number.NaN
-			checksRuns.push({ identity: blob.identity, ranAt: Number.isNaN(ranAt) ? Number.POSITIVE_INFINITY : ranAt })
+			checksRuns.push({ identity: blob.identity, ranAt: blob.evidence.executionContext.ranAt })
 			continue
 		}
 		const { kind, executionContext, provenance } = blob.evidence
@@ -339,10 +353,7 @@ async function latestEvidenceUnlocked(persistence: FileNativePersistence, blobs:
 		groups.set(key, group)
 	}
 	const current = new Map<string, string | undefined>()
-	const kept: string[] = checksRuns
-		.sort((left, right) => (left.ranAt === right.ranAt ? 0 : right.ranAt > left.ranAt ? 1 : -1) || compareIdentity(left.identity, right.identity))
-		.slice(0, CHECKS_RUN_RETENTION)
-		.map(record => record.identity)
+	const kept: string[] = keptChecksRuns(checksRuns)
 	for (const { viewId, records } of groups.values()) {
 		if (viewId === undefined) {
 			kept.push(...records.map(record => record.identity))

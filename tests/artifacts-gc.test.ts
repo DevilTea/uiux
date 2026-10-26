@@ -10,7 +10,7 @@ import { runArtifactsCommand } from '../src/cli/artifacts'
 import type { FormalEvidenceRecord } from '../src/domain/evidence/schema'
 import type { CheckpointRecord, HistoryResourceEntry, HostVersionRecord } from '../src/domain/history/schema'
 import { createChecksRunEvidenceService } from '../src/application/services/checks-run-evidence'
-import { ArtifactGcSweepError, CHECKS_RUN_RETENTION, collectArtifactGarbage } from '../src/persistence/artifact-gc'
+import { ArtifactGcSweepError, CHECKS_RUN_RETENTION, collectArtifactGarbage, keptChecksRuns } from '../src/persistence/artifact-gc'
 import { canonicalJsonBytes, FileNativePersistence, revisionForResourceFiles, type PersistenceFaultHook } from '../src/persistence/file-native'
 import { CheckpointStore } from '../src/persistence/history/checkpoint-store'
 import { blobDigest, HostHistoryStore } from '../src/persistence/history/host-store'
@@ -408,6 +408,14 @@ describe('uiux artifacts gc', () => {
 		expect((await storeListing(root)).length).toBe(CHECKS_RUN_RETENTION + 1)
 		// A second run finds nothing more to delete.
 		expect((await gc(workspace)).stdout).toEqual(['Deleted 0 blobs, 0 bytes.'])
+	})
+
+	it('keeps a checks_run record whose ranAt cannot be parsed outside the retained slots, and ranks only the rest', () => {
+		const unparseable = Array.from({ length: CHECKS_RUN_RETENTION + 2 }, (_, index) => ({ identity: `bad-${String(index).padStart(2, '0')}`, ranAt: index % 2 === 0 ? 'not a time' : undefined }))
+		const ranked = Array.from({ length: CHECKS_RUN_RETENTION + 3 }, (_, index) => ({ identity: `run-${String(index).padStart(2, '0')}`, ranAt: new Date(Date.UTC(2026, 9, 1, 0, index)).toISOString() }))
+		const kept = keptChecksRuns([...unparseable, ...ranked])
+		expect(kept.filter(identity => identity.startsWith('bad-')).sort()).toEqual(unparseable.map(record => record.identity))
+		expect(kept.filter(identity => identity.startsWith('run-')).sort()).toEqual(ranked.slice(3).map(record => record.identity))
 	})
 
 	it('keeps the identities named by a kept blob that is not JSON, including one behind a UTF-8 BOM', async () => {
