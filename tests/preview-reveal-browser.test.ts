@@ -141,7 +141,7 @@ describe('a reveal does nothing for a Widget it cannot or must not scroll to', (
 	]
 	for (const [name, markup] of cases) {
 		it(`${name}`, async () => {
-			const page = await open(`<div style="height:300px"></div>${markup.replace('<div data-widget-id="w"', '<div data-widget-id="w"')}<div style="height:3000px"></div>`)
+			const page = await open(`<div style="height:300px"></div>${markup}<div style="height:3000px"></div>`)
 			try {
 				expect(await reveal(page, 'w')).toBe('none')
 				expect(await scrollOf(page, 'root')).toEqual({ top: 0, left: 0 })
