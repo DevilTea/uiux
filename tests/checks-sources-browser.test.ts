@@ -122,7 +122,7 @@ describe('Checks sources and check states (issue #95)', () => {
 			expect(await stateOf(page, 'validation')).toBe('completed')
 			expect(await stateOf(page, 'translation')).toBe('completed')
 			expect(await stateOf(page, 'catalog')).toBe('completed')
-			// The Preview's translation warnings and Runtime errors are not gathered yet, and say so.
+			// The Preview's translation warnings and Runtime errors come from a live Preview (issue #347); none is open here, so they stay not checked.
 			expect(await stateOf(page, 'preview-translation')).toBe('not_checked')
 			expect(await stateOf(page, 'runtime')).toBe('not_checked')
 
