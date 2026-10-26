@@ -76,15 +76,24 @@ export interface FormalCaptureService {
 	capture(command: CaptureFormalEvidenceCommand): Promise<CaptureFormalEvidenceResult>
 	/** Replays an interaction recipe in the formal capture harness; the caller captures the context formally itself. */
 	replay(command: ReplayInteractionsCommand): Promise<InteractionReplayOutcome>
-	listEvidence(viewId?: string): Promise<readonly FormalEvidenceItem[]>
+	/**
+	 * The formal captures, or with `kinds` the Evidence records of exactly those kinds (the Submit for
+	 * review picker lists `checks_run`, `flow_trace` and `interaction_replay` records this way).
+	 */
+	listEvidence(viewId?: string, kinds?: readonly string[]): Promise<readonly FormalEvidenceItem[]>
 	/** Every readable View's current render-input digest, against which Evidence freshness is judged. */
 	viewRenderInputs(): Promise<readonly ViewRenderInput[]>
 }
 
 /** The formal capture record in a parsed artifact, if it is one; used to filter inside the read lock. */
 export function formalCaptureRecordOf(value: unknown): FormalEvidenceRecord | undefined {
+	return evidenceRecordOfKinds(value, ['formal_capture'])
+}
+
+/** The Evidence record in a parsed artifact when it is one of `kinds`. */
+function evidenceRecordOfKinds(value: unknown, kinds: readonly string[]): FormalEvidenceRecord | undefined {
 	const validation = validateFormalEvidenceRecord(value)
-	return validation.ok && validation.value.kind === 'formal_capture' ? validation.value : undefined
+	return validation.ok && kinds.includes(validation.value.kind) ? validation.value : undefined
 }
 
 export function createFormalCaptureService(
@@ -563,9 +572,9 @@ export function createFormalCaptureService(
 		}
 	}
 
-	async function listEvidence(viewId?: string): Promise<readonly FormalEvidenceItem[]> {
+	async function listEvidence(viewId?: string, kinds: readonly string[] = ['formal_capture']): Promise<readonly FormalEvidenceItem[]> {
 		// One snapshot under one shared lock, not one lock acquisition per artifact (issue #318).
-		const candidates = await persistence.artifacts.readAllCandidateJson<unknown, FormalEvidenceRecord>({ select: formalCaptureRecordOf })
+		const candidates = await persistence.artifacts.readAllCandidateJson<unknown, FormalEvidenceRecord>({ select: value => evidenceRecordOfKinds(value, kinds) })
 		const items: FormalEvidenceItem[] = []
 
 		for (const { identity, value: record } of candidates) {

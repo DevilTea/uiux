@@ -4,17 +4,22 @@ import { useI18n } from '#imports'
 import { CHANGE_DOMAINS, changeAffectsFormalCapture, changeScopeOfSubmission, type ChangeDomain } from '../../../src/domain/reviews/change-domains'
 import { useReadiness, type EvidenceEntry } from '../../composables/useReadiness'
 import { useWorkbench } from '../../composables/useWorkbench'
+import { useWorkbenchFormat } from '../../composables/useWorkbenchFormat'
 import type { FetchErrorDetails } from '../../utils/fetch-error'
-import { isSubmittable, type ReviewSubmissionDraft } from '../../utils/review-submission'
+import type { CitableEvidenceEntry } from '../../utils/readiness'
+import { isSubmittable, preselectedCitations, type ReviewSubmissionDraft } from '../../utils/review-submission'
 import { viewLocation } from '../../utils/workbench-routes'
 import WbErrorDescription from './WbErrorDescription.vue'
 
 /**
  * "Submit for review…" (brief c, section 12; roadmap R12): a human moves an open thread to
  * `ready-for-review` with structured change domains and formal Evidence of the anchored View at
- * its current revision (Part 1 / Part 7). Secondary and desktop-first. Evidence comes from the
- * same per-View list and freshness rules as the Readiness tab (brief f); only fresh, complete
- * captures can be referenced, because the server rejects anything else.
+ * its current revision (Part 1 / Part 7). Secondary and desktop-first. Any Evidence kind can be
+ * cited (Rule 01a11544-55b0-…): formal captures come from the same per-View list and freshness rules
+ * as the Readiness tab (brief f), and only fresh, complete ones can be referenced, because the server
+ * rejects anything else; Run Checks records, Flow traces and interaction replays are never refused as
+ * stale (Rule 01a11544-558b-…), so they are shown with when they ran or whether they are current.
+ * A change domain preselects the kind that proves it (owner ruling 6 of Discussion #241).
  */
 const props = defineProps<{
 	viewId: string
@@ -29,6 +34,7 @@ const open = defineModel<boolean>('open', { default: false })
 const { t } = useI18n()
 const workbench = useWorkbench()
 const readiness = useReadiness()
+const fmt = useWorkbenchFormat()
 
 const domains = ref<ChangeDomain[]>([])
 const evidence = ref<string[]>([])
@@ -44,6 +50,12 @@ const domainItems = computed(() => CHANGE_DOMAINS.map(domain => ({ label: t(`cha
 
 const entries = computed<readonly EvidenceEntry[]>(() => readiness.evidenceForView(props.viewId))
 const usable = computed(() => entries.value.filter(entry => entry.freshness.state === 'fresh'))
+const citable = computed<readonly CitableEvidenceEntry[]>(() => readiness.citableEvidenceForView(props.viewId))
+/** The kind each citable record has, to declare it as the record's own kind (Rule 01a11544-55b0-…). */
+const kindOf = computed(() => new Map<string, string>([
+	...entries.value.map(entry => [entry.digest, 'formal_capture'] as const),
+	...citable.value.map(entry => [entry.digest, entry.kind] as const),
+]))
 
 /**
  * Rules 01a115cd-c715-… and 01a115cd-c749-… (Discussion #1 c159: the Workbench uses the change
@@ -69,20 +81,82 @@ function freshnessNote(entry: EvidenceEntry): string {
 	return entry.freshness.reason ? t(`evidence.reason.${entry.freshness.reason}`, { subject: entry.freshness.subject ?? '' }) : t(`evidence.state.${entry.freshness.state}`)
 }
 
+function executionOf(record: CitableEvidenceEntry['record']): Record<string, unknown> {
+	return (record.executionContext ?? {}) as Record<string, unknown>
+}
+
+function citableLabel(entry: CitableEvidenceEntry): string {
+	const execution = executionOf(entry.record)
+	if (entry.kind === 'checks_run') return t('submit.checksLabel', { time: fmt.dateTime(typeof execution.ranAt === 'string' ? execution.ranAt : undefined) })
+	if (entry.kind === 'flow_trace') {
+		const flowName = workbench.flows.value.find(flow => flow.key === execution.flowId)?.summary.name
+		return [flowName || t('submit.flowGone'), execution.locale, execution.viewportId, execution.themeId].join(' · ')
+	}
+	return [execution.variantName ?? t('ctx.base'), execution.viewportId, execution.locale, execution.themeId].join(' · ')
+}
+
+/** What the record says of itself; a trace also says whether it is current, which never stops it being cited. */
+function citableNote(entry: CitableEvidenceEntry): string {
+	const data = (entry.record.data ?? {}) as Record<string, unknown>
+	if (entry.kind === 'checks_run') {
+		const findings = Array.isArray(data.findings) ? data.findings as readonly { severity?: string }[] : []
+		const counts = { errors: findings.filter(finding => finding.severity === 'error').length, warnings: findings.filter(finding => finding.severity === 'warning').length }
+		return entry.record.coverage.complete ? t('submit.checksNote', counts) : t('submit.checksIncomplete', counts)
+	}
+	if (entry.kind === 'flow_trace') {
+		const freshness = entry.freshness
+		if (!freshness || freshness.state === 'fresh') return t('submit.evidenceCurrent')
+		return freshness.reason ? t(`evidence.reason.${freshness.reason}`, { subject: freshness.subject ?? '' }) : t(`evidence.state.${freshness.state}`)
+	}
+	const assertions = Array.isArray(data.assertions) ? data.assertions as readonly { result?: string }[] : []
+	return t('submit.replayNote', { passed: assertions.filter(assertion => assertion.result === 'pass').length, total: assertions.length })
+}
+
+function citableWarns(entry: CitableEvidenceEntry): boolean {
+	if (entry.kind === 'checks_run') return !entry.record.coverage.complete
+	if (entry.kind === 'flow_trace') return entry.freshness?.state !== 'fresh'
+	return ((entry.record.data as { assertions?: readonly { result?: string }[] } | undefined)?.assertions ?? []).some(assertion => assertion.result !== 'pass')
+}
+
+const citableGroups = computed(() => (['checks_run', 'flow_trace', 'interaction_replay'] as const)
+	.map(kind => ({ kind, entries: citable.value.filter(entry => entry.kind === kind) }))
+	.filter(group => group.entries.length > 0))
+
 function toggle(digest: string, on: boolean): void {
 	evidence.value = on ? [...new Set([...evidence.value, digest])] : evidence.value.filter(item => item !== digest)
 }
 
-const draft = computed<ReviewSubmissionDraft>(() => ({ changeDomains: domains.value, evidence: evidence.value, reason: reason.value }))
+const draft = computed<ReviewSubmissionDraft>(() => ({
+	changeDomains: domains.value,
+	evidence: evidence.value.map(digest => ({ kind: kindOf.value.get(digest) ?? 'formal_capture', evidence: digest })),
+	reason: reason.value,
+}))
 const ready = computed(() => isSubmittable(draft.value))
+
+// Owner ruling 6 of Discussion #241: a change domain preselects the kind that proves it, once the
+// records are read; a domain that was already applied is not applied again, so unticking sticks.
+const preselectedFor = new Set<string>()
+function preselect(): void {
+	for (const domain of [...preselectedFor]) if (!domains.value.includes(domain as ChangeDomain)) preselectedFor.delete(domain)
+	if (readiness.citableLoading.value || readiness.evidenceLoading.value) return
+	for (const domain of domains.value) {
+		if (preselectedFor.has(domain)) continue
+		preselectedFor.add(domain)
+		const picked = preselectedCitations(domain, citable.value).map(citation => citation.evidence)
+		if (picked.length) evidence.value = [...new Set([...evidence.value, ...picked])]
+	}
+}
+watch([domains, citable, () => readiness.citableLoading.value, () => readiness.evidenceLoading.value], preselect, { deep: true })
 
 watch(open, (value) => {
 	if (!value) return
 	domains.value = []
 	reason.value = ''
-	// Nothing is preselected: a submission claims exactly the Evidence the person chose.
+	preselectedFor.clear()
+	// No domain is chosen yet, so nothing is preselected: a submission claims exactly the Evidence the person chose.
 	evidence.value = []
 	void readiness.loadEvidence(true)
+	void readiness.loadCitableEvidence()
 })
 
 const allUsableSelected = computed(() => usable.value.length > 0 && usable.value.every(entry => evidence.value.includes(entry.digest)))
@@ -175,7 +249,10 @@ async function send(): Promise<void> {
           </p>
         </UFormField>
 
-        <fieldset class="grid gap-2">
+        <fieldset
+          ref="evidenceList"
+          class="grid gap-2"
+        >
           <legend class="mb-1 text-sm font-medium text-default">
             {{ t('submit.evidence') }} <span class="text-error">*</span>
           </legend>
@@ -197,7 +274,7 @@ async function send(): Promise<void> {
             {{ t('submit.evidenceHelp', { view: viewName }) }}
           </p>
           <div
-            v-if="readiness.evidenceLoading.value && !entries.length"
+            v-if="(readiness.evidenceLoading.value || readiness.citableLoading.value) && !entries.length && !citable.length"
             class="grid gap-2"
           >
             <USkeleton
@@ -208,7 +285,7 @@ async function send(): Promise<void> {
             />
           </div>
           <div
-            v-else-if="!usable.length"
+            v-else-if="!usable.length && !citable.length"
             class="rounded-md border border-dashed border-default p-3 text-sm text-muted"
             data-submit-no-evidence
           >
@@ -224,9 +301,14 @@ async function send(): Promise<void> {
               @click="open = false"
             />
           </div>
+          <p
+            v-if="entries.length && citableGroups.length"
+            class="text-xs font-medium text-muted"
+          >
+            {{ t('submit.kind.formal_capture') }}
+          </p>
           <ul
             v-if="entries.length"
-            ref="evidenceList"
             class="max-h-56 divide-y divide-default overflow-y-auto rounded-md border border-default"
             data-submit-evidence
           >
@@ -255,6 +337,43 @@ async function send(): Promise<void> {
               >{{ entry.digest.slice(7, 15) }}</span>
             </li>
           </ul>
+          <template
+            v-for="group in citableGroups"
+            :key="group.kind"
+          >
+            <p class="mt-1 text-xs font-medium text-muted">
+              {{ t(`submit.kind.${group.kind}`) }}
+            </p>
+            <ul
+              class="max-h-40 divide-y divide-default overflow-y-auto rounded-md border border-default"
+              :data-submit-evidence-kind="group.kind"
+            >
+              <li
+                v-for="entry in group.entries"
+                :key="entry.digest"
+                class="flex min-h-(--wb-target) items-center gap-3 px-3 py-2"
+                :data-submit-evidence-digest="entry.digest"
+              >
+                <UCheckbox
+                  :model-value="evidence.includes(entry.digest)"
+                  :aria-label="citableLabel(entry)"
+                  @update:model-value="(value: boolean | 'indeterminate') => toggle(entry.digest, value === true)"
+                />
+                <span class="min-w-0 flex-1">
+                  <span class="block truncate font-mono text-xs text-highlighted">{{ citableLabel(entry) }}</span>
+                  <span
+                    class="block text-xs"
+                    :class="citableWarns(entry) ? 'text-warning' : 'text-muted'"
+                    :data-submit-evidence-note="entry.kind"
+                  >{{ citableNote(entry) }}</span>
+                </span>
+                <span
+                  class="shrink-0 font-mono text-xs text-dimmed"
+                  translate="no"
+                >{{ entry.digest.slice(7, 15) }}</span>
+              </li>
+            </ul>
+          </template>
         </fieldset>
 
         <UFormField

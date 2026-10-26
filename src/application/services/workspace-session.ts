@@ -231,7 +231,7 @@ export interface WorkspaceApplicationSession {
 	captureInteractionEvidence(command: CaptureInteractionEvidenceCommand): Promise<CaptureInteractionEvidenceResult>
 	/** Clauses 01a17670-d442-7068-8a08-c6e4ab9c09ae and 01a17671-11bf-7711-887b-121a02602cf4: the Workbench's Run Checks result as Evidence. */
 	recordChecksRun(input: unknown): Promise<RecordChecksRunResult>
-	listEvidence(viewId?: string): Promise<readonly FormalEvidenceItem[]>
+	listEvidence(viewId?: string, kinds?: readonly string[]): Promise<readonly FormalEvidenceItem[]>
 	/** Every readable View's current render-input digest (Rule 01a115cd-c5a5-…). */
 	viewRenderInputs(): Promise<readonly ViewRenderInput[]>
 	/** The Product Kit Checks (issue #141 Part 14 decision 7), run on request and non-blocking. */

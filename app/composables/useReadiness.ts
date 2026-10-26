@@ -8,6 +8,10 @@ import { describeFetchError, type FetchErrorDetails } from '../utils/fetch-error
 import {
 	contextFromRecord,
 	evidenceFreshness,
+	flowTraceFreshness,
+	CITABLE_EVIDENCE_KINDS,
+	type CitableEvidenceEntry,
+	type CitableEvidenceKind,
 	unchangedSinceCapture,
 	type CaptureContext,
 	type EvidenceFreshness,
@@ -84,6 +88,9 @@ const currentAdapters = shallowRef<Readonly<{ adapters?: readonly EvidenceAdapte
  * 01a115cd-c5a5-…: the View condition compares it, not the View revision).
  */
 const viewRenderInputs = shallowRef<ReadonlyMap<string, EvidenceViewRenderInput>>(new Map())
+/** The non-capture Evidence records a submission may cite, read when the Submit for review dialog opens. */
+const citableItems = shallowRef<readonly EvidenceItem[]>([])
+const citableLoading = shallowRef(false)
 const evidenceLoaded = shallowRef(false)
 const evidenceLoading = shallowRef(false)
 const evidenceError = shallowRef<FetchErrorDetails>()
@@ -192,14 +199,13 @@ export function useReadiness() {
 		void loadEvidence(true)
 	})
 
-	const evidenceEntries = computed<readonly EvidenceEntry[]>(() => {
+	const stalenessContext = computed(() => {
 		const inputs = viewRenderInputs.value
-		const revisions = new Map(views.value.map(view => [view.key, view.revision]))
 		const allViews = views.value.flatMap((view) => {
 			const input = inputs.get(view.key)
 			return input ? [{ key: view.key, renderInputDigest: input.renderInputDigest }] : []
 		})
-		const stalenessContext = {
+		return {
 			allViews,
 			workspace: workspace.value,
 			discoveredLocales: discoveredLocales.value,
@@ -207,16 +213,58 @@ export function useReadiness() {
 			...currentProductKit.value,
 			...currentAdapters.value,
 		}
+	})
+
+	const evidenceEntries = computed<readonly EvidenceEntry[]>(() => {
+		const inputs = viewRenderInputs.value
+		const revisions = new Map(views.value.map(view => [view.key, view.revision]))
+		const baseContext = stalenessContext.value
 		return evidenceItems.value.map((item) => {
 			const context = contextFromRecord(item.record)
 			return {
 				digest: item.digest,
 				record: item.record,
 				...(context ? { context } : {}),
-				freshness: evidenceFreshness(item.record, unchangedSinceCapture(item.record, inputs, revisions, stalenessContext)),
+				freshness: evidenceFreshness(item.record, unchangedSinceCapture(item.record, inputs, revisions, baseContext)),
 			}
 		})
 	})
+
+	/** Reads the `checks_run`, `flow_trace` and `interaction_replay` records the Submit for review picker lists. */
+	async function loadCitableEvidence(): Promise<void> {
+		citableLoading.value = true
+		try {
+			const items = await uiux.listEvidenceOfKinds<EvidenceItem>(CITABLE_EVIDENCE_KINDS)
+			citableItems.value = items.filter(item => CITABLE_EVIDENCE_KINDS.includes(item?.record?.kind as CitableEvidenceKind))
+		}
+		catch (cause) {
+			citableItems.value = []
+			evidenceError.value = describeFetchError(cause, t('evidence.loadFailed'))
+		}
+		finally { citableLoading.value = false }
+	}
+
+	/**
+	 * The citable records for one View, by kind: every `checks_run` run (newest first by `ranAt`, a
+	 * point-in-time record with no currency), every `flow_trace` with its freshness (by name, never
+	 * refused as stale), and the `interaction_replay` records of this View.
+	 */
+	function citableEvidenceForView(viewId: string | undefined): readonly CitableEvidenceEntry[] {
+		if (!viewId) return []
+		const ranAt = (record: FormalEvidenceRecord) => String((record.executionContext as Record<string, unknown>)?.ranAt ?? '')
+		const captures = new Map(evidenceItems.value.map(item => [item.digest, item.record]))
+		const traceContext = { ...stalenessContext.value, flows: flows.value.map(flow => ({ key: flow.key, revision: flow.revision })), captures }
+		const entries: CitableEvidenceEntry[] = []
+		for (const item of citableItems.value) {
+			const kind = item.record.kind as CitableEvidenceKind
+			if (kind === 'interaction_replay' && (item.record.executionContext as Record<string, unknown>)?.viewId !== viewId) continue
+			entries.push({ kind, digest: item.digest, record: item.record, ...(kind === 'flow_trace' ? { freshness: flowTraceFreshness(item.record, traceContext) } : {}) })
+		}
+		const rank = (entry: CitableEvidenceEntry) => CITABLE_EVIDENCE_KINDS.indexOf(entry.kind)
+		return entries.sort((a, b) => rank(a) - rank(b)
+			|| (a.kind === 'checks_run' ? ranAt(b.record).localeCompare(ranAt(a.record)) : 0)
+			|| a.digest.localeCompare(b.digest))
+	}
 
 	function evidenceForView(viewId: string | undefined): readonly EvidenceEntry[] {
 		if (!viewId) return []
@@ -342,6 +390,9 @@ export function useReadiness() {
 		evidenceLoading,
 		evidenceError,
 		loadEvidence,
+		loadCitableEvidence,
+		citableLoading,
+		citableEvidenceForView,
 		evidenceForView,
 		evidenceSummary,
 		signature,

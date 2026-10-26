@@ -91,6 +91,12 @@ export function useUiuxClient() {
 		return result.items
 	}
 
+	/** The Evidence records of exactly these kinds (`checks_run`, `flow_trace`, `interaction_replay`), as the Submit for review picker lists them. */
+	async function listEvidenceOfKinds<T>(kinds: readonly string[]): Promise<readonly T[]> {
+		const result = await $fetch<{ items: T[] }>('/api/evidence/list', { query: { kinds: kinds.join(',') } })
+		return result.items
+	}
+
 	/**
 	 * The formal Evidence with what its freshness is judged against: each View's current
 	 * render-input digest (`views`), and the current Product Kit provenance, `productKit`, or
@@ -144,6 +150,7 @@ export function useUiuxClient() {
 		readVersionResource,
 		listResources,
 		listEvidence,
+		listEvidenceOfKinds,
 		listEvidenceForFreshness,
 		assessHandoff,
 		previewAdapters,
