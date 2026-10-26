@@ -9,12 +9,13 @@ import { sha256Identity } from '../../domain/artifacts/schema'
 import { type AdapterProvenance, type AdapterWidgetCatalogEntry } from '../../domain/adapters/schema'
 import { validateAssetBinding } from '../../domain/assets/schema'
 import {
+	FLOW_TRACE_KIND,
+	validateFormalEvidenceRecord,
 	type EvidenceReference,
 	type FormalEvidenceRecord,
 } from '../../domain/evidence/schema'
 import { renderInputDigest } from '../../domain/evidence/render-input-digest'
-import { formalCaptureRecordOf } from './formal-capture'
-import { evaluateEvidenceStaleness } from '../../domain/evidence/staleness'
+import { evaluateEvidenceStaleness, evaluateFlowTraceStaleness } from '../../domain/evidence/staleness'
 import {
 	mayClaimImplementationReady,
 	validateHandoffManifest,
@@ -615,42 +616,50 @@ export function createHandoffExportService(persistence: FileNativePersistence, o
 		// 7. Evidence Records in closure
 		const evidenceRefs: EvidenceReference[] = []
 		const contextsInClosure: ResolvedRenderContext[] = []
-		const artifactCandidates = await persistence.artifacts.readAllCandidateJson<unknown, FormalEvidenceRecord>({ select: formalCaptureRecordOf })
+		const evidenceCandidates = await persistence.artifacts.readAllCandidateJson<unknown, FormalEvidenceRecord>({ select: handoffEvidenceRecordOf })
+		const artifactCandidates = evidenceCandidates.filter(candidate => candidate.value.kind === 'formal_capture')
+		const traceCandidates = evidenceCandidates.filter(candidate => candidate.value.kind === FLOW_TRACE_KIND)
 		// Rule 01a115cd-c5a5-…: each closure View's current render-input digest, taken once.
 		const stalenessViews = [...viewSnapshots.entries()].map(([key, snapshot]) => ({ key, renderInputDigest: renderInputDigest(snapshot.snapshot) }))
 		const viewEvidenceMap = new Map<string, FormalEvidenceRecord[]>()
 		const staleEvidenceByView = new Map<string, number>()
 
+		const stalenessContext = {
+			allViews: stalenessViews,
+			workspace: wsRead,
+			discoveredLocales: Object.keys(currentLocaleRevisions),
+			localeRevisions: currentLocaleRevisions,
+			...productKitFreshnessContext(currentProductKit),
+			...adapterFreshnessContext(currentAdapters),
+		}
+		// A formal capture and the screenshots it stores enter the bundle as derived artifacts of its View.
+		const referenceCapture = (identity: string, capture: FormalEvidenceRecord, viewId: string) => {
+			referencedArtifacts.set(identity, {
+				kind: 'formal-evidence-record',
+				artifact: identity,
+				context: { viewId },
+			})
+			for (const ref of capture.artifactRefs) {
+				referencedArtifacts.set(ref, {
+					kind: 'screenshot',
+					artifact: ref,
+					context: { viewId },
+				})
+			}
+		}
+
 		for (const { identity, value: formalRec } of artifactCandidates) {
 			const execCtx = formalRec.executionContext as Record<string, unknown> | undefined
 			const evViewId = execCtx?.viewId as string | undefined
 			if (evViewId && viewsToInclude.has(evViewId)) {
-				const staleness = evaluateEvidenceStaleness(formalRec, {
-					allViews: stalenessViews,
-					workspace: wsRead,
-					discoveredLocales: Object.keys(currentLocaleRevisions),
-					localeRevisions: currentLocaleRevisions,
-					...productKitFreshnessContext(currentProductKit),
-					...adapterFreshnessContext(currentAdapters),
-				})
+				const staleness = evaluateEvidenceStaleness(formalRec, stalenessContext)
 
 				if (!staleness.isStale) {
 					evidenceRefs.push({
 						kind: formalRec.kind,
 						evidence: identity,
 					})
-					referencedArtifacts.set(identity, {
-						kind: 'formal-evidence-record',
-						artifact: identity,
-						context: { viewId: evViewId },
-					})
-					for (const ref of formalRec.artifactRefs) {
-						referencedArtifacts.set(ref, {
-							kind: 'screenshot',
-							artifact: ref,
-							context: { viewId: evViewId },
-						})
-					}
+					referenceCapture(identity, formalRec, evViewId)
 					const list = viewEvidenceMap.get(evViewId) ?? []
 					list.push(formalRec)
 					viewEvidenceMap.set(evViewId, list)
@@ -681,6 +690,31 @@ export function createHandoffExportService(persistence: FileNativePersistence, o
 				else {
 					staleEvidenceByView.set(evViewId, (staleEvidenceByView.get(evViewId) ?? 0) + 1)
 				}
+			}
+		}
+
+		// Rule 01a11544-6734-7a24-a957-e23ddeb3e396: the fresh `flow_trace` records of the closure's Flows,
+		// and the captures they reference, enter the bundle as derived artifacts, while the canonical Flow
+		// stays an authored resource. A trace is judged like a capture (`evaluateFlowTraceStaleness`) and,
+		// like a stale capture, left out. Records carry no capture time, so every fresh trace of a Flow is
+		// referenced, as every fresh capture of a View is. No Rule makes Flow Evidence required for readiness,
+		// so a Flow without a fresh trace adds no diagnostic.
+		const capturesByIdentity = new Map(artifactCandidates.map(candidate => [candidate.identity, candidate.value]))
+		const traceContext = {
+			...stalenessContext,
+			flows: [...flowSnapshots.entries()].map(([key, snapshot]) => ({ key, revision: snapshot.revision })),
+			captures: capturesByIdentity,
+		}
+		for (const { identity, value: trace } of traceCandidates) {
+			const flowId = (trace.executionContext as Record<string, unknown>).flowId
+			if (typeof flowId !== 'string' || !flowSnapshots.has(flowId)) continue
+			if (evaluateFlowTraceStaleness(trace, traceContext).isStale) continue
+			evidenceRefs.push({ kind: trace.kind, evidence: identity })
+			referencedArtifacts.set(identity, { kind: 'flow-trace-record', artifact: identity, context: { flowId } })
+			for (const ref of trace.evidenceRefs ?? []) {
+				const capture = capturesByIdentity.get(ref.evidence)
+				const captureViewId = (capture?.executionContext as Record<string, unknown> | undefined)?.viewId
+				if (capture && typeof captureViewId === 'string') referenceCapture(ref.evidence, capture, captureViewId)
 			}
 		}
 
@@ -1224,6 +1258,15 @@ function collectAssetReferencesFromIr(
 
 	scan(ir, '/ir')
 	return { assetIds, diagnostics }
+}
+
+/**
+ * The formal capture or `flow_trace` record in a parsed artifact, if it is one: the Evidence kinds a
+ * Handoff reads (Rule 01a11544-6734-7a24-a957-e23ddeb3e396); any other artifact is ignored.
+ */
+function handoffEvidenceRecordOf(value: unknown): FormalEvidenceRecord | undefined {
+	const validation = validateFormalEvidenceRecord(value)
+	return validation.ok && (validation.value.kind === 'formal_capture' || validation.value.kind === FLOW_TRACE_KIND) ? validation.value : undefined
 }
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
