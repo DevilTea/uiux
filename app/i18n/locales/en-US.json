@@ -1019,6 +1019,13 @@
     "variantInvalid": "This Variant can't run.",
     "switchToBase": "Switch to base state",
     "mappingPaused": "Precise highlight paused. The preview can't be measured right now.",
+    "precisionUnavailable": "Precise highlighting unavailable",
+    "precisionAnnounce": {
+      "latched": "Precise highlighting is unavailable: refining the outline of this Widget failed.",
+      "exhausted": "Precise highlighting is unavailable: finer outlines could not be drawn at this zoom.",
+      "unproven-mapping": "Precise highlighting is unavailable: the preview's transform cannot be proven precise.",
+      "invalid-mapping": "Precise highlighting is unavailable: the preview cannot be measured precisely."
+    },
     "widgetMissing": "Widget {id} isn't in this View anymore.",
     "viewMissing": "View not found. Stayed on the current page.",
     "notVisible": "Not visible in this state",

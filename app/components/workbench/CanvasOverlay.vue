@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { useI18n } from '#imports'
 import { mapContourAffine, mapPointAffine, type AffineOuterMapping } from '../../../src/preview/outer-precision'
-import type { Contour } from '../../../src/preview/protocol/schema'
+import type { Contour, WidgetRect } from '../../../src/preview/protocol/schema'
 import type { HoverCandidate, SelectionGeometry } from '../../composables/usePreviewSession'
 
 /**
@@ -19,6 +19,8 @@ const props = defineProps<{
 	widgetType?: string
 	/** The runtime's hover candidate (Part 3): a transient, non-interactive outline beneath every other mark. */
 	hover?: HoverCandidate
+	/** The highlight is hidden because its contours cannot be drawn precisely: only a notice, anchored on the regions' bounds. */
+	precisionNotice?: Readonly<{ widgetId: string; reason?: string; bounds?: WidgetRect }>
 	hoverType?: string
 	/** Comment mode is re-anchoring a thread: the chip says "Re-anchor to {type}". */
 	reanchor?: boolean
@@ -37,11 +39,12 @@ const CHIP_INSET = 4
 
 // Chip widths are measured so a chip can flip or clamp inside the stage (a narrow phone stage
 // would otherwise clip a label anchored near its right edge).
-type ChipName = 'type' | 'size' | 'hover'
-const chipWidths = reactive<Record<ChipName, number>>({ type: 0, size: 0, hover: 0 })
+type ChipName = 'type' | 'size' | 'hover' | 'notice'
+const chipWidths = reactive<Record<ChipName, number>>({ type: 0, size: 0, hover: 0, notice: 0 })
 const typeChip = ref<HTMLElement>()
 const sizeChip = ref<HTMLElement>()
 const hoverChip = ref<HTMLElement>()
+const noticeChip = ref<HTMLElement>()
 const chipNames = new WeakMap<Element, ChipName>()
 const chipObserver = typeof ResizeObserver === 'undefined'
 	? undefined
@@ -61,6 +64,7 @@ function observeChip(name: ChipName, element: HTMLElement | undefined, previous:
 watch(typeChip, (element, previous) => observeChip('type', element, previous), { flush: 'post' })
 watch(sizeChip, (element, previous) => observeChip('size', element, previous), { flush: 'post' })
 watch(hoverChip, (element, previous) => observeChip('hover', element, previous), { flush: 'post' })
+watch(noticeChip, (element, previous) => observeChip('notice', element, previous), { flush: 'post' })
 onBeforeUnmount(() => chipObserver?.disconnect())
 
 /** Keeps a chip of `width` starting at `left` inside the stage; with no stage, it is unchanged. */
@@ -127,6 +131,19 @@ const hoverMark = computed(() => {
 	}
 })
 
+/**
+ * Precise highlighting is unavailable (the display-tolerance gate or the refinement latch): no outline and
+ * no labels, only this notice on the aggregate bounds of the regions (Rule 01a11687-2d04-704b-887a-4b599e54e887).
+ */
+const notice = computed(() => {
+	const { mapping, precisionNotice } = props
+	const bounds = precisionNotice?.bounds
+	if (!mapping || !precisionNotice || !bounds) return undefined
+	const topLeft = mapPointAffine({ x: bounds.x, y: bounds.y }, mapping)
+	const bottomRight = mapPointAffine({ x: bounds.x + bounds.width, y: bounds.y + bounds.height }, mapping)
+	return { left: placeStartChip(topLeft.x, bottomRight.x, chipWidths.notice), top: chipTop(topLeft.y) }
+})
+
 const selection = computed(() => {
 	const { mapping, geometry } = props
 	// The RootShell is the frame itself; its edge already marks it.
@@ -188,6 +205,13 @@ const selection = computed(() => {
         :style="{ left: `${hoverMark.chip.left}px`, top: `${hoverMark.chip.top}px` }"
       >{{ hoverMark.chip.text }}</span>
     </template>
+    <span
+      v-if="notice"
+      ref="noticeChip"
+      class="blueprint-chip is-prose"
+      data-precision-unavailable
+      :style="{ left: `${notice.left}px`, top: `${notice.top}px` }"
+    >{{ t('canvas.precisionUnavailable') }}</span>
     <template v-if="selection">
       <svg
         class="absolute inset-0 size-full overflow-visible"

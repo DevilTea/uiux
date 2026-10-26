@@ -1019,6 +1019,13 @@
     "variantInvalid": "這個 Variant 無法執行。",
     "switchToBase": "切換為基本狀態",
     "mappingPaused": "已暫停精確標示。目前無法量測預覽畫面。",
+    "precisionUnavailable": "無法精確標示",
+    "precisionAnnounce": {
+      "latched": "無法精確標示：此 Widget 的輪廓精細化失敗。",
+      "exhausted": "無法精確標示：在這個縮放比例下無法繪出更精細的輪廓。",
+      "unproven-mapping": "無法精確標示：無法證明預覽畫面的轉換足夠精確。",
+      "invalid-mapping": "無法精確標示：目前無法精確量測預覽畫面。"
+    },
     "widgetMissing": "Widget {id} 已不在這個 View 中。",
     "viewMissing": "找不到 View，已停留在目前頁面。",
     "notVisible": "在此狀態下不可見",

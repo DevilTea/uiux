@@ -290,6 +290,26 @@ const hoverCandidate = computed(() => {
 	if (candidate.purpose === 'inspection' && candidate.widgetId === highlightGeometry.value?.widgetId) return undefined
 	return candidate
 })
+/**
+ * What the overlay draws of the highlight: the Widget's contours only while every one meets the display
+ * tolerance under the current mapping (Rule 01a11687-32da-7ea6-83aa-d7451aaf0111). Otherwise the whole
+ * highlight stays hidden, and only an unavailable precision says so.
+ */
+// The verdict is taken under the mapping this component draws with, never under the one the session
+// last heard of, so that no frame draws against a verdict of an older mapping.
+const highlightVerdict = computed(() => preview.highlightPrecisionFor(mapping.value))
+const drawnHighlight = computed(() => {
+	const geometry = highlightGeometry.value
+	const precision = highlightVerdict.value
+	return geometry && precision.status === 'precise' && precision.geometryRevision === geometry.geometryRevision
+		? { ...geometry, regions: precision.regions }
+		: undefined
+})
+const precisionNotice = computed(() => {
+	const geometry = highlightGeometry.value
+	const precision = highlightVerdict.value
+	return geometry && precision.status === 'unavailable' ? { widgetId: geometry.widgetId, reason: precision.reason, ...(precision.bounds ? { bounds: precision.bounds } : {}) } : undefined
+})
 const pinsTracked = computed(() => preview.pinPlacements.value.length > 0)
 /** Threads whose Widget is gone (never drawn, never rebound): the unplaced tray (brief c, section 6). */
 const unplacedThreads = computed(() => comments?.threads.value.filter(item => !item.anchorValid && item.status !== 'resolved' && comments.inFilter(item)) ?? [])
@@ -477,6 +497,10 @@ watch(() => ({ ...contextSummary.value }), (next, previous) => {
 	else if (next.locale !== previous.locale) announcement.value = t('canvas.announceContext', { label: t('ctx.locale'), value: next.locale })
 	else if (next.viewport !== previous.viewport) announcement.value = t('canvas.announceContext', { label: t('ctx.viewport'), value: next.viewport })
 	else if (next.theme !== previous.theme) announcement.value = t('canvas.announceContext', { label: t('ctx.theme'), value: next.theme })
+})
+// Precise highlighting that is unavailable is said, not only drawn: the overlay is hidden from assistive technology.
+watch(() => precisionNotice.value?.reason, (reason) => {
+	if (reason) announcement.value = t(`canvas.precisionAnnounce.${reason}`)
 })
 watch(() => preview.selectionGeometry.value, (geometry, previous) => {
 	if (!geometry || geometry.widgetId === 'root' || geometry.widgetId === previous?.widgetId) return
@@ -749,7 +773,8 @@ function switchToBase(): void {
             <CanvasOverlay
               v-if="showFrame && overlayActive"
               :mapping="mapping"
-              :geometry="highlightGeometry"
+              :geometry="drawnHighlight"
+              :precision-notice="precisionNotice"
               :widget-type="widgetNode?.type"
               :hover="hoverCandidate"
               :hover-type="hoverNode?.type"
