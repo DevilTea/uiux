@@ -13,6 +13,7 @@ import { validateI18nOccurrenceLocator, validateI18nWarning, type I18nOccurrence
 import { validateProductKitProvenance, type ProductKitProvenance } from '../product-kit/provenance'
 import { validateAdapterProvenanceMembers } from '../adapters/schema'
 import type { EvidenceAdapterProvenance } from './adapter-provenance'
+import { CHECKS_RUN_KIND, validateChecksRunEvidence } from './checks-run'
 
 export type EvidenceKind = string
 
@@ -100,6 +101,7 @@ export function validateFormalEvidenceRecord(input: unknown, path = ''): Validat
 	}
 	if (record.kind === 'formal_capture') validateFormalTranslationEvidence(record, path, v)
 	if (record.kind === FLOW_TRACE_KIND) validateFlowTraceEvidence(record, path, v)
+	if (record.kind === CHECKS_RUN_KIND) validateChecksRunEvidence(record, path, v)
 	if (Object.hasOwn(record, 'id'))
 		v.issue('evidence.parallel_identity_forbidden', `${path}/id`, 'Formal evidence identity is the SHA-256 digest of its immutable serialized bytes.')
 	return v.finish<FormalEvidenceRecord>(input)

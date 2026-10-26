@@ -34,6 +34,7 @@ import type {
 } from '../services/review-authoring'
 import type { CreateViewCommand, DecideDecisionCommand, DecisionLifecycleCommand, DeleteViewCommand, UpdateViewMetadataCommand, UpdateViewSpecCommand, UpdateViewStructureCommand, ViewAuthoringResult } from '../services/view-authoring'
 import type { PointResourceRead, ValidateFlowResult, WorkspaceApplicationSession } from '../services/workspace-session'
+import type { RecordChecksRunResult } from '../services/checks-run-evidence'
 import type { CaptureFlowEvidenceCommand, CaptureFlowEvidenceResult } from '../services/flow-evidence'
 import type { UpdateWorkspaceSettingsCommand, WorkspaceAuthoringResult } from '../services/workspace-authoring'
 import type {
@@ -229,6 +230,8 @@ export interface ScopedWorkspaceSession {
 	captureFormalEvidence(command: CaptureFormalEvidenceCommand): Promise<CaptureFormalEvidenceResult | AccessRefusal>
 	captureFlowEvidence(command: CaptureFlowEvidenceCommand): Promise<CaptureFlowEvidenceResult | AccessRefusal>
 	validateFlow(flowId: string): Promise<ValidateFlowResult>
+	/** The Workbench's Run Checks result stored as a `checks_run` Evidence record: `evidence.capture`, refused before anything is validated or written. */
+	recordChecksRun(input: unknown): Promise<RecordChecksRunResult | AccessRefusal>
 	/** Run Checks' Product Kit part: a Workbench session with `evidence.capture`; its props and emits check also needs `product-kit.source.read`. */
 	runProductKitChecks(): Promise<ProductKitChecksResult | AccessRefusal>
 	exportHandoff(command: ExportHandoffCommand): Promise<ExportHandoffResult | AccessRefusal>
@@ -671,6 +674,10 @@ export function createScopedWorkspaceSession(
 		async captureFlowEvidence(command) {
 			const denied = authorizeOperation(principal, 'captureFlowEvidence')
 			return denied ? refusalFromScope('evidence', denied) : app.captureFlowEvidence(command)
+		},
+		async recordChecksRun(input) {
+			const denied = authorizeOperation(principal, 'recordChecksRun')
+			return denied ? refusalFromScope('evidence', denied) : app.recordChecksRun(input)
 		},
 		async validateFlow(flowId) { assert('validateFlow'); return app.validateFlow(flowId) },
 		async runProductKitChecks() {

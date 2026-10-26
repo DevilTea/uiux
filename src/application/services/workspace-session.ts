@@ -114,6 +114,7 @@ import {
 } from './history-diff'
 import { createHistoryRestoreService, type RestoreGuard, type RestoreResourceVersionCommand, type RestoreResourceVersionOutcome } from './history-restore'
 import { readViewReferenceTarget } from './flow-references'
+import { createChecksRunEvidenceService, type RecordChecksRunResult } from './checks-run-evidence'
 import { createFlowEvidenceService, type CaptureFlowEvidenceCommand, type CaptureFlowEvidenceResult } from './flow-evidence'
 import { createViewAssetBindingCheck, type AssetCatalog } from './asset-bindings'
 import { createHistoryPreviewService, type ReadVersionBlobOutcome, type ReadVersionResourceOutcome, type ResolveVersionAssetsOutcome } from './history-preview'
@@ -225,6 +226,8 @@ export interface WorkspaceApplicationSession {
 	validateFlow(flowId: string): Promise<ValidateFlowResult>
 	/** Clause 01a172cc-e195-711b-bfa9-5de6c1c8ff87: formal UX Flow Evidence. */
 	captureFlowEvidence(command: CaptureFlowEvidenceCommand): Promise<CaptureFlowEvidenceResult>
+	/** Clauses 01a17670-d442-7068-8a08-c6e4ab9c09ae and 01a17671-11bf-7711-887b-121a02602cf4: the Workbench's Run Checks result as Evidence. */
+	recordChecksRun(input: unknown): Promise<RecordChecksRunResult>
 	listEvidence(viewId?: string): Promise<readonly FormalEvidenceItem[]>
 	/** Every readable View's current render-input digest (Rule 01a115cd-c5a5-…). */
 	viewRenderInputs(): Promise<readonly ViewRenderInput[]>
@@ -311,6 +314,7 @@ export function createWorkspaceApplicationSession(
 		},
 		captureFormal: command => formalCapture.capture(command),
 	})
+	const checksRunEvidence = createChecksRunEvidenceService(persistence)
 	const handoffExport = createHandoffExportService(persistence, {
 		...(options?.checkAdapterSet ? { checkAdapterSet: options.checkAdapterSet } : {}),
 		adapterProvenance: adapterProvenanceSource,
@@ -564,6 +568,7 @@ export function createWorkspaceApplicationSession(
 		captureFormalEvidence: formalCapture.capture,
 		validateFlow,
 		captureFlowEvidence: flowEvidence.capture,
+		recordChecksRun: checksRunEvidence.record,
 		listEvidence: formalCapture.listEvidence,
 		viewRenderInputs: formalCapture.viewRenderInputs,
 		runProductKitChecks: command => productKitChecks.run({ ...(command?.readSource === false ? { readSource: false } : {}) }),
