@@ -36,6 +36,7 @@ import type { CreateViewCommand, DecideDecisionCommand, DecisionLifecycleCommand
 import type { PointResourceRead, ValidateFlowResult, WorkspaceApplicationSession } from '../services/workspace-session'
 import type { RecordChecksRunResult } from '../services/checks-run-evidence'
 import type { CaptureFlowEvidenceCommand, CaptureFlowEvidenceResult } from '../services/flow-evidence'
+import type { CaptureInteractionEvidenceCommand, CaptureInteractionEvidenceResult } from '../services/interaction-evidence'
 import type { UpdateWorkspaceSettingsCommand, WorkspaceAuthoringResult } from '../services/workspace-authoring'
 import type {
 	ComposeProductKitCommand,
@@ -229,6 +230,7 @@ export interface ScopedWorkspaceSession {
 	retractReviewThread(command: Unstamped<RetractReviewThreadCommand>): Promise<Scoped<ReviewAuthoringResult>>
 	captureFormalEvidence(command: CaptureFormalEvidenceCommand): Promise<CaptureFormalEvidenceResult | AccessRefusal>
 	captureFlowEvidence(command: CaptureFlowEvidenceCommand): Promise<CaptureFlowEvidenceResult | AccessRefusal>
+	captureInteractionEvidence(command: CaptureInteractionEvidenceCommand): Promise<CaptureInteractionEvidenceResult | AccessRefusal>
 	validateFlow(flowId: string): Promise<ValidateFlowResult>
 	/** The Workbench's Run Checks result stored as a `checks_run` Evidence record: `evidence.capture`, refused before anything is validated or written. */
 	recordChecksRun(input: unknown): Promise<RecordChecksRunResult | AccessRefusal>
@@ -674,6 +676,10 @@ export function createScopedWorkspaceSession(
 		async captureFlowEvidence(command) {
 			const denied = authorizeOperation(principal, 'captureFlowEvidence')
 			return denied ? refusalFromScope('evidence', denied) : app.captureFlowEvidence(command)
+		},
+		async captureInteractionEvidence(command) {
+			const denied = authorizeOperation(principal, 'captureInteractionEvidence')
+			return denied ? refusalFromScope('evidence', denied) : app.captureInteractionEvidence(command)
 		},
 		async recordChecksRun(input) {
 			const denied = authorizeOperation(principal, 'recordChecksRun')

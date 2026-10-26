@@ -3,6 +3,7 @@ import {
 	CHANGE_DOMAINS,
 	changeAffectsFlowEvidence,
 	changeAffectsFormalCapture,
+	changeAffectsInteractionEvidence,
 	changeScopeOfSubmission,
 	isKnownChangeDomain,
 	unknownChangeDomainDiagnostics,
@@ -39,8 +40,8 @@ function affected(change: ChangeScope): string[] {
 }
 
 describe('known change domains (Clause 01a14e30-2dce-…)', () => {
-	it('are exactly the ten values the Clause lists', () => {
-		expect([...CHANGE_DOMAINS]).toEqual(['ir', 'variant', 'spec', 'metadata', 'flow', 'asset', 'i18n', 'settings', 'adapter', 'product-kit'])
+	it('are exactly the eleven values the Clause lists', () => {
+		expect([...CHANGE_DOMAINS]).toEqual(['ir', 'variant', 'spec', 'metadata', 'flow', 'asset', 'i18n', 'settings', 'adapter', 'product-kit', 'interaction'])
 		for (const domain of CHANGE_DOMAINS) expect(isKnownChangeDomain(domain)).toBe(true)
 		for (const domain of ['IR', 'views', 'view-structure', 'copy', 'Adapter/config', '', ' ir']) expect(isKnownChangeDomain(domain)).toBe(false)
 	})
@@ -72,6 +73,16 @@ describe('the Evidence a change domain affects (Clause 01a14e30-2e43-…)', () =
 		expect(changeAffectsFlowEvidence(change, '55555555-5555-4555-8555-555555555556')).toBe(false)
 		// ir names no Flow Evidence.
 		expect(changeAffectsFlowEvidence(scope(['ir'], { flows: new Set([FLOW]) }), FLOW)).toBe(false)
+	})
+
+	it('interaction affects only the interaction Evidence of the change\'s Views and no formal capture', () => {
+		const change = scope(['interaction'])
+		expect(affected(change)).toEqual([])
+		expect(changeAffectsInteractionEvidence(change, CHECKOUT)).toBe(true)
+		expect(changeAffectsInteractionEvidence(change, RECEIPT)).toBe(false)
+		// ir, variant and flow leave interaction Evidence alone, as the Clause lists.
+		expect(changeAffectsInteractionEvidence(scope(['ir', 'variant', 'flow', 'spec', 'metadata']), CHECKOUT)).toBe(false)
+		expect(changeAffectsInteractionEvidence(scope(['ir', 'interaction']), CHECKOUT)).toBe(true)
 	})
 
 	it('ir and variant affect every formal capture of the change\'s Views, and only those', () => {

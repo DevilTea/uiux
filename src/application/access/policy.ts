@@ -105,6 +105,8 @@ export const ACCESS_OPERATIONS = {
 	captureFormalEvidence: { requiredKeys: ['evidence.capture'] },
 	// Clause 01a172cc-e195-711b-bfa9-5de6c1c8ff87: formal UX Flow Evidence is captured like formal capture.
 	captureFlowEvidence: { requiredKeys: ['evidence.capture'] },
+	// Clause 01a17762-b85b-77d6-a399-e26843475501: replayable interaction Evidence takes the key of Flow Evidence.
+	captureInteractionEvidence: { requiredKeys: ['evidence.capture'] },
 	// Clause 01a17671-11bf-7711-887b-121a02602cf4: recording a Run Checks result (`record_checks_run`, `POST /api/checks/runs`), by a Workbench or an Agent.
 	recordChecksRun: { requiredKeys: ['evidence.capture'] },
 	// Clause 01a172cc-de18-79ea-a611-c8ea5a34e250: validating a Flow only reads it.

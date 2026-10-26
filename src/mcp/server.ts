@@ -312,7 +312,7 @@ const submitReadyForReviewSchema = z.object({
 	expectedRevision: z.string(),
 	actor: reviewActorSchema.optional().describe(ACTOR_IGNORED_DESCRIPTION),
 	// A plain string list, so an unknown value is refused by the domain with its own code.
-	changeDomains: z.array(z.string()).describe(`What changed, one or more of ${CHANGE_DOMAINS.join(', ')}; any other value is refused with review.change_domain_unknown. spec and metadata (a View's name, feature and other fields outside its Spec and render input) affect no Evidence; flow only Flow Evidence; ir and variant the formal captures of the submission's Views; asset those of the Views binding a changed Asset; i18n those in a changed Locale; settings those in a changed viewport or theme; adapter and product-kit every formal capture.`),
+	changeDomains: z.array(z.string()).describe(`What changed, one or more of ${CHANGE_DOMAINS.join(', ')}; any other value is refused with review.change_domain_unknown. spec and metadata (a View's name, feature and other fields outside its Spec and render input) affect no Evidence; flow only Flow Evidence; ir and variant the formal captures of the submission's Views; asset those of the Views binding a changed Asset; i18n those in a changed Locale; settings those in a changed viewport or theme; adapter and product-kit every formal capture; interaction only the interaction replay Evidence of the submission's Views (citing it stays optional).`),
 	resources: z.array(z.object({
 		identity: z.record(z.string(), z.unknown()),
 		revision: z.string(),
@@ -433,6 +433,23 @@ const captureFlowEvidenceSchema = z.object({
 	flowId: z.string(),
 	renderContext: z.object({ locale: z.string(), viewportId: z.string(), themeId: z.string() }).strict(),
 	recipe: flowRecipeSchema.optional(),
+}).strict()
+
+// The members of a step and an assertion are checked by the domain (Clauses 01a17762-b467-… and 01a17762-b631-…), so a
+// wrong one is an `invalid` result with diagnostics, as over HTTP.
+const captureInteractionEvidenceSchema = z.object({
+	viewId: z.string(),
+	variant: z.string().optional().describe('The Variant name; omit it for the base state.'),
+	renderContext: z.object({ locale: z.string(), viewportId: z.string(), themeId: z.string() }).strict(),
+	steps: z.array(z.object({
+		action: z.string().describe('click, hover, type or press.'),
+		target: z.object({ viewId: z.string(), variant: z.string().optional(), widgetId: z.string() }).strict().describe('The View and Variant of this call, and a Widget of the View.'),
+		text: z.string().optional().describe('The text of a type step.'),
+		key: z.string().optional().describe('The key of a press step, as Playwright names it (Enter, Escape, ArrowDown).'),
+	}).strict()),
+	assertions: z.array(z.object({
+		expect: z.record(z.string(), z.unknown()).describe('{ widgetEvent: { widgetId?, name, payload? } } or { state: { widgetId?, key, value } }; widgetId defaults to the Widget of the last step.'),
+	}).strict()),
 }).strict()
 
 // The enumerated members are checked by the domain (Clause 01a17670-d442-7068-8a08-c6e4ab9c09ae), so a wrong one is
@@ -1325,6 +1342,30 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 				flowId: input.flowId,
 				renderContext: input.renderContext,
 				...(input.recipe ? { recipe: input.recipe } : {}),
+			})
+			return {
+				content: [{ type: 'text' as const, text: JSON.stringify(outcome) }],
+				structuredContent: outcome,
+				...(outcome.status === 'captured' ? {} : { isError: true }),
+			}
+		},
+	)
+
+	server.registerTool(
+		'capture_interaction_evidence',
+		{
+			title: 'Capture replayable interaction Evidence',
+			description: 'Capture replayable interaction Evidence for one View and Variant in one render context ({ locale, viewportId, themeId }): the View is formally captured, then the steps are replayed as real browser actions (click, hover, type with text, press with key) on the rendered Widgets in the Preview, and each assertion is decided from what the Runtime observed. A step is { action, target: { viewId, variant?, widgetId } } with the View and Variant of this call (1 to 50 steps). An assertion is { expect: { widgetEvent: { widgetId?, name, payload? } } } (the Widget emitted its declared Event, with arguments equal to payload when given) or { expect: { state: { widgetId?, key, value } } } (the Widget\'s State key equals value after the last step); widgetId defaults to the Widget of the last step (1 to 50 assertions). An assertion that does not hold is recorded as result "fail", not refused. Returns { status: "captured", viewId, evidenceDigest, evidence, captures }, or { status: "invalid", viewId, diagnostics } (a recipe that does not meet the limits, a Variant or Widget the View does not have, an unknown render context key), { status: "not_found", viewId } or { status: "failed", viewId, diagnostics } (the capture failed, or a step could not be performed); a refusal records nothing. Citing the record in a Review submission is optional.',
+			inputSchema: captureInteractionEvidenceSchema,
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+		},
+		async input => {
+			const outcome = await app.captureInteractionEvidence({
+				viewId: input.viewId,
+				...(input.variant !== undefined ? { variant: input.variant } : {}),
+				renderContext: input.renderContext,
+				steps: input.steps as never,
+				assertions: input.assertions as never,
 			})
 			return {
 				content: [{ type: 'text' as const, text: JSON.stringify(outcome) }],

@@ -2278,7 +2278,8 @@
     "i18n": "i18n（Locale 訊息）",
     "settings": "Workspace 設定（檢視區、主題）",
     "adapter": "Adapter 或設定",
-    "product-kit": "Product Kit"
+    "product-kit": "Product Kit",
+    "interaction": "互動（步驟、Widget Event）"
   },
   "phone": {
     "viewTab": "View",

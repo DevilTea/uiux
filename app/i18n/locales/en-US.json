@@ -2278,7 +2278,8 @@
     "i18n": "i18n (Locale messages)",
     "settings": "Workspace settings (viewport, theme)",
     "adapter": "Adapter or configuration",
-    "product-kit": "Product Kit"
+    "product-kit": "Product Kit",
+    "interaction": "Interaction (steps, Widget Events)"
   },
   "phone": {
     "viewTab": "View",

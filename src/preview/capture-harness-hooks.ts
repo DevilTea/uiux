@@ -1,4 +1,5 @@
 import type { Diagnostic } from '../domain/validation'
+import type { ProbedState, ProbedWidgetEvent } from './interaction-probe'
 import type { TranslationEvaluation } from './translation-evaluation'
 
 /**
@@ -18,4 +19,14 @@ export type CaptureHarnessHooks = Readonly<{
 	 * Runtime is not mounted.
 	 */
 	evaluateTranslations(): Promise<TranslationEvaluation>
+	/**
+	 * Interaction replay (Rule 01a11544-66d9-7fcd-8400-93516ddf2857): starts observing the declared Event
+	 * `name` of a Widget of the mounted Runtime, returning false when it has no such Event. Rejects when
+	 * the Runtime is not mounted.
+	 */
+	watchWidgetEvent(widgetId: string, name: string): Promise<boolean>
+	/** The Widget Events observed since they were watched, in emission order, with their JSON arguments. */
+	widgetEventOccurrences(): Promise<readonly ProbedWidgetEvent[]>
+	/** The current State a Widget holds under `key`, as JSON. */
+	readWidgetState(widgetId: string, key: string): Promise<ProbedState>
 }>

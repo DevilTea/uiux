@@ -9,13 +9,14 @@ import type { Diagnostic } from '../validation'
  * - Clause 01a14e57-637f-76a1-b6ce-45128da52c93: marking ready refuses an unknown value
  *   ({@link unknownChangeDomainDiagnostics}), the only place one is written.
  * - Clause 01a14e30-2e43-75a7-aca8-c8df28915f4e owns which Evidence each value affects
- *   ({@link changeAffectsFormalCapture}, {@link changeAffectsFlowEvidence}); Rules
+ *   ({@link changeAffectsFormalCapture}, {@link changeAffectsFlowEvidence},
+ *   {@link changeAffectsInteractionEvidence}); Rules
  *   01a115cd-c715-7527-b773-cae2d87c8f33 and 01a115cd-c749-7a82-bf67-7d1634e31b35 decide
  *   regeneration from them: Evidence they leave unaffected stays valid and need not be rerun.
  *
  * Pure and browser-safe: the Workbench uses it too.
  */
-export const CHANGE_DOMAINS = Object.freeze(['ir', 'variant', 'spec', 'metadata', 'flow', 'asset', 'i18n', 'settings', 'adapter', 'product-kit'] as const)
+export const CHANGE_DOMAINS = Object.freeze(['ir', 'variant', 'spec', 'metadata', 'flow', 'asset', 'i18n', 'settings', 'adapter', 'product-kit', 'interaction'] as const)
 export type ChangeDomain = typeof CHANGE_DOMAINS[number]
 
 export function isKnownChangeDomain(value: unknown): value is ChangeDomain {
@@ -81,6 +82,8 @@ function domainAffectsFormalCapture(domain: string, scope: ChangeScope, capture:
 		case 'spec':
 		case 'metadata':
 		case 'flow':
+		// `interaction` only the interaction replay Evidence of the submission's Views (owner ruling 2, #89).
+		case 'interaction':
 			return false
 		// Any View that binds a changed Asset, named by the change or not.
 		case 'asset':
@@ -103,6 +106,14 @@ function domainAffectsFormalCapture(domain: string, scope: ChangeScope, capture:
 /** Clause 01a14e30-2e43-…: only `flow` affects Flow Evidence, and only that of the change's Flows. */
 export function changeAffectsFlowEvidence(scope: ChangeScope, flowId: string): boolean {
 	return scope.domains.includes('flow') && named(scope.flows, flowId)
+}
+
+/**
+ * Clause 01a14e30-2e43-…: only `interaction` affects interaction replay Evidence, and only that of the
+ * Views the change names. Citing such Evidence stays the author's choice.
+ */
+export function changeAffectsInteractionEvidence(scope: ChangeScope, viewId: string): boolean {
+	return scope.domains.includes('interaction') && scope.views.has(viewId)
 }
 
 /** True when `value` is in `set`, or `set` is absent (the change names none, so any counts). */

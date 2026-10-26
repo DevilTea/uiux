@@ -828,6 +828,21 @@ function installCaptureHarnessHooks() {
 			if (!bridge?.evaluateTranslations) throw new Error('The Preview runtime is not mounted.')
 			return bridge.evaluateTranslations()
 		},
+		async watchWidgetEvent(widgetId: string, name: string) {
+			const probe = activeBridge?.interactionProbe?.()
+			if (!probe) throw new Error('The Preview runtime is not mounted.')
+			return probe.watch(widgetId, name)
+		},
+		async widgetEventOccurrences() {
+			const probe = activeBridge?.interactionProbe?.()
+			if (!probe) throw new Error('The Preview runtime is not mounted.')
+			return probe.occurrences()
+		},
+		async readWidgetState(widgetId: string, key: string) {
+			const probe = activeBridge?.interactionProbe?.()
+			if (!probe) throw new Error('The Preview runtime is not mounted.')
+			return probe.readState(widgetId, key)
+		},
 	})
 	Object.defineProperty(window, CAPTURE_HARNESS_GLOBAL, { value: hooks, configurable: true })
 }

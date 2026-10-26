@@ -160,6 +160,7 @@ const ROLE_MATRIX: Readonly<Record<AccessOperation, Readonly<{ min: AccessRole; 
 	updateComponentRegistry: { min: 'editor' },
 	captureFormalEvidence: { min: 'editor' },
 	captureFlowEvidence: { min: 'editor' },
+	captureInteractionEvidence: { min: 'editor' },
 	recordChecksRun: { min: 'editor' },
 	validateFlow: { min: 'viewer' },
 	// Added with the Product Kit Checks (issue #141 Part 14): `evidence.capture`, Workbench sessions only.
@@ -223,8 +224,8 @@ describe('parity: role-derived keys decide as the role matrix did', () => {
 				if ((denied === undefined) !== before) changed.push(`${id}: ${before ? 'allowed' : 'refused'} → ${denied ? 'refused' : 'allowed'}`)
 			}
 		}
-		// 65 operations, 7 lease acquires and 6 restores, for 16 members and the system credential.
-		expect(compared).toBe(78 * 17)
+		// 66 operations, 7 lease acquires and 6 restores, for 16 members and the system credential.
+		expect(compared).toBe(79 * 17)
 		expect(changed.sort()).toEqual([...INTENDED_CHANGES].sort())
 	})
 
