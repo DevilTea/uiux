@@ -1,5 +1,5 @@
 import type { GeometryReport, GeometryStreamContext } from './geometry-streams'
-import { evaluateSnapshotPrecision, type OuterErrorMapping, type SnapshotPrecisionEvaluation } from './outer-precision'
+import { affineAmplificationUpperBound, evaluateSnapshotPrecision, type OuterErrorMapping, type SnapshotPrecisionEvaluation } from './outer-precision'
 import { ContourCacheController } from './protocol/contour-cache'
 import type { FailureReportMessage } from './protocol/failure-report'
 import type {
@@ -44,6 +44,12 @@ import type {
 export type ContourRefinementDependencies = Readonly<{
 	/** Sends one contour request; false when it did not leave (the generation is not open). */
 	send(message: FullContourRequest | PartialContourRequest | ContourCancel): boolean
+	/**
+	 * Animation frames, so that a mapping that changes every frame (a zoom) asks for finer contours only
+	 * once it has held still for a frame. Without it, every change is judged at once.
+	 */
+	requestFrame?(callback: () => void): number
+	cancelFrame?(handle: number): void
 }>
 
 export type HighlightUnavailableReason = 'latched' | 'exhausted' | 'unproven-mapping' | 'invalid-mapping'
@@ -74,13 +80,17 @@ type Work = Readonly<{
 	retry: boolean
 }>
 
+/**
+ * A refinement that failed for good: no new refinement starts within its geometry revision. It is kept
+ * per Widget across demand changes, so that deselecting and selecting again, or toggling Comment mode,
+ * does not end it for geometry that did not change (Rule 01a11687-3650-7490-a7ec-80b2570582f6).
+ */
+type Latch = Readonly<{ revision: number; key: string; report: FailureReportMessage }>
+
 type Entry = {
 	readonly widgetId: string
 	readonly controller: ContourCacheController
 	work?: Work
-	/** The geometry revision whose refinement failed for good: no new refinement starts within it. */
-	latchedRevision?: number
-	latchReport?: FailureReportMessage
 	/** A complete regeneration for this target failed within the revision: nothing finer is asked for. */
 	exhausted?: Readonly<{ geometryRevision: number; targetMaxError: number }>
 }
@@ -91,6 +101,11 @@ export class ContourRefinement {
 	private mapping?: OuterErrorMapping
 	private demand?: string
 	private entry?: Entry
+	private readonly latches = new Map<string, Latch>()
+	private visible = true
+	private frame?: number
+	private mappingChanged = false
+	private memo?: Readonly<{ regions: readonly VisibleRegion[]; mapping: OuterErrorMapping; result: SnapshotPrecisionEvaluation }>
 	private sequence = 0
 	private readonly listeners = new Set<() => void>()
 	private readonly latchListeners = new Set<(report: FailureReportMessage | undefined) => void>()
@@ -108,6 +123,11 @@ export class ContourRefinement {
 		const generationChanged = this.context?.previewSessionId !== next?.previewSessionId
 			|| this.context?.runtimeGenerationId !== next?.runtimeGenerationId
 		this.dropEntry(!generationChanged)
+		// Another context or generation ends every latch.
+		if (this.latches.size) {
+			this.latches.clear()
+			this.emitLatch()
+		}
 		this.context = next ? Object.freeze({ ...next }) : undefined
 		if (generationChanged) this.sequence = 0
 		this.openEntry()
@@ -125,8 +145,24 @@ export class ContourRefinement {
 
 	/** The current outer mapping of the Preview, or `undefined` while it cannot be measured. */
 	setMapping(next: OuterErrorMapping | undefined): void {
-		if (sameMapping(this.mapping, next)) return
-		this.mapping = next
+		const settled = settleMapping(this.mapping, next)
+		if (settled === this.mapping) return
+		this.mapping = settled
+		if (this.deps.requestFrame) {
+			// Pending work that the new scale makes unnecessary is retired now; finer contours are asked for
+			// once the mapping has held still for a frame.
+			this.evaluate(true)
+			this.mappingChanged = true
+			this.scheduleSettle()
+		}
+		else this.evaluate()
+		this.publish()
+	}
+
+	/** Whether the demanded Widget is visible in the Preview: an offscreen or hidden one asks for no contour work. */
+	setVisible(visible: boolean): void {
+		if (this.visible === visible) return
+		this.visible = visible
 		this.evaluate()
 		this.publish()
 	}
@@ -147,8 +183,13 @@ export class ContourRefinement {
 		if (entry.work) this.cancel(entry, entry.work)
 		entry.work = undefined
 		entry.exhausted = undefined
-		// A newer geometry revision is a geometry change: the latch ends.
-		if (entry.latchedRevision !== undefined && report.geometryRevision > entry.latchedRevision) this.clearLatch(entry)
+		// A newer geometry revision ends the latch unless the geometry is the same: a reopened stream
+		// reports its baseline under a new revision even when nothing moved.
+		const latch = this.latches.get(entry.widgetId)
+		if (latch && report.geometryRevision > latch.revision) {
+			if (geometryKey(report) === latch.key) this.latches.set(entry.widgetId, { ...latch, revision: report.geometryRevision })
+			else this.clearLatch(entry)
+		}
 		this.evaluate()
 		this.publish()
 	}
@@ -210,21 +251,24 @@ export class ContourRefinement {
 			|| message.payload.baseSnapshotVersion !== work.baseSnapshotVersion) return 'stale'
 		entry.controller.endWork(work.sequence)
 		entry.work = undefined
-		entry.latchedRevision = work.geometryRevision
-		entry.latchReport = message
-		for (const listener of this.latchListeners) listener(message)
+		const snapshot = entry.controller.currentSnapshot()
+		this.latches.set(entry.widgetId, { revision: work.geometryRevision, key: snapshot ? geometryKey(snapshot) : '', report: message })
+		this.emitLatch()
 		this.publish()
 		return 'ended'
 	}
 
 	/** What may be drawn of the demanded Widget now. */
-	precision(widgetId: string): HighlightPrecision {
+	precision(widgetId: string, options?: Readonly<{ mapping: OuterErrorMapping | undefined }>): HighlightPrecision {
 		const entry = this.entry
 		if (!entry || entry.widgetId !== widgetId) return NONE
-		const snapshot = entry.controller.getSnapshot()
+		const snapshot = entry.controller.currentSnapshot()
 		if (!snapshot) return NONE
-		if (!this.mapping) return PENDING
-		const evaluation = evaluateSnapshotPrecision(snapshot.regions, this.mapping)
+		// The verdict can be asked for under the mapping the caller draws with, so that no frame draws
+		// against the verdict of an older one.
+		const mapping = options ? options.mapping : this.mapping
+		if (!mapping) return PENDING
+		const evaluation = this.judge(snapshot.regions, mapping)
 		switch (evaluation.status) {
 			case 'empty':
 				return NONE
@@ -233,7 +277,7 @@ export class ContourRefinement {
 			case 'precision-unavailable':
 				return unavailable(evaluation.reason === 'unproven-non-affine' ? 'unproven-mapping' : 'invalid-mapping', snapshot.regions)
 			case 'refinement-required':
-				if (entry.latchedRevision === snapshot.geometryRevision) return unavailable('latched', snapshot.regions)
+				if (this.latches.get(entry.widgetId)?.revision === snapshot.geometryRevision) return unavailable('latched', snapshot.regions)
 				if (entry.exhausted?.geometryRevision === snapshot.geometryRevision && evaluation.targetInnerMaxError <= entry.exhausted.targetMaxError)
 					return unavailable('exhausted', snapshot.regions)
 				return PENDING
@@ -243,9 +287,10 @@ export class ContourRefinement {
 	/** The contour work in flight and the latch, for diagnostics and tests. */
 	state(): Readonly<{ work?: Work; latchedRevision?: number }> {
 		const entry = this.entry
+		const latch = entry ? this.latches.get(entry.widgetId) : undefined
 		return Object.freeze({
 			...(entry?.work ? { work: entry.work } : {}),
-			...(entry?.latchedRevision !== undefined ? { latchedRevision: entry.latchedRevision } : {}),
+			...(latch ? { latchedRevision: latch.revision } : {}),
 		})
 	}
 
@@ -262,7 +307,10 @@ export class ContourRefinement {
 	}
 
 	dispose(): void {
+		if (this.frame !== undefined) this.deps.cancelFrame?.(this.frame)
+		this.frame = undefined
 		this.dropEntry(true)
+		this.latches.clear()
 		this.listeners.clear()
 		this.latchListeners.clear()
 		this.context = undefined
@@ -283,15 +331,41 @@ export class ContourRefinement {
 		const entry = this.entry
 		if (!entry) return
 		if (cancelWork && entry.work) this.cancel(entry, entry.work)
-		const hadLatch = entry.latchedRevision !== undefined
 		this.entry = undefined
-		if (hadLatch) for (const listener of this.latchListeners) listener(undefined)
 	}
 
 	private clearLatch(entry: Entry): void {
-		entry.latchedRevision = undefined
-		entry.latchReport = undefined
-		for (const listener of this.latchListeners) listener(undefined)
+		this.latches.delete(entry.widgetId)
+		this.emitLatch()
+	}
+
+	/** Tells the latch listeners the latest latch's report, or that none remains. */
+	private emitLatch(): void {
+		const latest = [...this.latches.values()].at(-1)
+		for (const listener of this.latchListeners) listener(latest?.report)
+	}
+
+	/** The evaluation of the cache's regions under a mapping, kept while neither changes. */
+	private judge(regions: readonly VisibleRegion[], mapping: OuterErrorMapping): SnapshotPrecisionEvaluation {
+		const memo = this.memo
+		if (memo && memo.regions === regions && memo.mapping === mapping) return memo.result
+		const result = evaluateSnapshotPrecision(regions, mapping)
+		this.memo = { regions, mapping, result }
+		return result
+	}
+
+	private scheduleSettle(): void {
+		if (this.frame !== undefined || !this.deps.requestFrame) return
+		this.frame = this.deps.requestFrame(() => {
+			this.frame = undefined
+			if (this.mappingChanged) {
+				this.mappingChanged = false
+				this.scheduleSettle()
+				return
+			}
+			this.evaluate()
+			this.publish()
+		})
 	}
 
 	private scopeOf(widgetId: string) {
@@ -311,12 +385,12 @@ export class ContourRefinement {
 	}
 
 	/** Judges the cache against the display tolerance and starts, keeps or retires the work accordingly. */
-	private evaluate(): void {
+	private evaluate(deferRefinement = false): void {
 		const entry = this.entry
 		if (!entry || !this.mapping) return
-		const snapshot = entry.controller.getSnapshot()
+		const snapshot = entry.controller.currentSnapshot()
 		if (!snapshot) return
-		const evaluation = evaluateSnapshotPrecision(snapshot.regions, this.mapping)
+		const evaluation = this.judge(snapshot.regions, this.mapping)
 		switch (evaluation.status) {
 			case 'empty':
 			case 'eligible':
@@ -326,7 +400,12 @@ export class ContourRefinement {
 				this.retire(entry)
 				return
 			case 'refinement-required':
-				this.refine(entry, snapshot.geometryRevision, snapshot.snapshotVersion, evaluation)
+				// An offscreen or hidden Widget draws no highlight, so nothing finer is asked for.
+				if (!this.visible) {
+					this.retire(entry)
+					return
+				}
+				if (!deferRefinement) this.refine(entry, snapshot.geometryRevision, snapshot.snapshotVersion, evaluation)
 		}
 	}
 
@@ -337,7 +416,7 @@ export class ContourRefinement {
 		evaluation: Extract<SnapshotPrecisionEvaluation, { status: 'refinement-required' }>,
 	): void {
 		// A failed refinement stops every further one within the revision, whatever the scale does.
-		if (entry.latchedRevision === geometryRevision) return
+		if (this.latches.get(entry.widgetId)?.revision === geometryRevision) return
 		const target = evaluation.targetInnerMaxError
 		// The work in flight asks for contours at least this fine: it is awaited, not repeated.
 		if (entry.work && entry.work.targetMaxError <= target) return
@@ -348,11 +427,11 @@ export class ContourRefinement {
 
 	/** One immediate retry of a failed partial refinement, then a complete regeneration, then nothing more. */
 	private recover(entry: Entry, failed: Work): void {
-		const snapshot = entry.controller.getSnapshot()
+		const snapshot = entry.controller.currentSnapshot()
 		if (!snapshot || !this.mapping) return
-		const evaluation = evaluateSnapshotPrecision(snapshot.regions, this.mapping)
-		if (evaluation.status !== 'refinement-required') return
-		if (entry.latchedRevision === snapshot.geometryRevision) return
+		const evaluation = this.judge(snapshot.regions, this.mapping)
+		if (evaluation.status !== 'refinement-required' || !this.visible) return
+		if (this.latches.get(entry.widgetId)?.revision === snapshot.geometryRevision) return
 		const target = evaluation.targetInnerMaxError
 		if (failed.kind === 'full') {
 			entry.exhausted = { geometryRevision: failed.geometryRevision, targetMaxError: failed.targetMaxError }
@@ -364,7 +443,7 @@ export class ContourRefinement {
 	}
 
 	private startPartial(entry: Entry, regionIds: readonly string[], baseSnapshotVersion: number, targetMaxError: number, retry: boolean): boolean {
-		const snapshot = entry.controller.getSnapshot()
+		const snapshot = entry.controller.currentSnapshot()
 		if (!snapshot || regionIds.length === 0) return false
 		const sequence = this.nextSequence()
 		const request: PartialContourRequest = {
@@ -477,10 +556,28 @@ function sameContext(left: GeometryStreamContext | undefined, right: GeometryStr
 		&& left.runtimeContextVersion === right.runtimeContextVersion
 }
 
-function sameMapping(left: OuterErrorMapping | undefined, right: OuterErrorMapping | undefined): boolean {
-	if (!left || !right) return left === right
-	if (left.kind === 'affine' && right.kind === 'affine')
-		return left.a === right.a && left.b === right.b && left.c === right.c && left.d === right.d && left.e === right.e && left.f === right.f
-	if (left.kind === 'non-affine' && right.kind === 'non-affine') return left.amplificationUpperBound === right.amplificationUpperBound
-	return false
+/** The relative difference below which two measurements of one mapping are the same mapping. */
+const MAPPING_JITTER = 1e-9
+
+/**
+ * The mapping to keep when `next` is measured: the previous one while `next` differs from it by no more
+ * than float jitter and does not amplify more, so a mapping that is measured every frame does not
+ * re-judge the cache for noise, and the verdict never rests on a smaller amplification than a measured one.
+ */
+function settleMapping(previous: OuterErrorMapping | undefined, next: OuterErrorMapping | undefined): OuterErrorMapping | undefined {
+	if (!previous || !next) return next
+	if (previous.kind === 'affine' && next.kind === 'affine') {
+		const pairs: ReadonlyArray<readonly [number, number]> = [[previous.a, next.a], [previous.b, next.b], [previous.c, next.c], [previous.d, next.d], [previous.e, next.e], [previous.f, next.f]]
+		if (!pairs.every(([x, y]) => Math.abs(x - y) <= MAPPING_JITTER * (1 + Math.abs(x)))) return next
+		const before = affineAmplificationUpperBound(previous)
+		const after = affineAmplificationUpperBound(next)
+		return before !== undefined && after !== undefined && before >= after ? previous : next
+	}
+	if (previous.kind === 'non-affine' && next.kind === 'non-affine' && previous.amplificationUpperBound === next.amplificationUpperBound) return previous
+	return next
+}
+
+/** The identity of a cache's geometry, for telling a reopened stream's unchanged baseline from a change. */
+function geometryKey(geometry: Readonly<{ rect: WidgetRect; regions: readonly VisibleRegion[] }>): string {
+	return JSON.stringify([geometry.rect, geometry.regions.map(region => [region.regionId, region.maxError, region.contour.commands])])
 }

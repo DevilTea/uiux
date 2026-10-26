@@ -207,6 +207,11 @@ export class ContourCacheController {
 		return true
 	}
 
+	/** The committed cache itself: deeply frozen, so it needs no defensive copy. It changes identity with every commit. */
+	currentSnapshot(): ContourCacheSnapshot | undefined {
+		return this.cache
+	}
+
 	getSnapshot(): ContourCacheSnapshot | undefined {
 		return this.cache && cloneSnapshot(this.cache)
 	}

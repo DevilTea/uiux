@@ -342,7 +342,7 @@ describe('Non-recoverable refinement failure latch', () => {
 
 	it('is cleared by a new geometry revision, which then refines again', () => {
 		const f = latched()
-		f.refinement.acceptReport(report(6, [region('r0', 0.5)]))
+		f.refinement.acceptReport(report(6, [region('r0', 0.5, 3)]))
 		expect(f.reports.at(-1)).toBeUndefined()
 		expect(f.refinement.state().latchedRevision).toBeUndefined()
 		expect(f.requests()).toHaveLength(2)
@@ -399,6 +399,112 @@ describe('Non-recoverable refinement failure latch', () => {
 		const full = f.requests()[2] as FullContourRequest
 		expect(f.refinement.receiveFailureReport(failureReport(full))).toBe('ended')
 		expect(f.refinement.precision('w')).toMatchObject({ status: 'unavailable', reason: 'latched' })
+		expect(f.requests()).toHaveLength(3)
+	})
+})
+
+describe('Verdict under the drawn mapping, latch persistence, frames, visibility', () => {
+	it('judges the cache under the mapping the caller draws with, not the one it was last told', () => {
+		const f = fixture()
+		f.refinement.setMapping(scale(0.9))
+		f.refinement.acceptReport(report(1, [region('r0', 0.5)]))
+		expect(f.refinement.precision('w').status).toBe('precise')
+		// The canvas already draws at scale 3: the same tick must not draw against the verdict of 0.9.
+		expect(f.refinement.precision('w', { mapping: scale(3) }).status).toBe('pending')
+		expect(f.refinement.precision('w', { mapping: undefined }).status).toBe('pending')
+		f.refinement.setMapping(scale(3))
+		expect(f.refinement.precision('w', { mapping: scale(0.9) }).status).toBe('precise')
+	})
+
+	it('keeps the latch of unchanged geometry across deselect and select, and ends it for changed geometry', () => {
+		const f = fixture()
+		f.refinement.acceptReport(report(5, [region('r0', 0.5)]))
+		f.refinement.setMapping(scale(2))
+		f.refinement.receiveFailureReport(failureReport(f.requests()[0] as PartialContourRequest))
+		const reports: Array<FailureReportMessage | undefined> = []
+		f.refinement.subscribeLatch(item => reports.push(item))
+		f.refinement.setDemand(undefined)
+		f.refinement.setDemand('w')
+		expect(reports).toEqual([])
+		// The reopened stream reports its baseline under a new revision, with the same geometry.
+		f.refinement.acceptReport(report(9, [region('r0', 0.5)]))
+		expect(f.refinement.precision('w')).toMatchObject({ status: 'unavailable', reason: 'latched' })
+		expect(f.refinement.state().latchedRevision).toBe(9)
+		expect(f.requests()).toHaveLength(1)
+		// Other geometry is a geometry change.
+		f.refinement.acceptReport(report(10, [region('r0', 0.5, 3)]))
+		expect(reports.at(-1)).toBeUndefined()
+		expect(f.refinement.state().latchedRevision).toBeUndefined()
+		expect(f.requests()).toHaveLength(2)
+	})
+
+	it('ignores float jitter of the mapping but not a larger amplification', () => {
+		const f = fixture()
+		f.refinement.acceptReport(report(1, [region('r0', 0.2)]))
+		f.refinement.setMapping(scale(2))
+		let calls = 0
+		f.refinement.subscribe(() => { calls++ })
+		// Jitter that does not amplify more is noise; one that does is kept, so a verdict never rests on less.
+		f.refinement.setMapping(scale(2 - 1e-13))
+		expect(calls).toBe(0)
+		f.refinement.setMapping(scale(2 + 1e-13))
+		expect(calls).toBe(1)
+		f.refinement.setMapping(scale(2 - 1e-13))
+		expect(calls).toBe(1)
+		f.refinement.setMapping(scale(2.0001))
+		expect(calls).toBe(2)
+	})
+
+	it('asks for finer contours only after the mapping held still for a frame, and retires work at once', () => {
+		const frames: Array<() => void> = []
+		const sent: Array<FullContourRequest | PartialContourRequest | ContourCancel> = []
+		const refinement = new ContourRefinement({
+			send: (message) => { sent.push(message); return true },
+			requestFrame: callback => frames.push(callback),
+			cancelFrame: () => {},
+		})
+		refinement.setContext(context)
+		refinement.setDemand('w')
+		refinement.acceptReport(report(1, [region('r0', 0.5)]))
+		const runFrame = () => frames.splice(0).forEach(frame => frame())
+		for (const value of [1.2, 1.5, 1.8, 2]) {
+			refinement.setMapping(scale(value))
+			runFrame()
+		}
+		expect(sent).toEqual([])
+		// A quiet frame later the finest need is asked for, once.
+		runFrame()
+		runFrame()
+		expect(sent.map(message => message.type)).toEqual(['contour.partial.request'])
+		refinement.setMapping(scale(0.9))
+		expect(sent.map(message => message.type)).toEqual(['contour.partial.request', 'contour.cancel'])
+		expect(refinement.precision('w').status).toBe('precise')
+	})
+
+	it('asks for no contour work while the Widget is offscreen or hidden, and retires what is pending', () => {
+		const f = fixture()
+		f.refinement.setVisible(false)
+		f.refinement.acceptReport(report(1, [region('r0', 0.5)]))
+		f.refinement.setMapping(scale(2))
+		expect(f.sent).toEqual([])
+		f.refinement.setVisible(true)
+		expect(f.requests()).toHaveLength(1)
+		f.refinement.setVisible(false)
+		expect(f.cancels()).toHaveLength(1)
+		expect(f.refinement.state().work).toBeUndefined()
+	})
+
+	it('rejects a complete regeneration whose region IDs changed, and stops asking at that precision', () => {
+		const f = fixture()
+		f.refinement.acceptReport(report(1, [region('r0', 0.5), region('r1', 0.5, 20)]))
+		f.refinement.setMapping(scale(2))
+		f.refinement.receiveResponse(partialResponse(f.requests()[0] as PartialContourRequest, [region('r0', 0.4), region('r1', 0.4)]))
+		f.refinement.receiveResponse(partialResponse(f.requests()[1] as PartialContourRequest, [region('r0', 0.4), region('r1', 0.4)]))
+		const full = f.requests()[2] as FullContourRequest
+		expect(full.type).toBe('contour.full.request')
+		// Fine enough, but one region was renamed: the runtime must have established a new revision instead.
+		expect(f.refinement.receiveResponse(fullResponse(full, [region('r0', 0.1), region('r9', 0.1, 20)]))).toBe('rejected')
+		expect(f.refinement.precision('w')).toMatchObject({ status: 'unavailable', reason: 'exhausted' })
 		expect(f.requests()).toHaveLength(3)
 	})
 })

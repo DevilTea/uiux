@@ -247,7 +247,10 @@ export function createPreviewSession(state: WorkbenchState) {
 		// The highlight's contour cache follows its Widget's current report: replaced at once, dropped with it.
 		if (refinementWidgetId && changed.has(refinementWidgetId)) {
 			const current = geometryStreams.report(refinementWidgetId)
-			if (current) refinement.acceptReport(current)
+			if (current) {
+				refinement.setVisible(reportVisibility(current.rect, current.regions) === 'visible')
+				refinement.acceptReport(current)
+			}
 			else refinement.dropReport(refinementWidgetId)
 		}
 		const removed = [...changed].some(widgetId => !geometryStreams.report(widgetId))
@@ -268,6 +271,9 @@ export function createPreviewSession(state: WorkbenchState) {
 	 */
 	const refinement = new ContourRefinement({
 		send: message => workbenchBridge?.sendGeometry(message).status === 'sent',
+		// A zoom changes the mapping every frame: finer contours are asked for once it holds still.
+		requestFrame: callback => requestAnimationFrame(callback),
+		cancelFrame: handle => cancelAnimationFrame(handle),
 	})
 	/** The Widget the refinement serves: the one whose highlight is shown. */
 	let refinementWidgetId: string | undefined
@@ -296,11 +302,19 @@ export function createPreviewSession(state: WorkbenchState) {
 	 * What may be drawn of the selected Widget's highlight: its contours only while every one meets the
 	 * display tolerance under the current mapping (Rule 01a11687-32da-7ea6-83aa-d7451aaf0111).
 	 */
-	const highlightPrecision = computed<HighlightPrecision>(() => {
+	function highlightPrecisionFor(mapping: AffineOuterMapping | undefined): HighlightPrecision {
 		void precisionVersion.value
 		const widgetId = selectionGeometry.value?.widgetId
-		return widgetId ? refinement.precision(widgetId) : NO_PRECISION
-	})
+		return widgetId ? refinement.precision(widgetId, { mapping }) : NO_PRECISION
+	}
+
+	/** Whether a report puts a visible part of the Widget inside the Preview's content viewport. */
+	function reportVisibility(rect: WidgetRect, regions: readonly VisibleRegion[]): SelectionVisibility {
+		const viewport = state.contextOptions.value.viewports.selectedDimensions
+		const zeroArea = rect.width === 0 || rect.height === 0
+		const intersects = rect.x < viewport.width && rect.y < viewport.height && rect.x + rect.width > 0 && rect.y + rect.height > 0
+		return zeroArea || !regions.length ? 'hidden' : intersects ? 'visible' : 'offscreen'
+	}
 	const pinEngine = new PinPlacementEngine()
 
 	/**
@@ -511,10 +525,7 @@ export function createPreviewSession(state: WorkbenchState) {
 		const target = selectionTarget
 		if (!target || !navigationCoordinator || message.context.widgetId !== target.widgetId) return
 		const { rect, regions } = message.payload
-		const viewport = state.contextOptions.value.viewports.selectedDimensions
-		const zeroArea = rect.width === 0 || rect.height === 0
-		const intersects = rect.x < viewport.width && rect.y < viewport.height && rect.x + rect.width > 0 && rect.y + rect.height > 0
-		const visibility: SelectionVisibility = zeroArea || !regions.length ? 'hidden' : intersects ? 'visible' : 'offscreen'
+		const visibility = reportVisibility(rect, regions)
 		const accepted = navigationCoordinator.acceptGeometry({
 			navigationRequestId: message.context.navigationRequestId ?? '',
 			viewId: message.context.viewId,
@@ -1161,7 +1172,7 @@ export function createPreviewSession(state: WorkbenchState) {
 		startReanchor,
 		selectionGeometry,
 		selectionVisibility,
-		highlightPrecision,
+		highlightPrecisionFor,
 		hoverCandidate,
 		canvasMapping,
 		setPinThreads,

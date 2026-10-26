@@ -247,6 +247,23 @@ describe('Runtime contour work', () => {
 	})
 })
 
+describe('Runtime precision held for a stream', () => {
+	it('goes back to the default precision once a request asks for coarser contours', () => {
+		const f = opened()
+		f.state.refinedCount = 3
+		f.producer.receiveContour(full(1, 1, 0.1))
+		f.runFrames()
+		f.runFrames()
+		expect(f.reports.at(-1)!.payload.regions.map(region => region.maxError)).toEqual([0.1, 0.1, 0.1])
+		f.state.count = 3
+		f.state.refinedCount = undefined
+		f.producer.receiveContour(full(1, 2, 0.4))
+		f.runFrames()
+		expect(f.reports.at(-1)!.context.geometryRevision).toBe(3)
+		expect(f.reports.at(-1)!.payload.regions.map(region => region.maxError)).toEqual([0.5, 0.5, 0.5])
+	})
+})
+
 describe('Workbench refinement against the runtime', () => {
 	const scale = (value: number): AffineOuterMapping => ({ kind: 'affine', a: value, b: 0, c: 0, d: value, e: 0, f: 0 })
 

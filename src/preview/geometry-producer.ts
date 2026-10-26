@@ -196,6 +196,12 @@ export class RuntimeGeometryProducer {
 		if (last && last.geometryRevision === request.context.geometryRevision && request.payload.sequence <= last.sequence) return 'ignored-stale'
 		this.lastSequences.set(widgetId, { geometryRevision: request.context.geometryRevision, sequence: request.payload.sequence })
 		this.jobs.set(widgetId, { request })
+		// A request for coarser contours than the stream was held to means the finer need has ended: the stream
+		// goes back to its default precision, and reports it when that differs.
+		if (stream.target !== undefined && request.payload.targetMaxError > stream.target) {
+			stream.target = undefined
+			stream.force = true
+		}
 		// Re-measure first: a change that is not reported yet makes this revision, and the work, stale.
 		stream.dirty = true
 		this.schedule()

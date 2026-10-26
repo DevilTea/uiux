@@ -213,6 +213,8 @@ describe('Contour precision and refinement in the Workbench', () => {
 			// The cache is still too coarse: the highlight stays hidden, says so, and shows no failure diagnostic.
 			await page.waitForSelector('[data-precision-unavailable]', { timeout: 10_000 })
 			expect(await page.locator('[data-overlay-selection]').count()).toBe(0)
+			// Assistive technology hears it too: the overlay itself is hidden from it.
+			await expect.poll(() => page.locator('p[role="status"].sr-only').allTextContents(), { timeout: 5_000 }).toContain('Precise highlighting is unavailable: finer outlines could not be drawn at this zoom.')
 			expect(await page.locator('[data-preview-failure]').count()).toBe(0)
 			await new Promise(resolve => setTimeout(resolve, 1000))
 			expect((await requestsOf(frame)).length).toBe(requests.length)

@@ -81,6 +81,8 @@ export function evaluateRegionPrecision(
 	// the product by more than one step: step the target down until it does.
 	for (let step = 0; step < 64 && targetInnerMaxError > 0 && conservativeProduct(amplification.value, targetInnerMaxError) > finalTolerance; step++)
 		targetInnerMaxError = nextDown(targetInnerMaxError)
+	if (!(targetInnerMaxError > 0) || conservativeProduct(amplification.value, targetInnerMaxError) > finalTolerance)
+		return { status: 'precision-unavailable', reason: 'invalid-mapping' }
 	if (!(targetInnerMaxError > 0) || !Number.isFinite(targetInnerMaxError))
 		return { status: 'precision-unavailable', reason: 'invalid-mapping' }
 	return { status: 'refinement-required', finalMaxError, targetInnerMaxError }

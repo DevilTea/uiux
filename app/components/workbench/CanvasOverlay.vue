@@ -20,7 +20,7 @@ const props = defineProps<{
 	/** The runtime's hover candidate (Part 3): a transient, non-interactive outline beneath every other mark. */
 	hover?: HoverCandidate
 	/** The highlight is hidden because its contours cannot be drawn precisely: only a notice, anchored on the regions' bounds. */
-	precisionNotice?: Readonly<{ widgetId: string; bounds?: WidgetRect }>
+	precisionNotice?: Readonly<{ widgetId: string; reason?: string; bounds?: WidgetRect }>
 	hoverType?: string
 	/** Comment mode is re-anchoring a thread: the chip says "Re-anchor to {type}". */
 	reanchor?: boolean
