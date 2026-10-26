@@ -191,6 +191,27 @@ export class ContourCacheController {
 		return { retiredSequence }
 	}
 
+	/** The contour work in flight, if any: the Workbench's own request, and the freshness gate of its response. */
+	activeRequest(): FullContourRequest | PartialContourRequest | undefined {
+		return this.activeWork?.request
+	}
+
+	/**
+	 * Ends the contour work with this `sequence` without a result, because the runtime reported it
+	 * failed for good or the Workbench retired it: a response it still sends is stale. False when it
+	 * was not the work in flight.
+	 */
+	endWork(sequence: number): boolean {
+		if (this.activeWork?.request.payload.sequence !== sequence) return false
+		this.activeWork = undefined
+		return true
+	}
+
+	/** The committed cache itself: deeply frozen, so it needs no defensive copy. It changes identity with every commit. */
+	currentSnapshot(): ContourCacheSnapshot | undefined {
+		return this.cache
+	}
+
 	getSnapshot(): ContourCacheSnapshot | undefined {
 		return this.cache && cloneSnapshot(this.cache)
 	}

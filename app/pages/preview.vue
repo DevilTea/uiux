@@ -367,6 +367,21 @@ function initBridge() {
 		// The geometry producer of this runtime generation (Part 2, multi-target geometry streams).
 		geometryProducer = new RuntimeGeometryProducer({
 			send: (response) => { bridge.sendGeometry(response) },
+			sendContour: (response) => { bridge.sendGeometry(response) },
+			// Contour work that failed for good ends without a response (work-scoped report, issue #110).
+			reportWorkFailure: (failure) => {
+				bridge.sendFailureReport({
+					type: 'failure.report',
+					context: failure.context,
+					payload: {
+						category: 'runtime',
+						reason: failure.reason,
+						...(failure.detail ? { detail: failure.detail } : {}),
+						sequence: failure.sequence,
+						...(failure.baseSnapshotVersion !== undefined ? { baseSnapshotVersion: failure.baseSnapshotVersion } : {}),
+					},
+				})
+			},
 			measurer: createDomGeometryMeasurer({ document }),
 			requestFrame: callback => window.requestAnimationFrame(callback),
 			cancelFrame: handle => window.cancelAnimationFrame(handle),
@@ -682,6 +697,7 @@ function receiveWire(input: unknown) {
 		geometryProducer.receive(message)
 		geometrySignals?.refreshObservedWidgets()
 	}
+	else if ((message.type === 'contour.full.request' || message.type === 'contour.partial.request' || message.type === 'contour.cancel') && geometryProducer) geometryProducer.receiveContour(message)
 	// A version frame is read-only: it enters no targeting interaction and takes no Widget Event arm.
 	else if (versionId && (message.type === 'targeting.enter' || message.type === 'widget.event.arm')) return
 	else if (message.type === 'targeting.enter') {

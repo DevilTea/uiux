@@ -283,6 +283,33 @@ describe('Runtime DOM measurer', () => {
 		expect(valid(result.r!)).toBe(true)
 	})
 
+	it('measures a rounded Widget at a finer precision on request, with the same region IDs, and leaves the default alone (#110)', async () => {
+		await page.setContent('<!doctype html><html><head><style>html,body{margin:0}*{box-sizing:border-box}</style></head><body><div data-widget-id="r" style="position:absolute;left:10px;top:10px;width:200px;height:100px;border-radius:16px;background:#eee"></div></body></html>')
+		await page.addScriptTag({ content: bundle })
+		const result = await page.evaluate(() => {
+			const P = (globalThis as never as { UiuxGeometryPerf: { createDomGeometryMeasurer(options: { document: Document }): { beginPass(): void; measure(id: string): unknown; measureAt(id: string, target: number): unknown; endPass(): void } } }).UiuxGeometryPerf
+			const measurer = P.createDomGeometryMeasurer({ document })
+			measurer.beginPass()
+			const before = measurer.measure('r')
+			const fine = measurer.measureAt('r', 0.05)
+			const coarserThanDefault = measurer.measureAt('r', 3)
+			const after = measurer.measure('r')
+			measurer.endPass()
+			return JSON.parse(JSON.stringify({ before, fine, coarserThanDefault, after }))
+		}) as Record<'before' | 'fine' | 'coarserThanDefault' | 'after', WidgetGeometry>
+		const [coarse] = result.before.regions
+		const [finer] = result.fine.regions
+		expect(finer!.regionId).toBe(coarse!.regionId)
+		expect(finer!.maxError).toBeLessThanOrEqual(0.05)
+		expect(finer!.maxError).toBeLessThan(coarse!.maxError)
+		expect(finer!.contour.commands.length).toBeGreaterThan(coarse!.contour.commands.length)
+		expect(result.fine.rect).toEqual(result.before.rect)
+		expect(valid(result.fine)).toBe(true)
+		// A target never coarsens the default, and a finer measurement leaves nothing behind in the next one.
+		expect(result.coarserThanDefault).toEqual(result.before)
+		expect(result.after).toEqual(result.before)
+	})
+
 	it('fails closed for the Widget\'s own unprovable chain: rotation, filters', async () => {
 		const result = await measure(`
 			<div data-widget-id="rotated" style="position:absolute;left:0;top:0;width:100px;height:50px;transform:rotate(10deg);background:#eee"></div>
