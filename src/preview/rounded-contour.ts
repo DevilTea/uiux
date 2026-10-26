@@ -451,3 +451,104 @@ function finitePoint(value: Point): boolean {
 function samePoint(left: Point, right: Point): boolean {
 	return left.x === right.x && left.y === right.y
 }
+
+export type ApproximatedPolygon = Readonly<{
+	points: readonly Point[]
+	maxError: number
+}>
+
+/**
+ * Produces a polygon that contains a CSS-style rounded rectangle (after the standard radius-overlap
+ * scaling), for a covering shape whose approximation may only ever remove more than the shape does.
+ *
+ * Each corner arc is replaced by the tangent polygon of an equal-angle subdivision: every edge
+ * touches the arc, so the polygon contains the arc and the straight sides are kept exactly. For a
+ * unit circle and an arc step of phi = (pi/2)/n the farthest polygon point is sec(phi/2) - 1 away,
+ * at most 1/(2n^2), the bound the inscribed contour of `approximateRoundedRectContour` plans with,
+ * and an ellipse corner maps that distance by at most max(rx, ry) under its affine scaling.
+ */
+export function approximateRoundedRectOuterPolygon(
+	rect: WidgetRect,
+	radii: RoundedRectRadii,
+	targetMaxError: number,
+): ApproximatedPolygon | undefined {
+	const bounds = rectBounds(rect)
+	if (!bounds || rect.width === 0 || rect.height === 0 || !validTargetMaxError(targetMaxError))
+		return undefined
+	const normalized = normalizeRadii(bounds, rect.width, rect.height, radii)
+	if (!normalized) return undefined
+	const numericError = coordinateNumericError([
+		bounds.left, bounds.top, bounds.right, bounds.bottom,
+		normalized.topLeft.rx, normalized.topLeft.ry,
+		normalized.topRight.rx, normalized.topRight.ry,
+		normalized.bottomRight.rx, normalized.bottomRight.ry,
+		normalized.bottomLeft.rx, normalized.bottomLeft.ry,
+	])
+	if (numericError > targetMaxError) return undefined
+
+	const corners = [
+		{ radius: normalized.topLeft, cx: bounds.left + normalized.topLeft.rx, cy: bounds.top + normalized.topLeft.ry, start: Math.PI, square: point(bounds.left, bounds.top) },
+		{ radius: normalized.topRight, cx: bounds.right - normalized.topRight.rx, cy: bounds.top + normalized.topRight.ry, start: 1.5 * Math.PI, square: point(bounds.right, bounds.top) },
+		{ radius: normalized.bottomRight, cx: bounds.right - normalized.bottomRight.rx, cy: bounds.bottom - normalized.bottomRight.ry, start: 0, square: point(bounds.right, bounds.bottom) },
+		{ radius: normalized.bottomLeft, cx: bounds.left + normalized.bottomLeft.rx, cy: bounds.bottom - normalized.bottomLeft.ry, start: 0.5 * Math.PI, square: point(bounds.left, bounds.bottom) },
+	] as const
+
+	const points: Point[] = []
+	let reportedError = numericError
+	for (const corner of corners) {
+		const { rx, ry } = corner.radius
+		if (rx === 0 || ry === 0) {
+			points.push(corner.square)
+			continue
+		}
+		const plan = planQuarterArc(Math.max(rx, ry), targetMaxError, numericError)
+		if (!plan) return undefined
+		reportedError = Math.max(reportedError, plan.reportedError)
+		appendTangentArc(points, { cx: corner.cx, cy: corner.cy, rx, ry }, corner.start, plan.segments)
+	}
+	return finishPolygon(points, reportedError)
+}
+
+/** The tangent polygon of an axis-aligned ellipse, containing it (see `approximateRoundedRectOuterPolygon`). */
+export function approximateEllipseOuterPolygon(
+	ellipse: EllipseGeometry,
+	targetMaxError: number,
+): ApproximatedPolygon | undefined {
+	if (!validTargetMaxError(targetMaxError) || !validEllipse(ellipse)) return undefined
+	if (ellipse.rx === 0 || ellipse.ry === 0) return undefined
+	const numericError = coordinateNumericError([
+		ellipse.cx, ellipse.cy, ellipse.rx, ellipse.ry,
+		ellipse.cx - ellipse.rx, ellipse.cx + ellipse.rx, ellipse.cy - ellipse.ry, ellipse.cy + ellipse.ry,
+	])
+	const plan = planQuarterArc(Math.max(ellipse.rx, ellipse.ry), targetMaxError, numericError)
+	if (!plan) return undefined
+	const points: Point[] = []
+	for (let quarter = 0; quarter < 4; quarter++) appendTangentArc(points, ellipse, quarter * 0.5 * Math.PI, plan.segments, false)
+	return finishPolygon(points, plan.reportedError)
+}
+
+/**
+ * Appends one quarter arc of an ellipse, from angle `start`, as the vertices of its tangent
+ * polygon: the two arc ends (when `ends`) joined by the intersections of consecutive tangents.
+ */
+function appendTangentArc(points: Point[], ellipse: EllipseGeometry, start: number, segments: number, ends = true): void {
+	const step = (0.5 * Math.PI) / segments
+	// Scales a mid-step direction out to the intersection of the two tangents around it.
+	const reach = 1 / Math.cos(step / 2)
+	const onEllipse = (angle: number, factor: number) => point(ellipse.cx + ellipse.rx * Math.cos(angle) * factor, ellipse.cy + ellipse.ry * Math.sin(angle) * factor)
+	if (ends) points.push(onEllipse(start, 1))
+	for (let index = 0; index < segments; index++) points.push(onEllipse(start + (index + 0.5) * step, reach))
+	if (ends) points.push(onEllipse(start + 0.5 * Math.PI, 1))
+}
+
+function finishPolygon(points: readonly Point[], maxError: number): ApproximatedPolygon | undefined {
+	const deduplicated: Point[] = []
+	for (const next of points) {
+		if (!finitePoint(next)) return undefined
+		const last = deduplicated[deduplicated.length - 1]
+		if (!last || !samePoint(last, next)) deduplicated.push(next)
+	}
+	while (deduplicated.length > 1 && samePoint(deduplicated[0]!, deduplicated[deduplicated.length - 1]!)) deduplicated.pop()
+	if (deduplicated.length < 3 || !Number.isFinite(maxError)) return undefined
+	return Object.freeze({ points: Object.freeze(deduplicated), maxError })
+}
