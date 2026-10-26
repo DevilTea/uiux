@@ -10,6 +10,7 @@ import { resolveFrameContext } from '../../src/preview/version-frame-context'
 import type { WorkspaceManifest } from '../../src/domain/workspace/schema'
 import { RuntimePreviewProtocolBridge } from '../../src/preview/protocol/bridge'
 import { createRuntimeGenerationId } from '../../src/preview/protocol/generation-id'
+import { REGION_STATUS_GEOMETRY_FEATURE } from '../../src/preview/protocol/schema'
 import { RuntimeGeometryProducer } from '../../src/preview/geometry-producer'
 import { createDomGeometryMeasurer } from '../../src/preview/dom-geometry'
 import { revealWidget } from '../../src/preview/reveal'
@@ -385,6 +386,8 @@ function initBridge() {
 					},
 				})
 			},
+			// `regionStatus` goes in a report only when this runtime declared `geometry.region-status`.
+			regionStatus: declaredFeatures().includes(REGION_STATUS_GEOMETRY_FEATURE),
 			measurer: createDomGeometryMeasurer({ document }),
 			// A reveal scrolls only this document; the bridge passes one only when `geometry.reveal` was declared.
 			reveal: widgetId => revealWidget(document, widgetId) === 'scrolled',

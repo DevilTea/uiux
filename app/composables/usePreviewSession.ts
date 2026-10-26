@@ -28,8 +28,10 @@ import {
 import type { AffineOuterMapping } from '../../src/preview/outer-precision'
 import {
 	MULTI_TARGET_GEOMETRY_FEATURE,
+	REGION_STATUS_GEOMETRY_FEATURE,
 	REVEAL_GEOMETRY_FEATURE,
 	type GeometryAcquireResponse,
+	type RegionStatus,
 	type PreviewFailureDiagnostic,
 	type VisibleRegion,
 	type WidgetRect,
@@ -73,13 +75,17 @@ export type SelectionGeometry = Readonly<{
 	geometryRevision: number
 	rect: WidgetRect
 	regions: readonly VisibleRegion[]
+	/** `translucent` when the report states proven translucent coverage over the Widget (Clause 01a11a59-dbda-79e5-9337-307bb9c1798b). */
+	regionStatus?: RegionStatus
 }>
 
 /**
  * `awaiting`: requested, no current report yet. `hidden`: zero-area or no reliably visible region
- * ("Not visible in this state"). `offscreen`: outside the iframe content viewport.
+ * ("Not visible in this state"). `offscreen`: outside the iframe content viewport. `unavailable`: the
+ * report says that the Widget's visible region or contour precision cannot be established, which is
+ * not "hidden" (Rule 01a11687-2d04-704b-887a-4b599e54e887).
  */
-export type SelectionVisibility = 'none' | 'awaiting' | 'visible' | 'hidden' | 'offscreen'
+export type SelectionVisibility = 'none' | 'awaiting' | 'visible' | 'hidden' | 'offscreen' | 'unavailable'
 
 /** The runtime's current hover candidate and its geometry (Part 3 targeting hover preview). */
 export type HoverCandidate = Readonly<{
@@ -190,6 +196,8 @@ export function createPreviewSession(state: WorkbenchState) {
 	const runtimeFeatures = ref<readonly string[]>([])
 	const selectionGeometry = shallowRef<SelectionGeometry>()
 	const selectionVisibility = ref<SelectionVisibility>('none')
+	/** The selected Widget's rectangle while its report says that precision is unavailable (the notice is anchored on it). */
+	const selectionUnavailable = shallowRef<Readonly<{ widgetId: string; rect: WidgetRect }>>()
 	/** Bumps on every accepted or hidden geometry report, so computed consumers re-read the coordinator. */
 	const geometryVersion = ref(0)
 	const hoverWidgetId = ref<string>()
@@ -299,7 +307,7 @@ export function createPreviewSession(state: WorkbenchState) {
 		if (refinementWidgetId && changed.has(refinementWidgetId)) {
 			const current = geometryStreams.report(refinementWidgetId)
 			if (current) {
-				refinement.setVisible(reportVisibility(current.rect, current.regions) === 'visible')
+				refinement.setVisible(reportVisibility(current.rect, current.regions, current.regionStatus) === 'visible')
 				refinement.acceptReport(current)
 			}
 			else refinement.dropReport(refinementWidgetId)
@@ -359,8 +367,23 @@ export function createPreviewSession(state: WorkbenchState) {
 		return widgetId ? refinement.precision(widgetId, { mapping }) : NO_PRECISION
 	}
 
+	/**
+	 * The Widget whose highlight is drawn under proven translucent coverage, for the one notice beside
+	 * the highlight and the matching marker on its Checks entry (Rules 01a11658-1d29-793c-9641-264dc477cfd5,
+	 * 01a11658-1d6e-75b1-b5c7-118341164ff5 and 01a11a70-38db-7a91-8cff-97dd242ac9e8). It describes the
+	 * current Preview state only: none while Comment mode suspends the highlight, while the highlight is
+	 * not drawn (no current report, a precision that is not met) and for a report without the status.
+	 */
+	const translucentCoverage = computed<string | undefined>(() => {
+		void geometryVersion.value
+		const geometry = selectionGeometry.value
+		if (!geometry || geometry.regionStatus !== 'translucent' || geometry.widgetId === 'root' || isCommentMode.value) return undefined
+		const precision = highlightPrecisionFor(canvasMapping.value.mapping)
+		return precision.status === 'precise' && precision.geometryRevision === geometry.geometryRevision ? geometry.widgetId : undefined
+	})
+
 	/** Whether a report puts a visible part of the Widget inside the Preview's content viewport. */
-	function reportVisibility(rect: WidgetRect, regions: readonly VisibleRegion[]): SelectionVisibility {
+	function reportVisibility(rect: WidgetRect, regions: readonly VisibleRegion[], regionStatus?: RegionStatus): SelectionVisibility {
 		const viewport = state.contextOptions.value.viewports.selectedDimensions
 		const zeroArea = rect.width === 0 || rect.height === 0
 		const intersects = rect.x < viewport.width && rect.y < viewport.height && rect.x + rect.width > 0 && rect.y + rect.height > 0
@@ -368,7 +391,9 @@ export function createPreviewSession(state: WorkbenchState) {
 		// none there, which is no reason to call it hidden (Rule 01a11a59-eba4-7d32-a10e-1241b5337460).
 		if (zeroArea) return 'hidden'
 		if (!intersects) return 'offscreen'
-		return regions.length ? 'visible' : 'hidden'
+		if (regions.length) return 'visible'
+		// An empty set whose status is `unavailable` is not "not visible": the region could not be established.
+		return regionStatus === 'unavailable' ? 'unavailable' : 'hidden'
 	}
 	const pinEngine = new PinPlacementEngine()
 
@@ -558,6 +583,7 @@ export function createPreviewSession(state: WorkbenchState) {
 		pendingReveal = undefined
 		selectionTarget = undefined
 		selectionGeometry.value = undefined
+		selectionUnavailable.value = undefined
 		selectionVisibility.value = 'none'
 		updateGeometryDemand()
 	}
@@ -612,6 +638,7 @@ export function createPreviewSession(state: WorkbenchState) {
 	function acquireSelectionGeometry(): void {
 		selectionTarget = undefined
 		selectionGeometry.value = undefined
+		selectionUnavailable.value = undefined
 		const viewId = state.selectedViewId.value
 		const widgetId = state.selectedWidgetId.value
 		if (!viewId || !widgetId || !navigationCoordinator) {
@@ -643,7 +670,9 @@ export function createPreviewSession(state: WorkbenchState) {
 		const target = selectionTarget
 		if (!target || !navigationCoordinator || message.context.widgetId !== target.widgetId) return
 		const { rect, regions } = message.payload
-		const visibility = reportVisibility(rect, regions)
+		// The status the coordinator kept: it reads none from a runtime that did not declare `geometry.region-status`.
+		const regionStatus = geometryStreams.report(message.context.widgetId)?.regionStatus
+		const visibility = reportVisibility(rect, regions, regionStatus)
 		const accepted = navigationCoordinator.acceptGeometry({
 			navigationRequestId: message.context.navigationRequestId ?? '',
 			viewId: message.context.viewId,
@@ -651,18 +680,21 @@ export function createPreviewSession(state: WorkbenchState) {
 			...(message.context.runtimeContextVersion !== undefined ? { runtimeContextVersion: message.context.runtimeContextVersion } : {}),
 			widgetId: message.context.widgetId,
 			geometryRevision: message.context.geometryRevision,
+			// An unavailable region draws no highlight, as a hidden one does; the Workbench tells the two apart itself.
 			visibility: visibility === 'visible' ? 'visible' : visibility === 'offscreen' ? 'offscreen' : 'hidden',
 		})
 		if (accepted.status !== 'accepted') return
 		selectionVisibility.value = visibility
 		selectionGeometry.value = visibility === 'visible'
-			? Object.freeze({ widgetId: target.widgetId, geometryRevision: message.context.geometryRevision, rect, regions })
+			? Object.freeze({ widgetId: target.widgetId, geometryRevision: message.context.geometryRevision, rect, regions, ...(regionStatus === 'translucent' ? { regionStatus } : {}) })
 			: undefined
+		selectionUnavailable.value = visibility === 'unavailable' ? Object.freeze({ widgetId: target.widgetId, rect }) : undefined
 	}
 
 	function resetSelectionGeometry(): void {
 		selectionTarget = undefined
 		selectionGeometry.value = undefined
+		selectionUnavailable.value = undefined
 		selectionVisibility.value = state.selectedWidgetId.value ? 'awaiting' : 'none'
 	}
 
@@ -728,6 +760,7 @@ export function createPreviewSession(state: WorkbenchState) {
 			navigationCoordinator?.enterCommentMode()
 			selectionTarget = undefined
 			selectionGeometry.value = undefined
+			selectionUnavailable.value = undefined
 		}
 		applyToolInteraction()
 		if (previous === 'comment') leaveCommentTracking()
@@ -1021,6 +1054,7 @@ export function createPreviewSession(state: WorkbenchState) {
 		syncGeometryContext()
 		geometryStreams.setMultiTarget(features.includes(MULTI_TARGET_GEOMETRY_FEATURE))
 		geometryStreams.setRevealSupported(features.includes(REVEAL_GEOMETRY_FEATURE))
+		geometryStreams.setRegionStatusSupported(features.includes(REGION_STATUS_GEOMETRY_FEATURE))
 		if (runtimeGenerationId.value) targeting.markGenerationReady(runtimeGenerationId.value)
 		// The new document knows no targeting interaction yet: enter a fresh one for the current tool.
 		applyToolInteraction()
@@ -1336,6 +1370,8 @@ export function createPreviewSession(state: WorkbenchState) {
 		startReanchor,
 		selectionGeometry,
 		selectionVisibility,
+		selectionUnavailable,
+		translucentCoverage,
 		highlightPrecisionFor,
 		hoverCandidate,
 		canvasMapping,

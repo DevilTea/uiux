@@ -299,6 +299,18 @@ const handoffFacet = computed<Facet>(() => {
                 >
                   {{ finding.widgetType ? `${finding.widgetType} · ` : '' }}#{{ finding.widgetId }}
                 </UButton>
+                <!-- The marker of the notice beside the Preview highlight: current Preview state only, so it exists only here, where the Preview is live. It adds no finding. -->
+                <span
+                  v-if="finding.widgetId && preview.translucentCoverage.value === finding.widgetId"
+                  class="ms-1 inline-flex items-center gap-1 text-xs text-muted"
+                  data-translucent-marker
+                >
+                  <UIcon
+                    name="i-lucide-layers"
+                    class="size-3 shrink-0"
+                  />
+                  {{ t('canvas.translucentNotice') }}
+                </span>
                 <span
                   v-else
                   class="block text-xs text-dimmed"

@@ -39,6 +39,12 @@ export type OcclusionEvidence<Shape> =
 	| Readonly<{
 		classification: 'translucent'
 		targetContribution: 'proven-nonzero'
+		/**
+		 * Where the translucent paint lies, when that is proven: a shape contained in the covered area, or
+		 * `everywhere` for paint that spans the whole document viewport. Without it the paint keeps what it
+		 * covers (Rule 01a11687-3190) but a status that claims coverage is never taken from it.
+		 */
+		area?: Shape | 'everywhere'
 	}>
 	| Readonly<{
 		/** The exact covering shape or paint order is unproven, but the paint has a finite bound. */
@@ -63,6 +69,8 @@ export type OcclusionPlan<Shape> =
 		status: 'precise'
 		subtract: readonly OcclusionCut<Shape>[]
 		translucentObstruction: boolean
+		/** The proven areas of the translucent paint over the Widget; a status that claims coverage rests on these. */
+		translucentAreas: readonly (Shape | 'everywhere')[]
 	}>
 	| Readonly<{
 		status: 'structural-only'
@@ -79,6 +87,7 @@ export type OcclusionPlan<Shape> =
 export function planOcclusion<Shape>(evidence: readonly OcclusionEvidence<Shape>[]): OcclusionPlan<Shape> {
 	const subtract: OcclusionCut<Shape>[] = []
 	let translucentObstruction = false
+	const translucentAreas: (Shape | 'everywhere')[] = []
 
 	for (const item of evidence) {
 		if (item.classification === 'unsupported')
@@ -86,6 +95,7 @@ export function planOcclusion<Shape>(evidence: readonly OcclusionEvidence<Shape>
 
 		if (item.classification === 'translucent') {
 			translucentObstruction = true
+			if (item.area !== undefined) translucentAreas.push(item.area === 'everywhere' ? item.area : cloneUnknown(item.area))
 			continue
 		}
 
@@ -103,6 +113,7 @@ export function planOcclusion<Shape>(evidence: readonly OcclusionEvidence<Shape>
 		status: 'precise' as const,
 		subtract: Object.freeze(subtract),
 		translucentObstruction,
+		translucentAreas: Object.freeze(translucentAreas),
 	})
 }
 

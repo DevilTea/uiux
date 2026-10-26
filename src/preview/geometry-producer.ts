@@ -10,12 +10,21 @@ import {
 	type PartialContourRequest,
 	type PartialContourResponse,
 	type ProtocolContext,
+	type RegionStatus,
 	type VisibleRegion,
 	type WidgetRect,
 } from './protocol/schema'
 
 /** One Widget's complete geometry at one instant, in inner content-viewport CSS px. */
-export type WidgetGeometry = Readonly<{ rect: WidgetRect; regions: readonly VisibleRegion[] }>
+export type WidgetGeometry = Readonly<{
+	rect: WidgetRect
+	regions: readonly VisibleRegion[]
+	/**
+	 * What the report says about its regions, for a runtime that declares `geometry.region-status`:
+	 * absent when neither `translucent` nor `unavailable` applies (Clause 01a11a59-dbda-79e5-9337-307bb9c1798b).
+	 */
+	regionStatus?: RegionStatus
+}>
 
 /**
  * Measures Widgets for one recomputation pass. `beginPass`/`endPass` bracket the pass so a
@@ -73,6 +82,11 @@ export type GeometryProducerDependencies = Readonly<{
 	cancelFrame(handle: number): void
 	/** Monotonic clock for the optional per-frame work statistics. */
 	now?: () => number
+	/**
+	 * Whether the runtime declares `geometry.region-status`. Without it no report carries a `regionStatus`,
+	 * whatever the measurer found (Clause 01a11a59-dbda-79e5-9337-307bb9c1798b).
+	 */
+	regionStatus?: boolean
 	/** Streams supported at once. A runtime declaring `geometry.multi-target` supports at least 64. */
 	maxStreams?: number
 }>
@@ -350,7 +364,7 @@ export class RuntimeGeometryProducer {
 			const geometry = stream.target !== undefined && this.deps.measurer.measureAt
 				? this.deps.measurer.measureAt(widgetId, stream.target)
 				: this.deps.measurer.measure(widgetId)
-			const key = geometryKey(geometry)
+			const key = geometryKey(geometry, this.deps.regionStatus === true)
 			const forced = stream.force === true
 			stream.force = false
 			if (stream.reported && key === stream.lastKey && !forced) continue
@@ -365,7 +379,11 @@ export class RuntimeGeometryProducer {
 			this.deps.send({
 				type: 'geometry.acquire.response',
 				context: { ...stream.context, geometryRevision },
-				payload: { rect: geometry.rect, regions: geometry.regions },
+				payload: {
+					rect: geometry.rect,
+					regions: geometry.regions,
+					...(this.deps.regionStatus && geometry.regionStatus ? { regionStatus: geometry.regionStatus } : {}),
+				},
 			})
 		}
 		if (measured) {
@@ -548,10 +566,10 @@ function sameContext(left: RuntimeGeometryContext, right: RuntimeGeometryContext
 	return left.viewId === right.viewId && left.variantId === right.variantId
 }
 
-/** Equality key of a report: a stream sends nothing while its `rect` and `regions` stay equal. */
-function geometryKey(geometry: WidgetGeometry): string {
+/** Equality key of a report: a stream sends nothing while its `rect`, `regions` and `regionStatus` stay equal. */
+function geometryKey(geometry: WidgetGeometry, withStatus: boolean): string {
 	const { rect, regions } = geometry
-	let key = `${rect.x},${rect.y},${rect.width},${rect.height}`
+	let key = `${rect.x},${rect.y},${rect.width},${rect.height}${withStatus && geometry.regionStatus ? `#${geometry.regionStatus}` : ''}`
 	for (const region of regions) {
 		key += `|${region.regionId}:${region.maxError}`
 		for (const command of region.contour.commands) {

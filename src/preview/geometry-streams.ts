@@ -4,6 +4,7 @@ import {
 	type GeometryAcquireResponse,
 	type GeometryReleaseRequest,
 	type GeometryRevealRequest,
+	type RegionStatus,
 	type VisibleRegion,
 	type WidgetRect,
 } from './protocol/schema'
@@ -63,6 +64,8 @@ export type GeometryReport = Readonly<{
 	geometryRevision: number
 	rect: WidgetRect
 	regions: readonly VisibleRegion[]
+	/** What the report says about its regions, kept only for a runtime that declared `geometry.region-status`. */
+	regionStatus?: RegionStatus
 }>
 
 export type GeometryReportOutcome = 'accepted' | 'no-context' | 'stale-context' | 'stale-stream' | 'stale-revision'
@@ -104,6 +107,7 @@ export class GeometryStreamCoordinator {
 	private ready = false
 	private multiTarget = false
 	private revealSupported = false
+	private regionStatusSupported = false
 	private demands: readonly GeometryDemand[] = []
 	private readonly streams = new Map<string, OpenStream>()
 	private readonly reports = new Map<string, GeometryReport>()
@@ -166,6 +170,15 @@ export class GeometryStreamCoordinator {
 	}
 
 	/**
+	 * Whether the runtime declared `geometry.region-status`. Without it a `regionStatus` is not read: an
+	 * empty region set means that no part is visible, and no translucent notice is ever shown
+	 * (Contract 01a1161c-3f11-7cc9-8e58-ccca1b3a422a, Notes).
+	 */
+	setRegionStatusSupported(enabled: boolean): void {
+		this.regionStatusSupported = enabled
+	}
+
+	/**
 	 * Asks the runtime to scroll the Widget of the open stream `navigationRequestId` into view, once,
 	 * one-way and best-effort (Clause 01a11a59-d8be-78aa-bdc7-28aa62bd9444). It is sent only in an
 	 * acknowledged generation that declared the feature, and only for the Widget's currently open
@@ -218,6 +231,7 @@ export class GeometryStreamCoordinator {
 			geometryRevision: reported.geometryRevision,
 			rect: response.payload.rect,
 			regions: response.payload.regions,
+			...(this.regionStatusSupported && response.payload.regionStatus ? { regionStatus: response.payload.regionStatus } : {}),
 		}))
 		this.emit(new Set([reported.widgetId]))
 		return 'accepted'

@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { useI18n } from '#imports'
 import { mapContourAffine, mapPointAffine, type AffineOuterMapping } from '../../../src/preview/outer-precision'
+import { aggregateHighlightBounds } from '../../../src/preview/highlight-bounds'
 import type { Contour, WidgetRect } from '../../../src/preview/protocol/schema'
 import type { HoverCandidate, SelectionGeometry } from '../../composables/usePreviewSession'
 
@@ -21,6 +22,8 @@ const props = defineProps<{
 	hover?: HoverCandidate
 	/** The highlight is hidden because its contours cannot be drawn precisely: only a notice, anchored on the regions' bounds. */
 	precisionNotice?: Readonly<{ widgetId: string; reason?: string; bounds?: WidgetRect }>
+	/** The highlighted Widget is under proven translucent coverage: one shared notice beside the highlight (Rule 01a11658-1d29-793c-9641-264dc477cfd5). */
+	translucent?: boolean
 	hoverType?: string
 	/** Comment mode is re-anchoring a thread: the chip says "Re-anchor to {type}". */
 	reanchor?: boolean
@@ -39,12 +42,13 @@ const CHIP_INSET = 4
 
 // Chip widths are measured so a chip can flip or clamp inside the stage (a narrow phone stage
 // would otherwise clip a label anchored near its right edge).
-type ChipName = 'type' | 'size' | 'hover' | 'notice'
-const chipWidths = reactive<Record<ChipName, number>>({ type: 0, size: 0, hover: 0, notice: 0 })
+type ChipName = 'type' | 'size' | 'hover' | 'notice' | 'translucent'
+const chipWidths = reactive<Record<ChipName, number>>({ type: 0, size: 0, hover: 0, notice: 0, translucent: 0 })
 const typeChip = ref<HTMLElement>()
 const sizeChip = ref<HTMLElement>()
 const hoverChip = ref<HTMLElement>()
 const noticeChip = ref<HTMLElement>()
+const translucentChip = ref<HTMLElement>()
 const chipNames = new WeakMap<Element, ChipName>()
 const chipObserver = typeof ResizeObserver === 'undefined'
 	? undefined
@@ -65,6 +69,7 @@ watch(typeChip, (element, previous) => observeChip('type', element, previous), {
 watch(sizeChip, (element, previous) => observeChip('size', element, previous), { flush: 'post' })
 watch(hoverChip, (element, previous) => observeChip('hover', element, previous), { flush: 'post' })
 watch(noticeChip, (element, previous) => observeChip('notice', element, previous), { flush: 'post' })
+watch(translucentChip, (element, previous) => observeChip('translucent', element, previous), { flush: 'post' })
 onBeforeUnmount(() => chipObserver?.disconnect())
 
 /** Keeps a chip of `width` starting at `left` inside the stage; with no stage, it is unchanged. */
@@ -144,6 +149,27 @@ const notice = computed(() => {
 	return { left: placeStartChip(topLeft.x, bottomRight.x, chipWidths.notice), top: chipTop(topLeft.y) }
 })
 
+/**
+ * The one translucent-obstruction notice: anchored on the aggregate bounds of every highlighted region,
+ * end-aligned with their top-right corner, in the row above the outline. It moves just inside the
+ * outline when that row would collide with the type chip or leave no room (Rule 01a11658-1d29-793c-9641-264dc477cfd5).
+ */
+const translucentNotice = computed(() => {
+	const { mapping, geometry } = props
+	if (!props.translucent || !mapping || !geometry || geometry.widgetId === 'root') return undefined
+	const bounds = aggregateHighlightBounds(geometry.regions)
+	if (!bounds) return undefined
+	const topLeft = mapPointAffine({ x: bounds.left, y: bounds.top }, mapping)
+	const topRight = mapPointAffine({ x: bounds.right, y: bounds.top }, mapping)
+	const width = chipWidths.translucent
+	const left = clampChip(topRight.x + 1 - width, width)
+	const above = chipTop(topLeft.y)
+	// The type chip starts at the outline's top-left in the same row: keep clear of it.
+	const typeEnd = (selection.value?.type.left ?? Number.NEGATIVE_INFINITY) + chipWidths.type
+	const collides = above < topLeft.y && left < typeEnd + CHIP_GAP
+	return { left, top: collides ? topLeft.y + CHIP_GAP : above }
+})
+
 const selection = computed(() => {
 	const { mapping, geometry } = props
 	// The RootShell is the frame itself; its edge already marks it.
@@ -212,6 +238,19 @@ const selection = computed(() => {
       data-precision-unavailable
       :style="{ left: `${notice.left}px`, top: `${notice.top}px` }"
     >{{ t('canvas.precisionUnavailable') }}</span>
+    <span
+      v-if="translucentNotice"
+      ref="translucentChip"
+      class="blueprint-chip is-prose"
+      data-translucent-notice
+      :style="{ left: `${translucentNotice.left}px`, top: `${translucentNotice.top}px` }"
+    >
+      <UIcon
+        name="i-lucide-layers"
+        class="size-3 align-text-bottom"
+      />
+      {{ t('canvas.translucentNotice') }}
+    </span>
     <template v-if="selection">
       <svg
         class="absolute inset-0 size-full overflow-visible"

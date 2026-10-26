@@ -1046,7 +1046,10 @@
     "switchToBase": "Switch to base state",
     "mappingPaused": "Precise highlight paused. The preview can't be measured right now.",
     "precisionUnavailable": "Precise highlighting unavailable",
+    "translucentNotice": "Under a translucent layer",
+    "translucentAnnounce": "This Widget is under a translucent layer in the current preview.",
     "precisionAnnounce": {
+      "region-status": "Precise highlighting is unavailable: the preview cannot establish where this Widget is visible.",
       "latched": "Precise highlighting is unavailable: refining the outline of this Widget failed.",
       "exhausted": "Precise highlighting is unavailable: finer outlines could not be drawn at this zoom.",
       "unproven-mapping": "Precise highlighting is unavailable: the preview's transform cannot be proven precise.",
