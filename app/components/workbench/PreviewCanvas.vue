@@ -290,6 +290,23 @@ const hoverCandidate = computed(() => {
 	if (candidate.purpose === 'inspection' && candidate.widgetId === highlightGeometry.value?.widgetId) return undefined
 	return candidate
 })
+/**
+ * What the overlay draws of the highlight: the Widget's contours only while every one meets the display
+ * tolerance under the current mapping (Rule 01a11687-32da-7ea6-83aa-d7451aaf0111). Otherwise the whole
+ * highlight stays hidden, and only an unavailable precision says so.
+ */
+const drawnHighlight = computed(() => {
+	const geometry = highlightGeometry.value
+	const precision = preview.highlightPrecision.value
+	return geometry && precision.status === 'precise' && precision.geometryRevision === geometry.geometryRevision
+		? { ...geometry, regions: precision.regions }
+		: undefined
+})
+const precisionNotice = computed(() => {
+	const geometry = highlightGeometry.value
+	const precision = preview.highlightPrecision.value
+	return geometry && precision.status === 'unavailable' ? { widgetId: geometry.widgetId, ...(precision.bounds ? { bounds: precision.bounds } : {}) } : undefined
+})
 const pinsTracked = computed(() => preview.pinPlacements.value.length > 0)
 /** Threads whose Widget is gone (never drawn, never rebound): the unplaced tray (brief c, section 6). */
 const unplacedThreads = computed(() => comments?.threads.value.filter(item => !item.anchorValid && item.status !== 'resolved' && comments.inFilter(item)) ?? [])
@@ -749,7 +766,8 @@ function switchToBase(): void {
             <CanvasOverlay
               v-if="showFrame && overlayActive"
               :mapping="mapping"
-              :geometry="highlightGeometry"
+              :geometry="drawnHighlight"
+              :precision-notice="precisionNotice"
               :widget-type="widgetNode?.type"
               :hover="hoverCandidate"
               :hover-type="hoverNode?.type"

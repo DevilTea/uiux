@@ -1019,6 +1019,7 @@
     "variantInvalid": "這個 Variant 無法執行。",
     "switchToBase": "切換為基本狀態",
     "mappingPaused": "已暫停精確標示。目前無法量測預覽畫面。",
+    "precisionUnavailable": "無法精確標示",
     "widgetMissing": "Widget {id} 已不在這個 View 中。",
     "viewMissing": "找不到 View，已停留在目前頁面。",
     "notVisible": "在此狀態下不可見",

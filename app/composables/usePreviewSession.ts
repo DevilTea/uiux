@@ -15,6 +15,7 @@ import { workbenchPreviewSessions } from '../../src/preview/protocol/session'
 import { PreviewNavigationState, type PreviewNavigationTarget } from '../../src/preview/navigation-state'
 import { PreviewTargetingState } from '../../src/preview/targeting-state'
 import { GeometryStreamCoordinator, type GeometryDemand, type GeometryReport } from '../../src/preview/geometry-streams'
+import { ContourRefinement, type HighlightPrecision } from '../../src/preview/contour-refinement'
 import {
 	PinPlacementEngine,
 	pinGeometryDemand,
@@ -243,6 +244,12 @@ export function createPreviewSession(state: WorkbenchState) {
 	 */
 	let geometryFrame: number | undefined
 	geometryStreams.subscribe((changed) => {
+		// The highlight's contour cache follows its Widget's current report: replaced at once, dropped with it.
+		if (refinementWidgetId && changed.has(refinementWidgetId)) {
+			const current = geometryStreams.report(refinementWidgetId)
+			if (current) refinement.acceptReport(current)
+			else refinement.dropReport(refinementWidgetId)
+		}
 		const removed = [...changed].some(widgetId => !geometryStreams.report(widgetId))
 		if (removed || typeof requestAnimationFrame === 'undefined') {
 			if (geometryFrame !== undefined) cancelAnimationFrame(geometryFrame)
@@ -254,6 +261,45 @@ export function createPreviewSession(state: WorkbenchState) {
 			geometryFrame = undefined
 			geometryVersion.value++
 		})
+	})
+	/**
+	 * Contour precision and refinement of the selected Widget's highlight (issue #110): the display
+	 * tolerance check under the canvas mapping, refinement requests, cancellation and the failure latch.
+	 */
+	const refinement = new ContourRefinement({
+		send: message => workbenchBridge?.sendGeometry(message).status === 'sent',
+	})
+	/** The Widget the refinement serves: the one whose highlight is shown. */
+	let refinementWidgetId: string | undefined
+	/** Bumps when what may be drawn of the highlight, or its contour work, changes. */
+	const precisionVersion = ref(0)
+	refinement.subscribe(() => { precisionVersion.value++ })
+	// A non-recoverable refinement failure shows the inline diagnostic until the latch ends (Rule
+	// 01a11687-375e-7667-b8f1-59389fdd9780); the generation and its streams stay as they are.
+	let latchFailure: PreviewFailureDiagnostic | undefined
+	refinement.subscribeLatch((report) => {
+		if (report) {
+			latchFailure = failureReportDiagnostic(report)
+			shownFailure.value = latchFailure
+		}
+		else if (latchFailure) {
+			// The latch ends with a geometry change or another context while the generation lives; a generation
+			// that ends keeps its diagnostic through Retry Preview until the next one recovers.
+			if (shownFailure.value === latchFailure && runtimeGenerationId.value) shownFailure.value = undefined
+			latchFailure = undefined
+		}
+	})
+	// The canvas publishes its measured mapping; a scale that makes a contour miss the display tolerance asks for finer ones.
+	watch(canvasMapping, state => refinement.setMapping(state.mapping), { immediate: true })
+	const NO_PRECISION: HighlightPrecision = Object.freeze({ status: 'none' })
+	/**
+	 * What may be drawn of the selected Widget's highlight: its contours only while every one meets the
+	 * display tolerance under the current mapping (Rule 01a11687-32da-7ea6-83aa-d7451aaf0111).
+	 */
+	const highlightPrecision = computed<HighlightPrecision>(() => {
+		void precisionVersion.value
+		const widgetId = selectionGeometry.value?.widgetId
+		return widgetId ? refinement.precision(widgetId) : NO_PRECISION
 	})
 	const pinEngine = new PinPlacementEngine()
 
@@ -395,14 +441,17 @@ export function createPreviewSession(state: WorkbenchState) {
 		const viewId = state.selectedViewId.value
 		const generation = runtimeGenerationId.value
 		const variantId = currentVariantId()
-		geometryStreams.setContext(viewId && generation
+		const context = viewId && generation
 			? {
 					previewSessionId: previewSessionId.value,
 					runtimeGenerationId: generation,
 					viewId,
 					...(variantId ? { variantId } : {}),
 				}
-			: undefined)
+			: undefined
+		// A View or Variant change cancels the contour work of the previous context before it ends.
+		refinement.setContext(context)
+		geometryStreams.setContext(context)
 	}
 
 	/** Recomputes which Widgets need geometry: hover candidate, selection highlight, pins (decision 6). */
@@ -419,6 +468,9 @@ export function createPreviewSession(state: WorkbenchState) {
 			demand.push(focused.has(pin.consumerId) ? { ...pin, tier: 'targeting' } : pin)
 		}
 		geometryStreams.setDemand(demand)
+		// The highlight is the only consumer that asks for precise contours; pins never do (Rule 01a11658-2727-76aa-aa7e-0661e92496e9).
+		refinementWidgetId = selectionTarget && !isCommentMode.value && selectionTarget.widgetId !== 'root' ? selectionTarget.widgetId : undefined
+		refinement.setDemand(refinementWidgetId)
 	}
 
 	/**
@@ -961,8 +1013,10 @@ export function createPreviewSession(state: WorkbenchState) {
 			if (message.type === 'geometry.acquire.response') receiveGeometryReport(message)
 			else if (message.type === 'targeting.hover' || message.type === 'targeting.select' || message.type === 'targeting.escape') receiveTargeting(message)
 			else if (message.type === 'widget.event.occurrence') widgetEvents.receive(message)
-			// A work-scoped failure report ends one contour work and leaves its generation alone; the
-			// Workbench sends no contour work yet, so there is none to end (issue #110).
+			else if (message.type === 'contour.full.response' || message.type === 'contour.partial.response') refinement.receiveResponse(message)
+			// A work-scoped failure report ends one contour work as a non-recoverable refinement failure and
+			// leaves its stream and generation alone (Clause 01a11a59-def9-797a-8d08-5e4b02ecd900).
+			else if (message.type === 'failure.report') refinement.receiveFailureReport(message)
 		}
 		else if (result.status === 'generation-failed') {
 			// The runtime reported its generation's failure: the session ended and retired it. A `protocol`
@@ -1107,6 +1161,7 @@ export function createPreviewSession(state: WorkbenchState) {
 		startReanchor,
 		selectionGeometry,
 		selectionVisibility,
+		highlightPrecision,
 		hoverCandidate,
 		canvasMapping,
 		setPinThreads,

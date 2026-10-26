@@ -144,7 +144,9 @@ const NATIVE_CONTROL_TAGS = new Set(['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON', 'M
 export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): WidgetMeasurer {
 	const doc = options.document
 	const view = doc.defaultView!
-	const roundedTargetMaxError = options.roundedTargetMaxError ?? 0.5
+	const defaultTargetMaxError = options.roundedTargetMaxError ?? 0.5
+	/** The error target in effect: the default, or a contour refinement's finer one while `measureAt` runs. */
+	let roundedTargetMaxError = defaultTargetMaxError
 
 	// Style-epoch caches: computed style, DOM structure and paint order. They survive scroll-only
 	// passes and are dropped by `invalidateStyles()` (mutations, resizes, interaction, animations).
@@ -1478,6 +1480,21 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 	return Object.freeze({
 		beginPass: resetPass,
 		measure,
+		measureAt(widgetId: string, targetMaxError: number): WidgetGeometry {
+			// Shapes cached for another target must not leak in or out; the target never coarsens the default.
+			if (!(targetMaxError > 0) || !Number.isFinite(targetMaxError)) return measure(widgetId)
+			chainShapes = new Map()
+			coverShapes = new Map()
+			roundedTargetMaxError = Math.min(defaultTargetMaxError, targetMaxError)
+			try {
+				return measure(widgetId)
+			}
+			finally {
+				roundedTargetMaxError = defaultTargetMaxError
+				chainShapes = new Map()
+				coverShapes = new Map()
+			}
+		},
 		endPass: resetPass,
 		invalidateStyles() {
 			styles = new Map()

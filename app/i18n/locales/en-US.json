@@ -1019,6 +1019,7 @@
     "variantInvalid": "This Variant can't run.",
     "switchToBase": "Switch to base state",
     "mappingPaused": "Precise highlight paused. The preview can't be measured right now.",
+    "precisionUnavailable": "Precise highlighting unavailable",
     "widgetMissing": "Widget {id} isn't in this View anymore.",
     "viewMissing": "View not found. Stayed on the current page.",
     "notVisible": "Not visible in this state",
