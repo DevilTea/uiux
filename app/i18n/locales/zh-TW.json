@@ -2520,7 +2520,7 @@
       "recipe_assertion_failed": "配方斷言了 Flow 並不成立的內容。",
       "recipe_invalid_shape": "配方的格式不正確。",
       "recipe_orphan_trigger": "觸發必須緊接在同一步驟的進入動作之後。",
-      "recipe_perform_required": "觸發必須指明引發其 Event 的瀏覽器動作（perform）。",
+      "recipe_perform_required": "觸發必須指明引發它的瀏覽器動作。",
       "recipe_unknown_step": "配方指名了 Flow 沒有的步驟。",
       "recipe_unknown_trigger": "配方指名了該步驟沒有的觸發。",
       "ambiguous_trigger": "這個步驟有兩個轉場使用相同的觸發條件。",
