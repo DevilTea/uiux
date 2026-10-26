@@ -64,6 +64,11 @@ export type GeometryProducerDependencies = Readonly<{
 	 * whether anything moved. Without it the runtime does not support `geometry.reveal`.
 	 */
 	reveal?(widgetId: string): boolean
+	/**
+	 * Whether the document has rendered what it shows and can tell if a Widget has a rendered box. Until
+	 * then a reveal waits (see `releaseDeferredReveals`); without this dependency it never waits.
+	 */
+	revealReady?(): boolean
 	requestFrame(callback: () => void): number
 	cancelFrame(handle: number): void
 	/** Monotonic clock for the optional per-frame work statistics. */
@@ -79,8 +84,11 @@ export type GeometryRequestOutcome =
 	| 'ignored-over-cap'
 	| 'ignored-unknown-stream'
 
-/** `revealed`: the Preview scrolled. `no-op`: the reveal named an open stream but did not apply to its Widget. */
-export type RevealRequestOutcome = 'revealed' | 'no-op' | 'ignored-stale' | 'ignored-unsupported'
+/**
+ * `revealed`: the Preview scrolled. `no-op`: the reveal named an open stream but did not apply to its
+ * Widget. `deferred`: the document had not rendered yet, so the reveal waits for it.
+ */
+export type RevealRequestOutcome = 'revealed' | 'no-op' | 'deferred' | 'ignored-stale' | 'ignored-unsupported'
 
 export type ContourRequestOutcome = 'queued' | 'canceled' | 'ignored-stale' | 'ignored-unsupported'
 
@@ -135,6 +143,8 @@ export class RuntimeGeometryProducer {
 	private readonly revisions = new Map<string, number>()
 	/** The contour work waiting for the next frame: at most one per Widget, the newest request. */
 	private readonly jobs = new Map<string, ContourJob>()
+	/** The newest reveal per Widget that arrived before the document could answer it. */
+	private readonly deferredReveals = new Map<string, GeometryRevealRequest>()
 	/** The newest contour-work sequence seen per Widget: an older or repeated one is ignored. */
 	private readonly lastSequences = new Map<string, Readonly<{ geometryRevision: number; sequence: number }>>()
 	private context?: RuntimeGeometryContext
@@ -187,6 +197,27 @@ export class RuntimeGeometryProducer {
 	 */
 	receiveReveal(request: GeometryRevealRequest): RevealRequestOutcome {
 		this.assertLive()
+		const outcome = this.applyReveal(request, true)
+		if (outcome === 'deferred') this.deferredReveals.set(request.context.widgetId, request)
+		return outcome
+	}
+
+	/**
+	 * Applies the reveals that arrived before the document could answer (`revealReady`): the Workbench
+	 * asks right after it opens the stream of a navigation, and a freshly loaded document has not
+	 * rendered its View yet. Each is judged as on arrival, against the stream that is open now: one whose
+	 * stream ended or was superseded meanwhile is stale. A reveal waits for the document's first
+	 * settling only; after it, a Widget that is still not rendered gets nothing, as on any reveal.
+	 */
+	releaseDeferredReveals(): void {
+		if (this.disposed || this.deferredReveals.size === 0) return
+		if (this.deps.revealReady && !this.deps.revealReady()) return
+		const requests = [...this.deferredReveals.values()]
+		this.deferredReveals.clear()
+		for (const request of requests) this.applyReveal(request, false)
+	}
+
+	private applyReveal(request: GeometryRevealRequest, mayDefer: boolean): RevealRequestOutcome {
 		const { widgetId, navigationRequestId } = request.context
 		const stream = this.streams.get(widgetId)
 		if (!stream || stream.request.context.navigationRequestId !== navigationRequestId) return 'ignored-stale'
@@ -195,6 +226,7 @@ export class RuntimeGeometryProducer {
 			|| request.context.runtimeContextVersion !== acquired.runtimeContextVersion) return 'ignored-stale'
 		if (!this.context || !matchesContext(stream.request, this.context)) return 'ignored-stale'
 		if (!this.deps.reveal) return 'ignored-unsupported'
+		if (mayDefer && this.deps.revealReady && !this.deps.revealReady()) return 'deferred'
 		if (!this.deps.reveal(widgetId)) return 'no-op'
 		// Scroll signals reach the producer too, in a later task; this one need not wait for them.
 		this.invalidate('layout')
@@ -282,6 +314,7 @@ export class RuntimeGeometryProducer {
 		if (this.frameHandle !== undefined) this.deps.cancelFrame(this.frameHandle)
 		this.frameHandle = undefined
 		this.streams.clear()
+		this.deferredReveals.clear()
 	}
 
 	/** Runs the pending recomputation now (tests and harnesses drive frames explicitly). */

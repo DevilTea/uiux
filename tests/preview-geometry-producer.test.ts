@@ -26,7 +26,7 @@ function rectRegion(x: number, y: number, width: number, height: number) {
 	}
 }
 
-function fixture(maxStreams?: number, reveal?: (widgetId: string) => boolean) {
+function fixture(maxStreams?: number, reveal?: (widgetId: string) => boolean, revealReady?: () => boolean) {
 	const frames: Array<() => void> = []
 	const sent: GeometryAcquireResponse[] = []
 	const geometry = new Map<string, WidgetGeometry>()
@@ -46,6 +46,7 @@ function fixture(maxStreams?: number, reveal?: (widgetId: string) => boolean) {
 		cancelFrame: (handle) => { frames[handle - 1] = () => {} },
 		...(maxStreams ? { maxStreams } : {}),
 		...(reveal ? { reveal } : {}),
+		...(revealReady ? { revealReady } : {}),
 	})
 	producer.setContext({ viewId })
 	const runFrames = () => {
@@ -142,6 +143,50 @@ describe('Runtime geometry producer (geometry.reveal)', () => {
 		f.producer.setContext({ viewId })
 		expect(f.producer.receiveReveal(revealRequest('a', 'n1', { variantId: 'compact' }))).toBe('ignored-stale')
 		expect(revealed).toEqual(['a'])
+	})
+
+	describe('a document that has not rendered yet', () => {
+		function loading() {
+			const revealed: string[] = []
+			let ready = false
+			const f = fixture(undefined, (widgetId) => { revealed.push(widgetId); return true }, () => ready)
+			return { f, revealed, settle: () => { ready = true; f.producer.releaseDeferredReveals() } }
+		}
+
+		it('holds a reveal until the document settles, then applies it to the stream that is open', () => {
+			const { f, revealed, settle } = loading()
+			f.place('a', 0, 900)
+			f.producer.receive(acquire('a', 'n1'))
+			expect(f.producer.receiveReveal(revealRequest('a', 'n1'))).toBe('deferred')
+			f.producer.releaseDeferredReveals()
+			expect(revealed).toEqual([])
+			settle()
+			expect(revealed).toEqual(['a'])
+			// Applied once: a second release finds nothing waiting.
+			settle()
+			expect(revealed).toEqual(['a'])
+		})
+
+		it('drops a held reveal whose stream ended or was superseded meanwhile', () => {
+			const { f, revealed, settle } = loading()
+			f.producer.receive(acquire('a', 'n1'))
+			f.producer.receive(acquire('b', 'm1'))
+			f.producer.receive(acquire('c', 'k1'))
+			expect(f.producer.receiveReveal(revealRequest('a', 'n1'))).toBe('deferred')
+			expect(f.producer.receiveReveal(revealRequest('b', 'm1'))).toBe('deferred')
+			expect(f.producer.receiveReveal(revealRequest('c', 'k1'))).toBe('deferred')
+			f.producer.receive(acquire('a', 'n2'))
+			f.producer.receive(release('b', 'm1'))
+			settle()
+			expect(revealed).toEqual(['c'])
+		})
+
+		it('does not hold a reveal that names no open stream', () => {
+			const { f, settle, revealed } = loading()
+			expect(f.producer.receiveReveal(revealRequest('a', 'n1'))).toBe('ignored-stale')
+			settle()
+			expect(revealed).toEqual([])
+		})
 	})
 
 	it('answers nothing without a reveal dependency (a runtime that does not support it)', () => {

@@ -235,6 +235,8 @@ export function createPreviewSession(state: WorkbenchState) {
 	 * Widget opened by an address replaces or ends it.
 	 */
 	let pendingReveal: Readonly<{ viewId: string; variantId: string; widgetId: string }> | undefined
+	/** The iframe element whose document the admitted runtime generation belongs to. */
+	let generationIframe: HTMLIFrameElement | undefined
 	let interactionSequence = 0
 	const targeting = new PreviewTargetingState<{ widgetId: string }>()
 	let armSequence = 0
@@ -279,8 +281,9 @@ export function createPreviewSession(state: WorkbenchState) {
 	/** Every geometry stream of this session (Part 2, 2026-10-05 multi-target decision group). */
 	const geometryStreams = new GeometryStreamCoordinator({
 		send(message) {
-			return workbenchBridge?.sendGeometry(message).status === 'sent'
+			workbenchBridge?.sendGeometry(message)
 		},
+		sendReveal: message => workbenchBridge?.sendGeometry(message).status === 'sent',
 		requestFrame: callback => requestAnimationFrame(callback),
 		cancelFrame: handle => cancelAnimationFrame(handle),
 	})
@@ -537,8 +540,11 @@ export function createPreviewSession(state: WorkbenchState) {
 	function sendPendingReveal(): void {
 		const pending = pendingReveal
 		const target = selectionTarget
-		// Without a Preview document nothing can receive it, so the request keeps waiting for the next one.
-		if (!pending || !target || isCommentMode.value || handshakePhase.value !== 'open' || !previewIframe.value?.contentWindow) return
+		if (!pending || !target || isCommentMode.value || handshakePhase.value !== 'open') return
+		// The generation must be the one of the Preview document that is shown: after the Preview page was left and
+		// opened again, the old generation is still admitted until the new document declares, and a reveal sent to
+		// the new document before then is dropped by its runtime. The request keeps waiting for the next generation.
+		if (!runtimeGenerationId.value || !previewIframe.value?.contentWindow || generationIframe !== previewIframe.value) return
 		if (target.viewId !== pending.viewId || target.widgetId !== pending.widgetId) return
 		if (!runtimeFeatures.value.includes(REVEAL_GEOMETRY_FEATURE)) {
 			pendingReveal = undefined
@@ -841,6 +847,7 @@ export function createPreviewSession(state: WorkbenchState) {
 	function endGeneration(): void {
 		const previousGeneration = runtimeGenerationId.value
 		runtimeGenerationId.value = undefined
+		generationIframe = undefined
 		runtimeFeatures.value = []
 		widgetEvents.onGenerationBoundary()
 		if (previousGeneration) targeting.onGenerationTeardown(previousGeneration)
@@ -877,6 +884,7 @@ export function createPreviewSession(state: WorkbenchState) {
 	function onGenerationAdmitted(generationId: string): void {
 		if (runtimeGenerationId.value) endGeneration()
 		runtimeGenerationId.value = generationId
+		generationIframe = previewIframe.value
 		syncGeometryContext()
 		handshakePhase.value = 'initiating'
 	}

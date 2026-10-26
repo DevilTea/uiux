@@ -333,6 +333,8 @@ const checksDebouncer = new MaxWaitDebouncer(() => flushChecksReport(), CHECKS_R
 function flushChecksReport(): void {
 	const bridge = runtimeBridge
 	if (!bridge || handshakeStatus.value !== 'open' || !viewId.value || !checksSettled()) return
+	// The document has rendered what it shows: a reveal that arrived while it loaded can be answered now.
+	geometryProducer?.releaseDeferredReveals()
 	checksPublisher ??= new ChecksReportPublisher(message => bridge.sendChecksReport(message).status === 'sent' ? 'sent' : 'unsent')
 	const status = materializationResult.value
 	const body = buildChecksReportBody({
@@ -386,6 +388,8 @@ function initBridge() {
 			measurer: createDomGeometryMeasurer({ document }),
 			// A reveal scrolls only this document; the bridge passes one only when `geometry.reveal` was declared.
 			reveal: widgetId => revealWidget(document, widgetId) === 'scrolled',
+			// The Workbench asks right after it opens the stream, before a new document has rendered its View.
+			revealReady: () => checksSettled(),
 			requestFrame: callback => window.requestAnimationFrame(callback),
 			cancelFrame: handle => window.cancelAnimationFrame(handle),
 			now: () => performance.now(),

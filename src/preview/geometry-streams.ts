@@ -68,8 +68,9 @@ export type GeometryReport = Readonly<{
 export type GeometryReportOutcome = 'accepted' | 'no-context' | 'stale-context' | 'stale-stream' | 'stale-revision'
 
 export type GeometryStreamDependencies = Readonly<{
-	/** Sends one message; `false` means that the bridge did not send it (a reveal then counts as unsent). */
-	send(message: GeometryAcquireRequest | GeometryReleaseRequest | GeometryRevealRequest): void | boolean
+	send(message: GeometryAcquireRequest | GeometryReleaseRequest): void
+	/** Sends one `geometry.reveal` and says whether the bridge sent it. Without it no reveal is ever sent. */
+	sendReveal?(message: GeometryRevealRequest): boolean
 	mintId?: () => string
 	requestFrame?: (callback: () => void) => number
 	cancelFrame?: (handle: number) => void
@@ -171,10 +172,10 @@ export class GeometryStreamCoordinator {
 	 * stream: a reveal opens no stream and has no identity of its own. Returns whether it was sent.
 	 */
 	reveal(widgetId: string, navigationRequestId: string): boolean {
-		if (!this.revealSupported || !this.ready || !this.context) return false
+		if (!this.revealSupported || !this.deps.sendReveal || !this.ready || !this.context) return false
 		const stream = this.streams.get(widgetId)
 		if (!stream || stream.navigationRequestId !== navigationRequestId) return false
-		return this.deps.send({ type: 'geometry.reveal', context: this.baseContext(widgetId, navigationRequestId), payload: {} }) !== false
+		return this.deps.sendReveal({ type: 'geometry.reveal', context: this.baseContext(widgetId, navigationRequestId), payload: {} })
 	}
 
 	/** Replaces the whole demand. Called on filter, thread, status, selection or hover changes. */

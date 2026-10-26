@@ -25,9 +25,11 @@ function coordinator(options: { reveal?: boolean; ready?: boolean; reject?: bool
 	const sent: Sent[] = []
 	let next = 0
 	const streams = new GeometryStreamCoordinator({
-		send: (message) => {
-			if (options.reject && message.type === 'geometry.reveal') return false
+		send: (message) => { sent.push(message) },
+		sendReveal: (message) => {
+			if (options.reject) return false
 			sent.push(message)
+			return true
 		},
 		mintId: () => `id-${++next}`,
 	})
