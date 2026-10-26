@@ -20,6 +20,8 @@ import { PersistenceError } from '../../persistence/errors'
 import { settledValue } from '../../persistence/file-native'
 import type { KitBuildStatus } from '../ports/kit-build'
 import { ASSET_LOAD_FAILED_DIAGNOSTIC, ASSET_LOAD_FAILED_STATUS, captureHarnessScreenshot, HARNESS_LAUNCH_ARGS, evaluateHarnessTranslations, openHarnessPreview, type HarnessPreview } from './capture-harness'
+import type { InteractionAssertionInput, InteractionStep } from '../../domain/evidence/interaction-replay'
+import { replayInteractions, type InteractionReplayOutcome } from './interaction-replay'
 import { missingDefaultLocaleError } from './default-locale-gate'
 import { createViewAssetBindingCheck, type AssetCatalog } from './asset-bindings'
 import { readWorkspaceProductKitProvenance } from './product-kit-provenance'
@@ -62,8 +64,18 @@ export type AdapterThemeSupportSource = () => Promise<Readonly<{ unsupportedThem
 /** A View's current render-input digest (Clause 01a14e30-2d4a-…) and the revision it was read at. */
 export type ViewRenderInput = Readonly<{ key: string; revision: string; renderInputDigest: string }>
 
+/** One recipe replayed in one render context's Preview (see `replay`). */
+export type ReplayInteractionsCommand = Readonly<{
+	context: ResolvedRenderContext
+	steps: readonly InteractionStep[]
+	assertions: readonly InteractionAssertionInput[]
+	baseUrl?: string
+}>
+
 export interface FormalCaptureService {
 	capture(command: CaptureFormalEvidenceCommand): Promise<CaptureFormalEvidenceResult>
+	/** Replays an interaction recipe in the formal capture harness; the caller captures the context formally itself. */
+	replay(command: ReplayInteractionsCommand): Promise<InteractionReplayOutcome>
 	listEvidence(viewId?: string): Promise<readonly FormalEvidenceItem[]>
 	/** Every readable View's current render-input digest, against which Evidence freshness is judged. */
 	viewRenderInputs(): Promise<readonly ViewRenderInput[]>
@@ -166,6 +178,48 @@ export function createFormalCaptureService(
 			},
 			workspaceInspection: wsRead.resource,
 			workspaceRevision: wsRead.revision,
+		}
+	}
+
+	/** The base URL for local preview: the internal server-known origin. */
+	function resolveBaseUrl(commandBaseUrl: string | undefined): string {
+		const defaultPort = process.env.PORT || process.env.NITRO_PORT || '3000'
+		const defaultHost = process.env.HOST || process.env.NITRO_HOST || '127.0.0.1'
+		const normalizedHost = (defaultHost === '0.0.0.0' || defaultHost === '::' || defaultHost === '') ? '127.0.0.1' : defaultHost
+		return commandBaseUrl
+			|| options?.serverOrigin
+			|| process.env.UIUX_SERVER_ORIGIN
+			|| process.env.UIUX_SERVER_URL
+			|| `http://${normalizedHost}:${defaultPort}`
+	}
+
+	/**
+	 * Rules 01a11544-66d9-… and 01a115cd-c507-…: opens `context` in the formal capture harness and replays
+	 * the recipe against its Preview (the shared replay engine), in a fresh browser that is closed again.
+	 * It stores nothing; the caller has formally captured the same context.
+	 */
+	async function replay(command: ReplayInteractionsCommand): Promise<InteractionReplayOutcome> {
+		const failure = (code: string, path: string, message: string): InteractionReplayOutcome => ({ status: 'failed', diagnostics: [{ code, path, message }] })
+		let browser: Browser
+		try {
+			browser = await chromium.launch({ headless: true, args: [...HARNESS_LAUNCH_ARGS] })
+		}
+		catch (cause) {
+			return failure('capture.browser_launch_failed', '/capture', `Playwright browser could not be launched: ${cause instanceof Error ? cause.message : String(cause)}`)
+		}
+		let preview: HarnessPreview | undefined
+		try {
+			preview = await openHarnessPreview(browser, { baseUrl: resolveBaseUrl(command.baseUrl), context: command.context, cookie: options?.captureCookie?.() })
+			if (preview.status !== 'ready')
+				return failure(preview.previewStatus === 'adapter_unavailable' ? 'adapter.materialization_unavailable' : 'preview.runtime_failed', '/preview', `Preview runtime status reported '${preview.previewStatus}'.`)
+			return await replayInteractions(preview.page, command)
+		}
+		catch (cause) {
+			return failure('capture.execution_failed', '/capture', cause instanceof Error ? cause.message : 'Execution failed during the interaction replay')
+		}
+		finally {
+			await preview?.close()
+			await browser.close().catch(() => undefined)
 		}
 	}
 
@@ -297,15 +351,7 @@ export function createFormalCaptureService(
 			}
 		}
 
-		// Resolve base URL for local preview: internal server-known origin
-		const defaultPort = process.env.PORT || process.env.NITRO_PORT || '3000'
-		const defaultHost = process.env.HOST || process.env.NITRO_HOST || '127.0.0.1'
-		const normalizedHost = (defaultHost === '0.0.0.0' || defaultHost === '::' || defaultHost === '') ? '127.0.0.1' : defaultHost
-		const baseUrl = command.baseUrl
-			|| options?.serverOrigin
-			|| process.env.UIUX_SERVER_ORIGIN
-			|| process.env.UIUX_SERVER_URL
-			|| `http://${normalizedHost}:${defaultPort}`
+		const baseUrl = resolveBaseUrl(command.baseUrl)
 
 		// Clause 01a11bb1-8fc4-7b7d-87da-d3fc5d457d98: each record carries the Product Kit provenance
 		// of the Workspace at capture time, taken once for the run.
@@ -553,6 +599,7 @@ export function createFormalCaptureService(
 
 	return {
 		capture,
+		replay,
 		listEvidence,
 		viewRenderInputs,
 	}

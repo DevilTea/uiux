@@ -33,6 +33,7 @@ import { RuntimeChecksObserver, type ChecksObservation } from './checks-observer
 import { evaluateTranslationProperties, type TranslationEvaluation } from './translation-evaluation'
 import { describeWidgetCatalogEntry, type DescribedWidgetCatalog } from './widget-catalog'
 import { WidgetEventObserver, type WidgetEventReport } from './widget-event-observer'
+import { InteractionProbe } from './interaction-probe'
 import type { WidgetEventTrigger } from './protocol/widget-events'
 
 export type StandaloneAdapterDescriptor = Readonly<{
@@ -93,6 +94,12 @@ export interface PreviewRuntimeBridge {
 	 * is not mounted. Only the formal capture harness calls it.
 	 */
 	evaluateTranslations?(): TranslationEvaluation
+	/**
+	 * The capture harness's interaction replay observation (Rule 01a11544-66d9-7fcd-8400-93516ddf2857): the
+	 * declared Widget Events a replay's real browser actions cause and the State a Widget holds afterwards.
+	 * It throws while the Runtime is not mounted. Only the formal capture harness calls it.
+	 */
+	interactionProbe?(): InteractionProbe
 	dispose(): void
 }
 
@@ -586,6 +593,7 @@ export function createStandalonePreviewMount(input: Readonly<{
 		}
 
 		let activeController: LiveViewRuntimeController = controllerResult
+		let probe: InteractionProbe | undefined
 		const activeRuntime = shallowRef(activeController.runtime)
 		let disposed = false
 		/**
@@ -897,9 +905,15 @@ export function createStandalonePreviewMount(input: Readonly<{
 				})
 			},
 
+			interactionProbe(): InteractionProbe {
+				if (disposed || phase !== 'mounted') throw new Error('The Preview runtime is not mounted.')
+				return probe ??= new InteractionProbe(() => activeController.runtime)
+			},
+
 			dispose() {
 				if (disposed) return
 				disposed = true
+				probe?.dispose()
 				// The construction's stylesheet link and root attributes go with it.
 				stylesheetLink?.remove()
 				if (phase === 'failed') return

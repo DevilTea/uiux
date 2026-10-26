@@ -623,7 +623,7 @@ describe('mark ready follows the render-input digest and the known change domain
 		finally { await mcp.close() }
 
 		// Every known value is accepted.
-		const accepted = await markReady(ctx, revision, ctx.viewRevision, captured, ['ir', 'variant', 'spec', 'metadata', 'flow', 'asset', 'i18n', 'settings', 'adapter', 'product-kit'])
+		const accepted = await markReady(ctx, revision, ctx.viewRevision, captured, ['ir', 'variant', 'spec', 'metadata', 'flow', 'asset', 'i18n', 'settings', 'adapter', 'product-kit', 'interaction'])
 		expect(accepted.status, JSON.stringify(accepted.body)).toBe(200)
 	})
 

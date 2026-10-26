@@ -2281,7 +2281,8 @@
     "i18n": "i18n（Locale 訊息）",
     "settings": "Workspace 設定（檢視區、主題）",
     "adapter": "Adapter 或設定",
-    "product-kit": "Product Kit"
+    "product-kit": "Product Kit",
+    "interaction": "互動（步驟、Widget 事件）"
   },
   "phone": {
     "viewTab": "View",
@@ -2575,6 +2576,8 @@
     "evidence": {
       "flow_trace_mismatch": "Flow 軌跡與其配方和擷取內容不一致。",
       "invalid_flow_trace": "Flow 軌跡紀錄無效。",
+      "invalid_interaction_replay": "互動重播紀錄無效。",
+      "interaction_replay_mismatch": "互動重播與其擷取內容不一致。",
       "invalid_checks_run": "這次執行檢查的結果無效，因此未記錄。",
       "checks_run_mismatch": "這次執行檢查的結果前後不一致，因此未記錄。",
       "duplicate_adapter": "Evidence 重複記錄了同一個 Adapter。",
@@ -2780,6 +2783,16 @@
       "unknown_type": "不支援這種參照類型。",
       "invalid_absolute_uri": "請使用完整網址，例如 https://example.com/spec。"
     },
+    "interaction": {
+      "invalid_recipe": "步驟或斷言的格式不符，或超出上限。",
+      "invalid_render_context": "請為互動 Evidence 選擇 Locale、檢視區與主題。",
+      "preview_left": "重播離開了預覽文件，因此未記錄。",
+      "recipe_mismatch": "有步驟沒有指向正在擷取的 View 與 Variant。",
+      "replay_failed": "互動重播未能完成。",
+      "step_failed": "有步驟無法在預覽中執行。",
+      "unknown_variant": "這個 View 沒有此 Variant。",
+      "unknown_widget": "這個 View 沒有此 Widget。"
+    },
     "kit": {
       "build_declaration_invalid": "kit/package.json 中宣告的建置無效。",
       "build_output_missing": "kit 建置尚未產生任何輸出。",
@@ -2841,6 +2854,7 @@
     "history": "版本歷程紀錄無效。",
     "i18n": "翻譯有問題。",
     "identity": "識別碼無效。",
+    "interaction": "無法記錄這次互動重播。",
     "kit": "kit/ 專案有問題。",
     "lease": "無法取得編輯鎖定。",
     "persistence": "無法讀取或寫入 Workspace 檔案。",

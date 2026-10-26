@@ -116,6 +116,7 @@ import { createHistoryRestoreService, type RestoreGuard, type RestoreResourceVer
 import { readViewReferenceTarget } from './flow-references'
 import { createChecksRunEvidenceService, type RecordChecksRunResult } from './checks-run-evidence'
 import { createFlowEvidenceService, type CaptureFlowEvidenceCommand, type CaptureFlowEvidenceResult } from './flow-evidence'
+import { createInteractionEvidenceService, type CaptureInteractionEvidenceCommand, type CaptureInteractionEvidenceResult } from './interaction-evidence'
 import { createViewAssetBindingCheck, type AssetCatalog } from './asset-bindings'
 import { createHistoryPreviewService, type ReadVersionBlobOutcome, type ReadVersionResourceOutcome, type ResolveVersionAssetsOutcome } from './history-preview'
 import {
@@ -226,6 +227,8 @@ export interface WorkspaceApplicationSession {
 	validateFlow(flowId: string): Promise<ValidateFlowResult>
 	/** Clause 01a172cc-e195-711b-bfa9-5de6c1c8ff87: formal UX Flow Evidence. */
 	captureFlowEvidence(command: CaptureFlowEvidenceCommand): Promise<CaptureFlowEvidenceResult>
+	/** Clause 01a17762-b85b-77d6-a399-e26843475501: replayable interaction Evidence. */
+	captureInteractionEvidence(command: CaptureInteractionEvidenceCommand): Promise<CaptureInteractionEvidenceResult>
 	/** Clauses 01a17670-d442-7068-8a08-c6e4ab9c09ae and 01a17671-11bf-7711-887b-121a02602cf4: the Workbench's Run Checks result as Evidence. */
 	recordChecksRun(input: unknown): Promise<RecordChecksRunResult>
 	listEvidence(viewId?: string): Promise<readonly FormalEvidenceItem[]>
@@ -313,6 +316,10 @@ export function createWorkspaceApplicationSession(
 			return read?.kind === 'flow' ? read : undefined
 		},
 		captureFormal: command => formalCapture.capture(command),
+	})
+	const interactionEvidence = createInteractionEvidenceService(persistence, {
+		captureFormal: command => formalCapture.capture(command),
+		replay: command => formalCapture.replay(command),
 	})
 	const checksRunEvidence = createChecksRunEvidenceService(persistence)
 	const handoffExport = createHandoffExportService(persistence, {
@@ -568,6 +575,7 @@ export function createWorkspaceApplicationSession(
 		captureFormalEvidence: formalCapture.capture,
 		validateFlow,
 		captureFlowEvidence: flowEvidence.capture,
+		captureInteractionEvidence: interactionEvidence.capture,
 		recordChecksRun: checksRunEvidence.record,
 		listEvidence: formalCapture.listEvidence,
 		viewRenderInputs: formalCapture.viewRenderInputs,

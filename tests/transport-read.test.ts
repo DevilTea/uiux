@@ -121,6 +121,7 @@ describe('shared HTTP/MCP point-resource reads', { timeout: HEAVY_SERVER_SUITE_T
 				'assess_handoff_readiness',
 				'capture_flow_evidence',
 				'capture_formal_evidence',
+				'capture_interaction_evidence',
 				'compare_component_copies',
 				'compose_product_kit',
 				'create_asset',

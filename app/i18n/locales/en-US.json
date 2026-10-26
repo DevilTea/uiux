@@ -2281,7 +2281,8 @@
     "i18n": "i18n (Locale messages)",
     "settings": "Workspace settings (viewport, theme)",
     "adapter": "Adapter or configuration",
-    "product-kit": "Product Kit"
+    "product-kit": "Product Kit",
+    "interaction": "Interaction (steps, Widget Events)"
   },
   "phone": {
     "viewTab": "View",
@@ -2575,6 +2576,8 @@
     "evidence": {
       "flow_trace_mismatch": "The Flow trace does not agree with its recipe and captures.",
       "invalid_flow_trace": "The Flow trace record is not valid.",
+      "invalid_interaction_replay": "The interaction replay record is not valid.",
+      "interaction_replay_mismatch": "The interaction replay does not agree with its capture.",
       "invalid_checks_run": "This Run Checks result is not valid, so it was not recorded.",
       "checks_run_mismatch": "The Run Checks result does not agree with itself, so it was not recorded.",
       "duplicate_adapter": "The Evidence records the same Adapter more than once.",
@@ -2780,6 +2783,16 @@
       "unknown_type": "This reference type is not supported.",
       "invalid_absolute_uri": "Use a full address, such as https://example.com/spec."
     },
+    "interaction": {
+      "invalid_recipe": "The steps or assertions are not in the expected shape or exceed a limit.",
+      "invalid_render_context": "Choose a Locale, viewport and theme for the interaction Evidence.",
+      "preview_left": "The replay left the Preview document, so it was not recorded.",
+      "recipe_mismatch": "A step does not target the View and Variant being captured.",
+      "replay_failed": "The interaction replay did not finish.",
+      "step_failed": "A step could not be performed in the Preview.",
+      "unknown_variant": "The View does not have this Variant.",
+      "unknown_widget": "The View does not have this Widget."
+    },
     "kit": {
       "build_declaration_invalid": "The build declared in kit/package.json (uiux) is not valid.",
       "build_output_missing": "The kit build has produced no output yet.",
@@ -2841,6 +2854,7 @@
     "history": "A version history record is not valid.",
     "i18n": "There is a problem with a translation.",
     "identity": "An identity is not valid.",
+    "interaction": "The interaction replay could not be recorded.",
     "kit": "There is a problem with the kit project.",
     "lease": "The edit lock could not be taken.",
     "persistence": "The Workspace files could not be read or written.",
