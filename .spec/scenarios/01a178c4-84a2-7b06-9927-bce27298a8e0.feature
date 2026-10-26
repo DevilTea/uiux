@@ -13,4 +13,3 @@ Feature: A declared translation Property nobody evaluated is reported as unevalu
     When the Runtime evaluates the result Property of one Label
     When the Preview sends a `checks.report`
     Then the report's coverage is incomplete and lists the other Label's result Property
-    Then the Runtime evaluated no Property to produce that list
