@@ -316,6 +316,7 @@ export function createWorkspaceApplicationSession(
 			return read?.kind === 'flow' ? read : undefined
 		},
 		captureFormal: command => formalCapture.capture(command),
+		replay: command => formalCapture.replay(command),
 	})
 	const interactionEvidence = createInteractionEvidenceService(persistence, {
 		captureFormal: command => formalCapture.capture(command),

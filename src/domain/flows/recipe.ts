@@ -1,4 +1,5 @@
-import { isRecord, jsonPointer, type Diagnostic } from '../validation'
+import { validateInteractionAction, type InteractionAction } from '../evidence/interaction-replay'
+import { isRecord, jsonPointer, Validator, type Diagnostic } from '../validation'
 import type { FlowResource, FlowStep } from './schema'
 
 /**
@@ -6,8 +7,12 @@ import type { FlowResource, FlowStep } from './schema'
  * an ordered list of `enter` actions, which enter a step and assert its target, and `trigger`
  * actions, which immediately follow an `enter` of the same step, take the transition the trigger
  * identifies there and assert the step it leads to. The recipe belongs to the Evidence record and
- * never to the Flow (Rule 01a11544-66ad-73e5-8fcd-9e24bfcb3313).
+ * never to the Flow (Rule 01a11544-66ad-73e5-8fcd-9e24bfcb3313). A `trigger` carries the browser action
+ * that causes its Widget Event (`perform`, owner ruling 4 of
+ * https://github.com/DevilTea/uiux/discussions/241#discussioncomment-19197851), which the interaction
+ * replay engine performs; a recipe that is given states it on every trigger.
  */
+export type FlowRecipePerform = Readonly<{ action: InteractionAction; text?: string; key?: string }>
 export type FlowRecipeEnter = Readonly<{
 	type: 'enter'
 	stepId: string
@@ -17,6 +22,8 @@ export type FlowRecipeTrigger = Readonly<{
 	type: 'trigger'
 	stepId: string
 	trigger: Readonly<{ widgetId: string; event: string }>
+	/** Absent only on a derived trigger whose Event is neither `press` nor `click`; `validateFlowRecipe` refuses such a recipe. */
+	perform?: FlowRecipePerform
 	expect: Readonly<{ resultStepId: string }>
 }>
 export type FlowRecipeAction = FlowRecipeEnter | FlowRecipeTrigger
@@ -28,6 +35,7 @@ export type FlowRecipeEntry = Readonly<{
 	viewId: string
 	variantName?: string
 	trigger?: Readonly<{ widgetId: string; event: string }>
+	perform?: FlowRecipePerform
 	resultStepId?: string
 }>
 
@@ -41,7 +49,9 @@ function enterOf(stepId: string, step: FlowStep): FlowRecipeEnter {
  * The recipe the server derives when none is given, breadth-first from the entry step: every
  * reached step is entered once without a trigger when it has no outgoing transition, otherwise
  * once for each outgoing transition, in order of Widget ID then Event name, followed by its trigger.
- * The Flow must be valid (every step reachable, every target present).
+ * A trigger whose Event is `press` or `click` performs a `click`; no other Event has a default action, so its trigger
+ * has no `perform` and `validateFlowRecipe` refuses the recipe until one is given. The Flow must be valid
+ * (every step reachable, every target present).
  */
 export function deriveFlowRecipe(flow: FlowResource): FlowRecipe {
 	const actions: FlowRecipeAction[] = []
@@ -55,7 +65,7 @@ export function deriveFlowRecipe(flow: FlowResource): FlowRecipe {
 		if (transitions.length === 0) actions.push(enterOf(stepId, step))
 		for (const transition of transitions) {
 			actions.push(enterOf(stepId, step))
-			actions.push({ type: 'trigger', stepId, trigger: { widgetId: transition.trigger.widgetId, event: transition.trigger.event }, expect: { resultStepId: transition.targetStepId } })
+			actions.push({ type: 'trigger', stepId, trigger: { widgetId: transition.trigger.widgetId, event: transition.trigger.event }, ...((transition.trigger.event === 'press' || transition.trigger.event === 'click') ? { perform: { action: 'click' as const } } : {}), expect: { resultStepId: transition.targetStepId } })
 			if (!seen.has(transition.targetStepId)) {
 				seen.add(transition.targetStepId)
 				queue.push(transition.targetStepId)
@@ -74,9 +84,25 @@ export function flowRecipeEntries(recipe: FlowRecipe): readonly FlowRecipeEntry[
 			continue
 		}
 		const last = entries.pop()!
-		entries.push({ ...last, trigger: { widgetId: action.trigger.widgetId, event: action.trigger.event }, resultStepId: action.expect.resultStepId })
+		entries.push({ ...last, trigger: { widgetId: action.trigger.widgetId, event: action.trigger.event }, ...(action.perform ? { perform: action.perform } : {}), resultStepId: action.expect.resultStepId })
 	}
 	return entries
+}
+
+/** A trigger's `perform`: required, and shaped as a step of an interaction replay (an action, the text of a `type`, the key of a `press`). */
+function validatePerform(trigger: Record<string, unknown>, path: string, diagnostics: Diagnostic[]): void {
+	const performPath = jsonPointer(path, 'perform')
+	if (!Object.hasOwn(trigger, 'perform')) {
+		diagnostics.push({ code: 'flow.recipe_perform_required', path: performPath, message: 'A trigger states the browser action that causes its Event, perform { action, text?, key? }; only a derived press or click trigger defaults to a click.' })
+		return
+	}
+	const bad = (at: string, message: string) => { diagnostics.push({ code: 'flow.recipe_invalid_shape', path: at, message }) }
+	const perform = trigger.perform
+	if (!isRecord(perform)) return bad(performPath, 'perform is { action, text?, key? }.')
+	keysOnly(perform, ['action', 'text', 'key'], performPath, diagnostics)
+	const v = new Validator()
+	validateInteractionAction(perform, performPath, 'flow.recipe_invalid_shape', v)
+	diagnostics.push(...v.diagnostics)
 }
 
 function keysOnly(value: Record<string, unknown>, allowed: readonly string[], path: string, diagnostics: Diagnostic[]): void {
@@ -87,7 +113,7 @@ function keysOnly(value: Record<string, unknown>, allowed: readonly string[], pa
 
 /**
  * Checks `input` as a recipe of `flow`: its shape, and that every action names a step and trigger the
- * Flow has and asserts what the Flow holds. A recipe that does not match is refused whole; it is
+ * Flow has, gives every trigger its `perform`, and asserts what the Flow holds. A recipe that does not match is refused whole; it is
  * never adjusted. The diagnostics are empty for a recipe that matches.
  */
 export function validateFlowRecipe(input: unknown, flow: FlowResource): readonly Diagnostic[] {
@@ -103,7 +129,7 @@ export function validateFlowRecipe(input: unknown, flow: FlowResource): readonly
 	input.actions.forEach((action, index) => {
 		const path = jsonPointer('/recipe/actions', index)
 		if (!isRecord(action) || (action.type !== 'enter' && action.type !== 'trigger')) return bad(path, 'An action is an enter or a trigger.')
-		keysOnly(action, action.type === 'enter' ? ['type', 'stepId', 'expect'] : ['type', 'stepId', 'trigger', 'expect'], path, diagnostics)
+		keysOnly(action, action.type === 'enter' ? ['type', 'stepId', 'expect'] : ['type', 'stepId', 'trigger', 'perform', 'expect'], path, diagnostics)
 		const stepId = action.stepId
 		const step = typeof stepId === 'string' && Object.hasOwn(flow.steps, stepId) ? flow.steps[stepId] : undefined
 		if (!step) return bad(`${path}/stepId`, 'The action names a step the Flow does not have.', 'flow.recipe_unknown_step')
@@ -124,6 +150,7 @@ export function validateFlowRecipe(input: unknown, flow: FlowResource): readonly
 		const trigger = isRecord(action.trigger) ? action.trigger : undefined
 		if (!trigger) return bad(`${path}/trigger`, 'A trigger names { widgetId, event }.')
 		keysOnly(trigger, ['widgetId', 'event'], `${path}/trigger`, diagnostics)
+		validatePerform(action, path, diagnostics)
 		const transition = step.transitions.find(candidate => candidate.trigger.widgetId === trigger.widgetId && candidate.trigger.event === trigger.event)
 		if (!transition) return bad(`${path}/trigger`, 'The step has no transition with this trigger.', 'flow.recipe_unknown_trigger')
 		if (!expect) return bad(`${path}/expect`, 'A trigger asserts the step it leads to.')

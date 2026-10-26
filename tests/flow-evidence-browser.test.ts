@@ -1,157 +1,192 @@
-import { spawn, type ChildProcess } from 'node:child_process'
-import { mkdtemp, rm } from 'node:fs/promises'
-import { createServer, type AddressInfo } from 'node:net'
-import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-import { createWorkspaceApplicationSession } from '../src/application/services/workspace-session'
 import { validateFormalEvidenceRecord } from '../src/domain/evidence/schema'
-import type { FlowResource } from '../src/domain/flows/schema'
-import type { ViewResource } from '../src/domain/views/schema'
 import { FileNativePersistence } from '../src/persistence'
 import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { assertSameScreenshot } from './support/screenshot-diff'
-import { provisionToken, sessionCookieFor } from './support/access'
-import { HEAVY_SERVER_SUITE_TIMEOUT_MS } from './support/timeouts'
-import { writeCurrentWorkspace } from './support/workspace-layout'
+import { startWorkbenchServer, type WorkbenchServer } from './support/workbench-server'
 
 /**
- * Formal UX Flow Evidence against the built server and a real Playwright capture (Clause
- * 01a172cc-e195-711b-bfa9-5de6c1c8ff87): a two-step Flow is traced, each entered View and Variant is
- * formally captured, and the stored `flow_trace` record references those captures.
+ * Formal UX Flow Evidence against the built server and a real Playwright capture and replay (Clause
+ * 01a172cc-e195-711b-bfa9-5de6c1c8ff87, Rule 01a11544-66d9-7fcd-8400-93516ddf2857): a two-step Flow is
+ * traced, each entered View and Variant is formally captured, each trigger is replayed as a real browser
+ * action on the rendered Widget and asserted to emit its Event exactly once, and the stored `flow_trace`
+ * record references the captures. The Views and Flows are authored through the authoring API.
  */
 
-const VIEW_A = '11111111-1111-4111-8111-111111111111'
-const VIEW_B = '33333333-3333-4333-8333-333333333333'
-const FLOW_ID = '22222222-2222-4222-8222-222222222222'
 const STEP_A = '44444444-4444-4444-8444-444444444444'
 const STEP_B = '55555555-5555-4555-8555-555555555555'
-const roots: string[] = []
-const servers: ChildProcess[] = []
+const renderContext = { locale: 'en-US', viewportId: 'desktop', themeId: 'light' }
+const click = { action: 'click' }
 
-afterEach(async () => {
-	for (const server of servers.splice(0)) server.kill('SIGTERM')
-	await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })))
+let server: WorkbenchServer
+let viewA = ''
+let viewB = ''
+let clickFlow = ''
+let pressFlow = ''
+let blockedFlow = ''
+let changeFlow = ''
+
+type Trace = {
+	kind: string
+	coverage: { complete: boolean }
+	artifactRefs: unknown[]
+	evidenceRefs: unknown[]
+	executionContext: Record<string, unknown>
+	provenance: { resources: { identity: unknown }[] }
+	data: { recipe: { actions: { type: string; stepId: string; perform?: unknown }[] }; steps: Record<string, unknown>[] }
+}
+type Outcome = {
+	status: string
+	flowId: string
+	evidenceDigest: string
+	evidence: Trace
+	captures: { viewId: string; variantName?: string; evidenceDigest: string; screenshotDigest: string }[]
+	diagnostics?: { code: string; path: string }[]
+}
+
+async function api<T = unknown>(method: string, path: string, body?: unknown): Promise<{ status: number; body: T }> {
+	const response = await fetch(`${server.origin}${path}`, {
+		method,
+		headers: { ...server.headers, 'content-type': 'application/json', origin: server.origin },
+		...(body === undefined ? {} : { body: JSON.stringify(body) }),
+	})
+	const text = await response.text()
+	return { status: response.status, body: (text ? JSON.parse(text) : undefined) as T }
+}
+
+const trace = (flowId: string, recipe?: unknown) => api<Outcome>('POST', `/api/flows/${flowId}/evidence`, { renderContext, ...(recipe === undefined ? {} : { recipe }) })
+
+async function authorView(name: string, widgetId: string, variants: Record<string, unknown>): Promise<string> {
+	const spec = { intent: name, entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [] }
+	const created = await api<{ key: string }>('POST', '/api/views', { name, spec })
+	const read = await api<{ revision: string }>('GET', `/api/resources/view/${created.body.key}`)
+	const structure = await api('PUT', `/api/views/${created.body.key}/structure`, {
+		expectedRevision: read.body.revision,
+		ir: { id: 'root', type: 'RootShell', slots: { content: [{ id: widgetId, type: 'Button', config: { label: name } }] } },
+		variants,
+	})
+	expect(structure.status, JSON.stringify(structure.body)).toBe(200)
+	return created.body.key
+}
+
+async function authorFlow(name: string, event: string, variantName?: string): Promise<string> {
+	const flow = await api<{ key: string }>('POST', '/api/flows', {
+		name,
+		entryStepId: STEP_A,
+		steps: {
+			[STEP_A]: { target: { viewId: viewA, ...(variantName ? { variantName } : {}) }, transitions: [{ trigger: { widgetId: 'pay-button', event }, targetStepId: STEP_B }] },
+			[STEP_B]: { target: { viewId: viewB, variantName: 'done' }, transitions: [] },
+		},
+	})
+	expect(flow.status, JSON.stringify(flow.body)).toBe(201)
+	return flow.body.key
+}
+
+beforeAll(async () => {
+	server = await startWorkbenchServer()
+	viewA = await authorView('Pay', 'pay-button', { blocked: { state: { 'pay-button': { disabled: true } } } })
+	viewB = await authorView('Done', 'done-button', { done: { state: {} } })
+	// The reference Adapter's Button declares `click`, not `press`.
+	clickFlow = await authorFlow('Pay by click', 'click')
+	pressFlow = await authorFlow('Pay by press', 'press')
+	// A disabled Button cannot be clicked.
+	blockedFlow = await authorFlow('Pay while blocked', 'click', 'blocked')
+	changeFlow = await authorFlow('Pay by change', 'change')
+}, 90_000)
+
+afterAll(async () => {
+	await server?.close()
 })
 
-function view(id: string, name: string): ViewResource {
-	return {
-		id,
-		name,
-		ir: { type: 'RootShell', id: 'root', slots: { content: [] } },
-		variants: { done: { state: {} } },
-		spec: { intent: '', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], decisions: [] },
-	}
-}
-
-const flow: FlowResource = {
-	id: FLOW_ID,
-	name: 'Two steps',
-	entryStepId: STEP_A,
-	steps: {
-		[STEP_A]: { target: { viewId: VIEW_A }, transitions: [{ trigger: { widgetId: 'root', event: 'press' }, targetStepId: STEP_B }] },
-		[STEP_B]: { target: { viewId: VIEW_B, variantName: 'done' }, transitions: [] },
-	},
-}
-
-async function startServer(root: string): Promise<{ origin: string; cookie: { name: string; value: string } }> {
-	const token = await provisionToken(root, { nickname: 'tester', kind: 'human', preset: 'owner' })
-	const probe = createServer()
-	await new Promise<void>((done, fail) => { probe.once('error', fail); probe.listen(0, '127.0.0.1', () => done()) })
-	const { port } = probe.address() as AddressInfo
-	await new Promise<void>((done, fail) => probe.close(error => error ? fail(error) : done()))
-	const server = spawn(process.execPath, [resolve(process.cwd(), '.output/server/index.mjs')], {
-		stdio: ['ignore', 'pipe', 'pipe'],
-		env: { ...process.env, HOST: '127.0.0.1', PORT: String(port), NITRO_HOST: '127.0.0.1', NITRO_PORT: String(port), UIUX_WORKSPACE_ROOT: root, UIUX_PACKAGE_ROOT: process.cwd() },
-	})
-	servers.push(server)
-	let output = ''
-	server.stdout?.setEncoding('utf8').on('data', chunk => { output += chunk })
-	server.stderr?.setEncoding('utf8').on('data', chunk => { output += chunk })
-	const origin = `http://127.0.0.1:${port}`
-	const deadline = Date.now() + 15_000
-	while (Date.now() < deadline) {
-		if (server.exitCode !== null) throw new Error(`The test server exited before it was ready:\n${output}`)
-		try {
-			if ((await fetch(`${origin}/api/health`)).status === 200) return { origin, cookie: await sessionCookieFor(origin, token) }
-		}
-		catch { await new Promise(done => setTimeout(done, 100)) }
-	}
-	throw new Error(`The test server was not ready in time:\n${output}`)
-}
-
-describe('formal UX Flow Evidence over a real capture', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS }, () => {
-	it('captures each entered View and Variant and stores a trace that references the captures', async () => {
-		const root = await mkdtemp(join(tmpdir(), 'uiux-flow-trace-'))
-		roots.push(root)
-		await writeCurrentWorkspace(root, {
-			i18n: { defaultLocale: 'en-US' },
-			adapters: [],
-			viewports: { desktop: { label: 'Desktop', dimensions: { width: 1280, height: 800 } } },
-			themes: { light: { label: 'Light' } },
-		})
-		const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
-		await persistence.locales.create('en-US', {})
-		await persistence.views.create(VIEW_A, view(VIEW_A, 'First'))
-		await persistence.views.create(VIEW_B, view(VIEW_B, 'Second'))
-		await persistence.flows.create(FLOW_ID, flow)
-		const server = await startServer(root)
-		const app = createWorkspaceApplicationSession(persistence, { serverOrigin: server.origin, captureCookie: () => server.cookie })
-
-		const renderContext = { locale: 'en-US', viewportId: 'desktop', themeId: 'light' }
-		const outcome = await app.captureFlowEvidence({ flowId: FLOW_ID, renderContext })
-		expect(outcome.status, JSON.stringify(outcome)).toBe('captured')
-		if (outcome.status !== 'captured') return
+describe('formal UX Flow Evidence over a real capture and replay', () => {
+	it('derives a click for a click trigger, captures each entered View and Variant, replays it as a real click, and stores a trace that references the captures', async () => {
+		const recipe = { actions: [
+			{ type: 'enter', stepId: STEP_A, expect: { viewId: viewA } },
+			{ type: 'trigger', stepId: STEP_A, trigger: { widgetId: 'pay-button', event: 'click' }, perform: click, expect: { resultStepId: STEP_B } },
+			{ type: 'enter', stepId: STEP_B, expect: { viewId: viewB, variantName: 'done' } },
+		] }
+		const response = await trace(clickFlow)
+		expect(response.status, JSON.stringify(response.body)).toBe(200)
+		const outcome = response.body
+		expect(outcome.status).toBe('captured')
 
 		// One formal capture per distinct View and Variant the recipe enters.
-		expect(outcome.captures.map(capture => [capture.viewId, capture.variantName])).toEqual([[VIEW_A, undefined], [VIEW_B, 'done']])
-		const record = JSON.parse(Buffer.from((await persistence.artifacts.read(outcome.evidenceDigest))!).toString('utf8'))
-		expect(record).toEqual(JSON.parse(JSON.stringify(outcome.evidence)))
-		expect(validateFormalEvidenceRecord(record).diagnostics).toEqual([])
-		expect(record).toMatchObject({
+		expect(outcome.captures.map(capture => [capture.viewId, capture.variantName])).toEqual([[viewA, undefined], [viewB, 'done']])
+		const stored = await api<Trace>('GET', `/api/artifacts/${outcome.evidenceDigest}`)
+		expect(stored.body).toEqual(JSON.parse(JSON.stringify(outcome.evidence)))
+		expect(validateFormalEvidenceRecord(stored.body).diagnostics).toEqual([])
+		expect(stored.body).toMatchObject({
 			schemaVersion: 1,
 			kind: 'flow_trace',
-			executionContext: { flowId: FLOW_ID, ...renderContext },
+			executionContext: { flowId: clickFlow, ...renderContext },
 			coverage: { complete: true },
 			artifactRefs: [],
 		})
-		expect(record.data.steps).toEqual([
-			{ stepId: STEP_A, viewId: VIEW_A, trigger: { widgetId: 'root', event: 'press' }, resultStepId: STEP_B, valid: true, captureRef: outcome.captures[0]!.evidenceDigest },
-			{ stepId: STEP_B, viewId: VIEW_B, variantName: 'done', valid: true, captureRef: outcome.captures[1]!.evidenceDigest },
+		// The Button's Event click occurred exactly once when the Button was really clicked: the step is valid.
+		expect(stored.body.data.steps).toEqual([
+			{ stepId: STEP_A, viewId: viewA, trigger: { widgetId: 'pay-button', event: 'click' }, resultStepId: STEP_B, valid: true, captureRef: outcome.captures[0]!.evidenceDigest },
+			{ stepId: STEP_B, viewId: viewB, variantName: 'done', valid: true, captureRef: outcome.captures[1]!.evidenceDigest },
 		])
-		expect(record.data.recipe.actions.map((action: { type: string, stepId: string }) => [action.type, action.stepId])).toEqual([['enter', STEP_A], ['trigger', STEP_A], ['enter', STEP_B]])
-		expect(record.evidenceRefs).toEqual(outcome.captures.map(capture => ({ kind: 'formal_capture', evidence: capture.evidenceDigest })).sort((a, b) => a.evidence.localeCompare(b.evidence)))
-		expect(record.provenance.resources).toEqual(expect.arrayContaining([
-			expect.objectContaining({ identity: { type: 'flow', id: FLOW_ID } }),
-			expect.objectContaining({ identity: { type: 'view', id: VIEW_A } }),
-			expect.objectContaining({ identity: { type: 'view', id: VIEW_B } }),
+		expect(stored.body.data.recipe).toEqual(recipe)
+		expect(stored.body.evidenceRefs).toEqual(outcome.captures.map(capture => ({ kind: 'formal_capture', evidence: capture.evidenceDigest })).sort((a, b) => a.evidence.localeCompare(b.evidence)))
+		expect(stored.body.provenance.resources).toEqual(expect.arrayContaining([
+			expect.objectContaining({ identity: { type: 'flow', id: clickFlow } }),
+			expect.objectContaining({ identity: { type: 'view', id: viewA } }),
+			expect.objectContaining({ identity: { type: 'view', id: viewB } }),
 		]))
 		// Each referenced capture is a stored formal capture of that View and Variant, with its screenshot.
 		for (const capture of outcome.captures) {
-			const stored = JSON.parse(Buffer.from((await persistence.artifacts.read(capture.evidenceDigest))!).toString('utf8'))
-			expect(stored).toMatchObject({ kind: 'formal_capture', executionContext: { viewId: capture.viewId }, artifactRefs: [capture.screenshotDigest] })
-			expect(await persistence.artifacts.read(capture.screenshotDigest)).toBeDefined()
+			const formal = await api<{ kind: string; artifactRefs: string[] }>('GET', `/api/artifacts/${capture.evidenceDigest}`)
+			expect(formal.body).toMatchObject({ kind: 'formal_capture', artifactRefs: [capture.screenshotDigest] })
 		}
 
 		// The stored recipe replays to the same trace: formal captures are deterministic (issue #344), so the captures' identities and the trace's own identity match.
-		const again = await app.captureFlowEvidence({ flowId: FLOW_ID, renderContext, recipe: record.data.recipe })
+		const persistence = new FileNativePersistence({ root: server.workspaceRoot, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
+		const again = (await trace(clickFlow, stored.body.data.recipe)).body
 		expect(again.status).toBe('captured')
-		if (again.status === 'captured') {
-			expect(again.evidence.data?.recipe).toEqual(record.data.recipe)
-			for (const [index, capture] of again.captures.entries()) await assertSameScreenshot(`flow-replay-${index}`, digest => persistence.artifacts.read(digest), outcome.captures[index]!, capture)
-			expect(again.evidence.data?.steps).toEqual(record.data.steps)
-			expect(again.captures).toEqual(outcome.captures)
-			expect(again.evidenceDigest).toBe(outcome.evidenceDigest)
-		}
-		const narrower = await app.captureFlowEvidence({ flowId: FLOW_ID, renderContext, recipe: { actions: [record.data.recipe.actions[0]] } })
-		expect(narrower).toMatchObject({ status: 'captured' })
-		if (narrower.status === 'captured') {
-			expect(narrower.evidenceDigest).not.toBe(outcome.evidenceDigest)
-			expect(narrower.captures).toHaveLength(1)
-		}
+		for (const [index, capture] of again.captures.entries()) await assertSameScreenshot(`flow-replay-${index}`, digest => persistence.artifacts.read(digest), outcome.captures[index]!, capture)
+		expect(again.evidence.data.steps).toEqual(stored.body.data.steps)
+		expect(again.captures).toEqual(outcome.captures)
+		expect(again.evidenceDigest).toBe(outcome.evidenceDigest)
 
 		// An unknown Locale is the caller's render context, refused before anything is recorded.
-		expect(await app.captureFlowEvidence({ flowId: FLOW_ID, renderContext: { ...renderContext, locale: 'fr-FR' } })).toMatchObject({ status: 'invalid' })
-	})
+		const unknown = await api<Outcome>('POST', `/api/flows/${clickFlow}/evidence`, { renderContext: { ...renderContext, locale: 'fr-FR' } })
+		expect(unknown.body.status).toBe('invalid')
+	}, 180_000)
+
+	it('records a trigger whose Event the Widget does not emit as valid false, not as a held transition', async () => {
+		// Derivation defaults a press trigger to a click; the Button is clicked, but it declares no press Event.
+		const response = await trace(pressFlow)
+		expect(response.status, JSON.stringify(response.body)).toBe(200)
+		expect(response.body.status).toBe('captured')
+		expect(response.body.evidence.data.recipe.actions.map(action => [action.type, action.perform])).toEqual([['enter', undefined], ['trigger', click], ['enter', undefined]])
+		expect(response.body.evidence.data.steps.map(step => step.valid)).toEqual([false, true])
+	}, 180_000)
+
+	it('refuses a derived recipe whose trigger Event is neither press nor click, before a browser runs, and records nothing', async () => {
+		const persistence = new FileNativePersistence({ root: server.workspaceRoot, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
+		const before = await persistence.artifacts.listIdentities()
+		const response = await trace(changeFlow)
+		expect(response.status).toBe(422)
+		expect(response.body).toMatchObject({ status: 'invalid', diagnostics: [{ code: 'flow.recipe_perform_required', path: '/recipe/actions/1/perform' }] })
+		expect(await persistence.artifacts.listIdentities()).toEqual(before)
+	}, 60_000)
+
+	it('fails the run, keeping the formal captures and recording no trace, when the action cannot be performed', async () => {
+		const persistence = new FileNativePersistence({ root: server.workspaceRoot, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
+		const before = await persistence.artifacts.listIdentities()
+		// A disabled Button cannot be clicked: the step times out.
+		const response = await trace(blockedFlow, { actions: [
+			{ type: 'enter', stepId: STEP_A, expect: { viewId: viewA, variantName: 'blocked' } },
+			{ type: 'trigger', stepId: STEP_A, trigger: { widgetId: 'pay-button', event: 'click' }, perform: click, expect: { resultStepId: STEP_B } },
+			{ type: 'enter', stepId: STEP_B, expect: { viewId: viewB, variantName: 'done' } },
+		] })
+		expect(response.status).toBe(422)
+		expect(response.body).toMatchObject({ status: 'failed', flowId: blockedFlow, diagnostics: [{ code: 'interaction.step_failed' }] })
+		const kinds = await Promise.all((await persistence.artifacts.listIdentities()).filter(identity => !before.includes(identity))
+			.map(async identity => (await persistence.artifacts.readCandidateJson(identity) as { kind?: string } | undefined)?.kind))
+		expect(kinds).toContain('formal_capture')
+		expect(kinds).not.toContain('flow_trace')
+	}, 120_000)
 })

@@ -99,6 +99,22 @@ function validateJsonBound(v: Validator, value: unknown, path: string, code: str
 }
 
 /**
+ * The browser action of a step, and of a Flow recipe's trigger `perform` (Clause 01a172cc-d6f0-714d-b2fb-bd66e13c73a5):
+ * an `action`, the `text` of a `type` and the `key` of a `press`, each only where it belongs.
+ */
+export function validateInteractionAction(value: Readonly<Record<string, unknown>>, path: string, code: string, v: Validator): void {
+	const action = typeof value.action === 'string' && (INTERACTION_ACTIONS as readonly string[]).includes(value.action) ? value.action : undefined
+	if (!action) v.issue(code, `${path}/action`, `An action is one of ${INTERACTION_ACTIONS.join(', ')}.`)
+	if (action === 'type') {
+		if (typeof value.text !== 'string' || value.text.length === 0 || value.text.length > MAX_INTERACTION_TEXT_LENGTH)
+			v.issue(code, `${path}/text`, `A type action has text of 1 to ${MAX_INTERACTION_TEXT_LENGTH} characters.`)
+	}
+	else if (Object.hasOwn(value, 'text')) v.issue(code, `${path}/text`, 'Only a type action has text.')
+	if (action === 'press') identifier(v, value.key, `${path}/key`, code, MAX_INTERACTION_KEY_LENGTH)
+	else if (Object.hasOwn(value, 'key')) v.issue(code, `${path}/key`, 'Only a press action has a key.')
+}
+
+/**
  * Checks the shape of `steps` and `assertions`: the one recipe format a record stores and a caller gives
  * (`requireResult` is true for the record, false for an input, which carries no `result`). A step's
  * target View and Variant are what `context` names; a mismatch is `codes.mismatch`.
@@ -119,15 +135,7 @@ export function validateInteractionRecipe(
 			const step = v.object(value, path)
 			if (!step) return
 			rejectUnknownKeys(step, ['action', 'target', 'text', 'key'], path, v)
-			const action = typeof step.action === 'string' && (INTERACTION_ACTIONS as readonly string[]).includes(step.action) ? step.action : undefined
-			if (!action) v.issue(codes.shape, `${path}/action`, `An action is one of ${INTERACTION_ACTIONS.join(', ')}.`)
-			if (action === 'type') {
-				if (typeof step.text !== 'string' || step.text.length === 0 || step.text.length > MAX_INTERACTION_TEXT_LENGTH)
-					v.issue(codes.shape, `${path}/text`, `A type step has text of 1 to ${MAX_INTERACTION_TEXT_LENGTH} characters.`)
-			}
-			else if (Object.hasOwn(step, 'text')) v.issue(codes.shape, `${path}/text`, 'Only a type step has text.')
-			if (action === 'press') identifier(v, step.key, `${path}/key`, codes.shape, MAX_INTERACTION_KEY_LENGTH)
-			else if (Object.hasOwn(step, 'key')) v.issue(codes.shape, `${path}/key`, 'Only a press step has a key.')
+			validateInteractionAction(step, path, codes.shape, v)
 			const target = v.object(step.target, `${path}/target`)
 			if (!target) return
 			rejectUnknownKeys(target, ['viewId', 'variant', 'widgetId'], `${path}/target`, v)

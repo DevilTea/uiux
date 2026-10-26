@@ -1,8 +1,8 @@
 Feature: Capturing formal Flow Evidence records a trace that references a capture of each entered View
   # Source: Discussion #241 owner rulings 2026-10-25 (#88 Flows on the server) https://github.com/DevilTea/uiux/discussions/241#discussioncomment-19177134, items 4-6.
-  # Test: code@e10ae42 `tests/flow-evidence-browser.test.ts#L84` "captures each entered View and Variant and stores a trace that references the captures". https://github.com/DevilTea/uiux/blob/e10ae42/tests/flow-evidence-browser.test.ts#L84
-  # Test: code@0a5478e `tests/flow-evidence.test.ts#L48` "derives a recipe that enters every step and takes every transition, in a fixed order". https://github.com/DevilTea/uiux/blob/0a5478e/tests/flow-evidence.test.ts#L48
-  # Status: Partly built as of e10ae42: the Rule 01a11544-6628-73b9-b10a-9643d264bea1 it demonstrates is Partly built (see the Implementation gaps of its Feature); the Clauses it demonstrates are built.
+  # Test: code@65c9da2 `tests/flow-evidence-browser.test.ts#L103` "derives a click for a click trigger, captures each entered View and Variant, replays it as a real click, and stores a trace that references the captures". https://github.com/DevilTea/uiux/blob/65c9da2/tests/flow-evidence-browser.test.ts#L103
+  # Test: code@65c9da2 `tests/flow-evidence.test.ts#L50` "derives a recipe that enters every step and takes every transition, in a fixed order". https://github.com/DevilTea/uiux/blob/65c9da2/tests/flow-evidence.test.ts#L50
+  # Status: built as of 65c9da2.
   @spec:id:01a172d3-f0ff-7b92-9067-2647bde918da
   @spec:demonstrates:01a11544-6628-73b9-b10a-9643d264bea1
   @spec:demonstrates:01a172cc-d382-7cd3-b140-6320d2065edc

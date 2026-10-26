@@ -7,7 +7,8 @@ import type { ResolvedRenderContext } from '../../domain/render-context/schema'
 import { isFullUuid, isRecord, type Diagnostic, type JsonObject, type JsonValue } from '../../domain/validation'
 import type { FileNativePersistence } from '../../persistence'
 import { PersistenceError } from '../../persistence/errors'
-import type { CaptureFormalEvidenceCommand, CaptureFormalEvidenceResult } from './formal-capture'
+import type { CaptureFormalEvidenceCommand, CaptureFormalEvidenceResult, ReplayInteractionsCommand } from './formal-capture'
+import type { InteractionReplayOutcome } from './interaction-replay'
 
 /** The render context a Flow trace is captured in: every step's View and Variant is captured in it. */
 export type FlowRenderContext = Readonly<{ locale: string; viewportId: string; themeId: string }>
@@ -42,13 +43,18 @@ const invalid = (flowId: string, diagnostics: readonly Diagnostic[]): CaptureFlo
  * Formal UX Flow Evidence (Rules 01a11544-6628-73b9-b10a-9643d264bea1 and 01a11544-62c8-7d37-933b-b991fed72e30,
  * Clauses 01a172cc-e195-711b-bfa9-5de6c1c8ff87 and 01a172cc-d382-7cd3-b140-6320d2065edc): a Flow with any
  * diagnostic is refused; otherwise every View and Variant the recipe enters is formally captured by the
- * formal capture harness in the render context, and the trace that references those captures is stored.
+ * formal capture harness in the render context, each trigger is replayed as its `perform` browser action on
+ * the entered View's Preview (Rule 01a11544-66d9-7fcd-8400-93516ddf2857, through the shared interaction
+ * replay engine) asserting the Widget Event exactly once, and the trace that references those captures is
+ * stored. A trigger whose Event does not occur exactly once is recorded as `valid: false`; a replay that
+ * cannot run fails the run.
  */
 export function createFlowEvidenceService(
 	persistence: FileNativePersistence,
 	input: Readonly<{
 		readFlow(flowId: string): Promise<FlowDiagnosticRead | undefined>
 		captureFormal(command: CaptureFormalEvidenceCommand): Promise<CaptureFormalEvidenceResult>
+		replay(command: ReplayInteractionsCommand): Promise<InteractionReplayOutcome>
 	}>,
 ): FlowEvidenceService {
 	async function capture(command: CaptureFlowEvidenceCommand): Promise<CaptureFlowEvidenceResult> {
@@ -77,12 +83,11 @@ export function createFlowEvidenceService(
 			return invalid(flowId, [{ code: 'render_context.unknown_viewport', path: '/renderContext/viewportId', message: `Viewport ${context.viewportId} does not exist in the Workspace.` }])
 
 		let recipe: FlowRecipe
+		// A derived recipe is checked like a given one: a trigger whose Event is not `press` has no default `perform`.
 		if (command.recipe === undefined) recipe = deriveFlowRecipe(flow)
-		else {
-			const diagnostics = validateFlowRecipe(command.recipe, flow)
-			if (diagnostics.length > 0) return invalid(flowId, diagnostics)
-			recipe = command.recipe as FlowRecipe
-		}
+		else recipe = command.recipe as FlowRecipe
+		const recipeDiagnostics = validateFlowRecipe(recipe, flow)
+		if (recipeDiagnostics.length > 0) return invalid(flowId, recipeDiagnostics)
 		const entries = flowRecipeEntries(recipe)
 
 		const contexts: ResolvedRenderContext[] = []
@@ -110,14 +115,34 @@ export function createFlowEvidenceService(
 				: { status: 'failed', flowId, diagnostics }
 		}
 
+		// Every trigger is performed in a fresh Preview of its step's View and Variant, and held only when its Event occurred exactly once.
+		// The step it leads to (`resultStepId`) was matched against the canonical Flow when the recipe was validated.
+		const held: boolean[] = []
+		for (const entry of entries) {
+			if (!entry.trigger) { held.push(true); continue }
+			const perform = entry.perform!
+			const replayed = await input.replay({
+				context: contexts[contextOf.get(keyOf(entry))!]!,
+				steps: [{
+					action: perform.action,
+					target: { viewId: entry.viewId, ...(entry.variantName !== undefined ? { variant: entry.variantName } : {}), widgetId: entry.trigger.widgetId },
+					...(perform.text !== undefined ? { text: perform.text } : {}),
+					...(perform.key !== undefined ? { key: perform.key } : {}),
+				}],
+				assertions: [{ expect: { widgetEvent: { widgetId: entry.trigger.widgetId, name: entry.trigger.event, count: 1 } } }],
+				...(command.baseUrl ? { baseUrl: command.baseUrl } : {}),
+			})
+			if (replayed.status !== 'replayed') return { status: 'failed', flowId, diagnostics: replayed.diagnostics }
+			held.push(replayed.results[0] === 'pass')
+		}
+
 		const captureDigests = captured.results.map(result => result.evidenceDigest!)
-		const steps = entries.map(entry => ({
+		const steps = entries.map((entry, index) => ({
 			stepId: entry.stepId,
 			viewId: entry.viewId,
 			...(entry.variantName !== undefined ? { variantName: entry.variantName } : {}),
 			...(entry.trigger ? { trigger: { widgetId: entry.trigger.widgetId, event: entry.trigger.event }, resultStepId: entry.resultStepId! } : {}),
-			// Every assertion of a recipe that matched its Flow held, or the recipe would have been refused above.
-			valid: true,
+			valid: held[index]!,
 			captureRef: captureDigests[contextOf.get(keyOf(entry))!]!,
 		}))
 
