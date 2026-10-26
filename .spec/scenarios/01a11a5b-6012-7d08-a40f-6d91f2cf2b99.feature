@@ -1,7 +1,9 @@
 Feature: Preview failure diagnostics
   # Source: Discussion #131 (Part 13, Preview protocol additions). Decisions behind the demonstrated Rules and Clauses: #131 body: decision 9 https://github.com/DevilTea/uiux/discussions/131; #131 owner acceptance 2026-10-08 https://github.com/DevilTea/uiux/discussions/131#discussioncomment-18807266.
-  # Note: No test exists yet; the report decodes and is accepted (code@ebae02e `src/preview/protocol/bridge.ts#L292`), but the contour work it would end is part of the implementation tracked in issue #110 (https://github.com/DevilTea/uiux/issues/110).
-  # Status: not built as of ebae02e; see the Implementation gaps entry of 01a11a59-def9-797a-8d08-5e4b02ecd900 in its owner.
+  # Test: code@7eceb6a `tests/contour-refinement-browser.test.ts#L232` "ends work on a work-scoped failure report and latches until the geometry or the context changes". https://github.com/DevilTea/uiux/blob/7eceb6acec9a11455b2cbb3f9e6011989705bed0/tests/contour-refinement-browser.test.ts#L232
+  # Test: code@7eceb6a `tests/preview-contour-refinement.test.ts#L321` "ends the work without a response and starts no refinement or regeneration within the revision". https://github.com/DevilTea/uiux/blob/7eceb6acec9a11455b2cbb3f9e6011989705bed0/tests/preview-contour-refinement.test.ts#L321
+  # Test: code@7eceb6a `tests/contour-refinement-browser.test.ts#L279` "clears the latch with an explicit Retry Preview, which starts a new generation". https://github.com/DevilTea/uiux/blob/7eceb6acec9a11455b2cbb3f9e6011989705bed0/tests/contour-refinement-browser.test.ts#L279
+  # Status: built as of 7eceb6a.
   @spec:id:01a11a5b-6012-774b-8a16-a6d1aeb57d5a
   @spec:demonstrates:01a11687-3650-7490-a7ec-80b2570582f6
   @spec:demonstrates:01a11a59-def9-797a-8d08-5e4b02ecd900
