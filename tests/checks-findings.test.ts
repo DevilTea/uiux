@@ -382,12 +382,19 @@ describe('the check states of the Preview sources (issue #95)', () => {
 	})
 
 	it('is incomplete, never completed, for a report without coverage: a Preview with no Runtime to inspect has verified nothing', () => {
-		expect(previewSourceStates({ state: 'completed', report: held() })).toEqual({ translation: 'incomplete', runtime: 'completed' })
+		expect(previewSourceStates({ state: 'completed', report: held() })).toEqual({ translation: 'incomplete', runtime: 'incomplete' })
+	})
+
+	it('is incomplete for the Runtime errors source when no Runtime was created, never completed with zero findings (issue #370)', () => {
+		// A theme-incompatible Preview reports no Runtime error and no coverage: nothing ran.
+		expect(previewSourceStates({ state: 'completed', report: held({ runtimeErrors: [], translationWarnings: [] }) }).runtime).toBe('incomplete')
+		// A report with coverage came from a Runtime that was inspected, and lists every error it knows.
+		expect(previewSourceStates({ state: 'completed', report: held({ coverage: { complete: true, unevaluated: [] } }) }).runtime).toBe('completed')
 	})
 
 	it('is failed for the translation source when the Preview could not evaluate, whatever the coverage says', () => {
 		for (const reason of ['runtime.view_load_failed', 'runtime.adapter_invalid', 'runtime.adapter_unavailable', 'runtime.preview_blocked'])
-			expect(previewSourceStates({ state: 'completed', report: held({ runtimeErrors: [{ reason }] }) })).toEqual({ translation: 'failed', runtime: 'completed' })
+			expect(previewSourceStates({ state: 'completed', report: held({ runtimeErrors: [{ reason }] }) })).toEqual({ translation: 'failed', runtime: 'failed' })
 		// A Property that failed is an error to list, and its Property is counted as unevaluated, not a failed Preview.
 		expect(previewSourceStates({ state: 'completed', report: held({ runtimeErrors: [{ reason: 'runtime.property_failed', widgetId: 'b1' }], coverage: { complete: false, unevaluated: [entry] } }) }))
 			.toEqual({ translation: 'incomplete', runtime: 'completed' })

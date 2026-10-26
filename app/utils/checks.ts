@@ -414,7 +414,10 @@ const BLOCKING_RUNTIME_REASONS: ReadonlySet<string> = new Set(['runtime.view_loa
  *   declared Property was evaluated. A report that names unevaluated Properties, or carries no
  *   `coverage` (a Preview with no Runtime to inspect), is incomplete: an unverified check is never
  *   zero findings.
- * - Runtime errors are completed, as every one the Preview knows is listed.
+ * - Runtime errors follow the same signals: failed when the Preview could not evaluate (it ran
+ *   nothing), and incomplete when the report carries no `coverage`, since a Preview that created no
+ *   Runtime (a theme-incompatible context, a foreign runtime that cannot be inspected) did not run
+ *   the check (issue #370). Otherwise they are completed, as every one the Preview knows is listed.
  * - A report that says it left entries out (`runtime.report_truncated`, whose detail is not normative
  *   and cannot say which list was cut) makes both sources incomplete.
  * - A report of a Preview that is closed is the last one, never the current one: incomplete.
@@ -429,10 +432,13 @@ export function previewSourceStates(live: PreviewChecksHeld): Readonly<{ transla
 	}
 	if (live.state === 'stale') return { translation: 'incomplete', runtime: 'incomplete' }
 	const truncated = report.runtimeErrors.some(error => error.reason === 'runtime.report_truncated')
-	const translation: CheckState = report.runtimeErrors.some(error => BLOCKING_RUNTIME_REASONS.has(error.reason))
+	const blocked = report.runtimeErrors.some(error => BLOCKING_RUNTIME_REASONS.has(error.reason))
+	const translation: CheckState = blocked
 		? 'failed'
 		: truncated || report.coverage?.complete !== true ? 'incomplete' : 'completed'
-	return { translation, runtime: truncated ? 'incomplete' : 'completed' }
+	// No `coverage` means no Runtime was inspected: the Runtime errors source did not run, whatever it lists.
+	const runtime: CheckState = blocked ? 'failed' : truncated || !report.coverage ? 'incomplete' : 'completed'
+	return { translation, runtime }
 }
 
 /** The declared translation Properties a report says have no usable result; 0 when it names none. */
