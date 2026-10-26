@@ -9,7 +9,8 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { runArtifactsCommand } from '../src/cli/artifacts'
 import type { FormalEvidenceRecord } from '../src/domain/evidence/schema'
 import type { CheckpointRecord, HistoryResourceEntry, HostVersionRecord } from '../src/domain/history/schema'
-import { ArtifactGcSweepError, collectArtifactGarbage } from '../src/persistence/artifact-gc'
+import { createChecksRunEvidenceService } from '../src/application/services/checks-run-evidence'
+import { ArtifactGcSweepError, CHECKS_RUN_RETENTION, collectArtifactGarbage, keptChecksRuns } from '../src/persistence/artifact-gc'
 import { canonicalJsonBytes, FileNativePersistence, revisionForResourceFiles, type PersistenceFaultHook } from '../src/persistence/file-native'
 import { CheckpointStore } from '../src/persistence/history/checkpoint-store'
 import { blobDigest, HostHistoryStore } from '../src/persistence/history/host-store'
@@ -373,6 +374,48 @@ describe('uiux artifacts gc', () => {
 		expect(run.status, run.stderr.join('\n')).toBe(0)
 		expect(run.stdout).toEqual([orphan, 'Deleted 1 blob, 11 bytes.'])
 		for (const identity of [outer, inner, asKey, deepest]) expect(await exists(artifactPath(root, identity)), identity).toBe(true)
+	})
+
+	it('keeps the newest checks_run records and any a root references, and deletes the older ones (owner ruling of 2026-10-26, item 1)', async () => {
+		const workspace = await makeWorkspace()
+		const { root, persistence } = workspace
+		const service = createChecksRunEvidenceService(persistence)
+		const sources = ['validation', 'translation', 'catalog', 'product-kit'].map(source => ({ source, state: 'completed' }))
+		const record = async (minute: number) => {
+			const result = await service.record({ ranAt: `2026-10-20T10:${String(minute).padStart(2, '0')}:00Z`, sources, findings: [] })
+			if (result.status !== 'recorded') throw new Error(JSON.stringify(result))
+			return result.evidenceDigest
+		}
+		// 25 runs, recorded out of order: the newest by ranAt, not by write order or blob time, are kept.
+		const order = [3, 24, 0, 17, 9, 1, 22, 5, 14, 20, 2, 11, 23, 7, 19, 4, 13, 21, 8, 16, 6, 18, 10, 15, 12]
+		const runs = new Map<number, string>()
+		for (const minute of order) runs.set(minute, await record(minute))
+		expect(runs.size).toBe(25)
+		// The oldest run is referenced by a Review submission, so it stays.
+		await writeReview(root, readyThread(runs.get(0)!))
+		const newest = [...runs.entries()].filter(([minute]) => minute >= 25 - CHECKS_RUN_RETENTION).map(([, identity]) => identity)
+		const doomed = [...runs.entries()].filter(([minute]) => minute > 0 && minute < 25 - CHECKS_RUN_RETENTION).map(([, identity]) => identity).sort()
+		expect(newest).toHaveLength(CHECKS_RUN_RETENTION)
+		expect(doomed).toHaveLength(4)
+		const dry = await gc(workspace, '--dry-run')
+		expect(dry.status, dry.stderr.join('\n')).toBe(0)
+		expect(dry.stdout.slice(0, -1)).toEqual(doomed)
+		const run = await gc(workspace)
+		expect(run.status, run.stderr.join('\n')).toBe(0)
+		expect(run.stdout.slice(0, -1)).toEqual(doomed)
+		for (const identity of doomed) expect(await exists(artifactPath(root, identity)), identity).toBe(false)
+		for (const identity of [...newest, runs.get(0)!]) expect(await exists(artifactPath(root, identity)), identity).toBe(true)
+		expect((await storeListing(root)).length).toBe(CHECKS_RUN_RETENTION + 1)
+		// A second run finds nothing more to delete.
+		expect((await gc(workspace)).stdout).toEqual(['Deleted 0 blobs, 0 bytes.'])
+	})
+
+	it('keeps a checks_run record whose ranAt cannot be parsed outside the retained slots, and ranks only the rest', () => {
+		const unparseable = Array.from({ length: CHECKS_RUN_RETENTION + 2 }, (_, index) => ({ identity: `bad-${String(index).padStart(2, '0')}`, ranAt: index % 2 === 0 ? 'not a time' : undefined }))
+		const ranked = Array.from({ length: CHECKS_RUN_RETENTION + 3 }, (_, index) => ({ identity: `run-${String(index).padStart(2, '0')}`, ranAt: new Date(Date.UTC(2026, 9, 1, 0, index)).toISOString() }))
+		const kept = keptChecksRuns([...unparseable, ...ranked])
+		expect(kept.filter(identity => identity.startsWith('bad-')).sort()).toEqual(unparseable.map(record => record.identity))
+		expect(kept.filter(identity => identity.startsWith('run-')).sort()).toEqual(ranked.slice(3).map(record => record.identity))
 	})
 
 	it('keeps the identities named by a kept blob that is not JSON, including one behind a UTF-8 BOM', async () => {

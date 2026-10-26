@@ -20,6 +20,8 @@ import {
 	FINDING_SOURCES,
 	GROUP_BYS,
 	groupFindings,
+	previewReportTruncated,
+	previewSourceStates,
 	previewTranslationFindings,
 	runtimeErrorFindings,
 	sectionFindings,
@@ -35,6 +37,7 @@ import {
 	type FindingSource,
 	type GroupBy,
 	type PreviewFindingText,
+	unevaluatedCount,
 	type ViewUsage,
 } from '../../utils/checks'
 import { flowPath, localeCellLocation, viewLocation } from '../../utils/workbench-routes'
@@ -100,6 +103,14 @@ const readStates = ref<Record<ReadSource, CheckState>>({ validation: 'not_checke
 /** Catalog problems of the Adapter set or of entries no View uses: they stay on the Product Kit page. */
 const catalogElsewhere = ref(0)
 const catalogError = shallowRef<FetchErrorDetails>()
+/**
+ * What the Catalog findings are rebuilt from when Views change (Rule 01a115cd-beb7-7024-9e44-0b5fe9ecf9af): the
+ * Adapter set's report of the last run, kept as read and never asked for again, and each View's Widgets with the
+ * revision they were read at. A View without Widgets in its entry could not be derived, so it is not settled.
+ */
+const catalogReport = shallowRef<Readonly<{ diagnostics: readonly Diagnostic[]; warned: boolean }>>()
+type ViewUsageEntry = Readonly<{ revision: string; widgets?: readonly Readonly<{ id: string; type: string }>[] }>
+let viewUsageEntries = new Map<string, ViewUsageEntry>()
 
 // Filters and grouping: Workbench presentation (Rule 01a115cd-bd13-778b-8a0a-b4d43cd98aa7).
 const ALL = 'all'
@@ -149,6 +160,7 @@ async function runChecks(): Promise<void> {
 	const localeResources = new Map<string, I18nResource>()
 	const localeStates: CheckState[] = []
 	const usage: ViewUsage[] = []
+	const usageEntries = new Map<string, ViewUsageEntry>()
 	let usageComplete = true
 	const failed: { name: string; error: FetchErrorDetails }[] = []
 	// A resource read's diagnostics are structural and schema findings: each one stops that resource from
@@ -202,8 +214,12 @@ async function runChecks(): Promise<void> {
 				const flat = tree?.status === 'valid' ? flattenWidgetTree(tree.root) : []
 				const types = new Map(flat.map(widget => [widget.id, widget.type] as const))
 				// A View whose Widgets cannot be derived cannot be said to use or not use a Catalog entry.
-				if (tree?.status === 'valid') usage.push({ resource, widgets: flat.map(widget => ({ id: widget.id, type: widget.type })) })
-				else usageComplete = false
+				if (tree?.status === 'valid') {
+					const widgets = flat.map(widget => ({ id: widget.id, type: widget.type }))
+					usage.push({ resource, widgets })
+					usageEntries.set(job.key, { revision: result.revision, widgets })
+				}
+				else { usageComplete = false; usageEntries.set(job.key, { revision: result.revision }) }
 				push(resource, result.diagnostics, diagnostic => resolveDiagnosticWidgetTarget(diagnostic, ir, new Set(types.keys())), types)
 			}
 			catch (cause) {
@@ -231,10 +247,13 @@ async function runChecks(): Promise<void> {
 		const problems = catalogProblems(response.diagnostics ?? [], usage, catalogState)
 		catalog = problems.findings
 		elsewhere = problems.elsewhere
+		catalogReport.value = { diagnostics: response.diagnostics ?? [], warned: !!response.warnings?.length }
 	}
 	catch (cause) {
 		catalogError.value = describeFetchError(cause, t('checks.catalog.failed'))
+		catalogReport.value = undefined
 	}
+	viewUsageEntries = usageEntries
 
 	resourceFindings.value = validationFindings
 	translationFindings.value = reminders
@@ -247,7 +266,58 @@ async function runChecks(): Promise<void> {
 	await kitDone
 	// A newer run records its own result; this one is superseded.
 	if (serial === runSerial) await recordRun(ranAt, serial)
+	// Views that changed while the run was reading are followed like any later edit.
+	void refreshCatalogUsage()
 }
+
+// ---- Catalog problems follow the Views ---------------------------------------------------------
+
+let usageSerial = 0
+
+/**
+ * Rule 01a115cd-beb7-7024-9e44-0b5fe9ecf9af: after a run, the affected Views and Widgets of a Catalog problem
+ * follow the Views as they are now. The Workbench's live refresh already keeps the View list current, so a
+ * changed, added or removed View is the signal: only those Views are read again, and the problems of the
+ * run's Adapter report are attributed again. The Adapter set is not asked for again.
+ */
+async function refreshCatalogUsage(): Promise<void> {
+	const report = catalogReport.value
+	if (!report || running.value) return
+	const serial = ++usageSerial
+	const listed = views.value
+	const stale = listed.filter(view => viewUsageEntries.get(view.key)?.revision !== view.revision)
+	const removed = [...viewUsageEntries.keys()].filter(key => !listed.some(view => view.key === key))
+	if (!stale.length && !removed.length) return
+	const next = new Map(viewUsageEntries)
+	for (const key of removed) next.delete(key)
+	await Promise.all(stale.map(async (view) => {
+		try {
+			const result = await read('view', view.key)
+			const ir = result?.resource?.ir
+			const tree = ir ? deriveWidgetTree(ir) : undefined
+			if (!result) next.delete(view.key)
+			else next.set(view.key, { revision: result.revision, ...(tree?.status === 'valid' ? { widgets: flattenWidgetTree(tree.root).map(widget => ({ id: widget.id, type: widget.type })) } : {}) })
+		}
+		catch { next.delete(view.key) }
+	}))
+	// A newer refresh or a new run owns the result.
+	if (serial !== usageSerial || running.value || catalogReport.value !== report) return
+	viewUsageEntries = next
+	const usage: ViewUsage[] = []
+	let usageComplete = true
+	for (const view of views.value) {
+		const widgets = next.get(view.key)?.widgets
+		if (widgets) usage.push({ resource: { kind: 'view', key: view.key, name: view.summary.name || t('common.unnamed') }, widgets })
+		else usageComplete = false
+	}
+	const state: CheckState = usageComplete && !report.warned ? 'completed' : 'incomplete'
+	const problems = catalogProblems(report.diagnostics, usage, state)
+	catalogFindings.value = problems.findings
+	catalogElsewhere.value = problems.elsewhere
+	readStates.value = { ...readStates.value, catalog: state }
+}
+
+watch(() => views.value.map(view => `${view.key}@${view.revision}`).join('|'), () => { void refreshCatalogUsage() })
 
 // ---- Product Kit Checks -----------------------------------------------------------------------
 
@@ -413,8 +483,11 @@ const previewFindings = computed<readonly Finding[]>(() => {
 	const widgetTypes = selectedViewId.value === report.viewId && widgetTreeResult.value?.status === 'valid'
 		? new Map(flattenWidgetTree(widgetTreeResult.value.root).map(widget => [widget.id, widget.type] as const))
 		: undefined
-	const input = { resource: { kind: 'view', key: view.key, name: view.name } satisfies FindingResource, ...(widgetTypes ? { widgetTypes } : {}), text: previewText, checkState: previewState.value }
-	return [...previewTranslationFindings(report, input), ...runtimeErrorFindings(report, input)]
+	const input = { resource: { kind: 'view', key: view.key, name: view.name } satisfies FindingResource, ...(widgetTypes ? { widgetTypes } : {}), text: previewText }
+	return [
+		...previewTranslationFindings(report, { ...input, checkState: previewStates.value.translation }),
+		...runtimeErrorFindings(report, { ...input, checkState: previewStates.value.runtime }),
+	]
 })
 
 const findings = computed<readonly Finding[]>(() => {
@@ -469,11 +542,11 @@ const kitState = computed<CheckState>(() => {
 	return kitError.value ? 'failed' : 'not_checked'
 })
 
-/** The check state of the Preview's sources: a report of a Preview that is gone is incomplete, never completed. */
-const previewState = computed<CheckState>(() => {
-	const live = preview.liveChecks.value
-	return live.state === 'stale' ? 'incomplete' : live.state
-})
+/**
+ * The check states of the Preview's sources: failed when it could not evaluate, incomplete when its
+ * report says declared Properties were not evaluated (or the Preview is gone), completed otherwise.
+ */
+const previewStates = computed(() => previewSourceStates(preview.liveChecks.value))
 
 /** What the Preview's rows say about their scope: where they come from, or why nothing is known. */
 const previewNote = computed(() => {
@@ -487,6 +560,15 @@ const previewNote = computed(() => {
 		locale: live.locale ?? '—',
 		time: fmt.time(live.receivedAt),
 	})
+})
+
+/** What the Preview's translation row adds: how many declared Properties its Runtime did not evaluate, whose warnings are unknown. */
+const previewCoverageNote = computed(() => {
+	const report = preview.liveChecks.value.report
+	const n = unevaluatedCount(report)
+	if (n === 0) return undefined
+	// A cut report names only some of them: the count is a lower bound.
+	return t(previewReportTruncated(report) ? 'checks.sources.previewUnevaluatedAtLeast' : 'checks.sources.previewUnevaluated', { n }, n)
 })
 
 const sourceRows = computed<readonly SourceRow[]>(() => {
@@ -504,8 +586,8 @@ const sourceRows = computed<readonly SourceRow[]>(() => {
 		},
 		{ id: 'product-kit', state: kitState.value, count: countOf('product-kit'), ...(!canRunKitChecks.value ? { requiredKey: 'evidence.capture' } : {}) },
 		// The Preview's sources follow the live Preview, not Run Checks: no Preview reporting means not checked.
-		{ id: 'preview-translation', state: previewState.value, count: countOf('preview-translation'), note: previewNote.value },
-		{ id: 'runtime', state: previewState.value, count: countOf('runtime'), note: previewNote.value },
+		{ id: 'preview-translation', state: previewStates.value.translation, count: countOf('preview-translation'), note: [previewNote.value, previewCoverageNote.value].filter(Boolean).join(' ') || undefined },
+		{ id: 'runtime', state: previewStates.value.runtime, count: countOf('runtime'), note: previewNote.value },
 	]
 })
 

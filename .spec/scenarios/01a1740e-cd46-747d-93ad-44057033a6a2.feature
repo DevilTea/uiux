@@ -2,7 +2,7 @@ Feature: A Catalog problem of an entry a View uses shows once, grouped by View a
   # Source: Discussion #1 comment 77 https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18610366, Discussion #1 comment 78 https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18610433, Discussion #1 comment 79 https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18610541 (Catalog problems of used entries, grouped problem, View, Widget).
   # Test: code@01f26de `tests/checks-sources-browser.test.ts#L91` "lists reminders and Catalog problems with their origin, scope, state and severity, errors first". https://github.com/DevilTea/uiux/blob/01f26de/tests/checks-sources-browser.test.ts#L91
   # Test: code@01f26de `tests/checks-findings.test.ts#L199` "shows one problem once, expanding to each distinct View and then each distinct Widget". https://github.com/DevilTea/uiux/blob/01f26de/tests/checks-findings.test.ts#L199
-  # Status: built as of 01f26de; the listed Views and Widgets are read when Run Checks runs, so see the Implementation gaps entry of 01a115cd-beb7-7024-9e44-0b5fe9ecf9af.
+  # Status: built as of 01f26de.
   @spec:id:01a1740e-cd46-756c-84e6-9794475d91d6
   @spec:demonstrates:01a115cd-be51-740b-8472-c08dc7138e3e
   @spec:demonstrates:01a115cd-be84-755b-b9fb-62f519cf989c
