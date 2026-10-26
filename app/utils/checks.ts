@@ -28,6 +28,35 @@ export const FINDING_SEVERITIES = ['error', 'warning'] as const
 export type FindingSeverity = typeof FINDING_SEVERITIES[number]
 
 /**
+ * The Workbench's severity derivation, no wire change (owner ruling 3 of Discussion #241,
+ * issue #349): resource-read diagnostics (structural and schema, including the missing default
+ * Locale) and Catalog problems are errors; translation reminders and Product Kit findings are
+ * warnings. The single place that fixes these values: every finding takes its severity from here.
+ */
+export const SOURCE_SEVERITY: Readonly<Record<FindingSource, FindingSeverity>> = {
+	validation: 'error',
+	catalog: 'error',
+	translation: 'warning',
+	'product-kit': 'warning',
+}
+
+/** The severity a finding of this source lists with. */
+export function severityOf(source: FindingSource): FindingSeverity {
+	return SOURCE_SEVERITY[source]
+}
+
+const VARIANT_PATH = /^\/variants\/([^/]+)(?:\/|$)/
+
+/**
+ * The Variant a View diagnostic concerns, from its `path` prefix `/variants/<name>` (the JSON
+ * Pointer the View schema writes, with `~1` and `~0` escapes undone); none for any other path.
+ */
+export function variantOfPath(path: string): string | undefined {
+	const match = VARIANT_PATH.exec(path)
+	return match ? unescapePointer(match[1]!) : undefined
+}
+
+/**
  * The check state of a source (Rule 01a115cd-bb96-7131-99d9-a3882829590c): not yet checked,
  * checking, completed (with or without findings), and failed or incomplete. An unrun source is
  * never zero findings.
@@ -274,7 +303,7 @@ export function translationReminders(
 			path: item.diagnostic.path,
 			resource: { kind: 'locale', key: locale, name: locale },
 			source: 'translation',
-			severity: item.severity,
+			severity: severityOf('translation'),
 			checkState,
 			locale,
 			translationKey: key,
@@ -346,7 +375,7 @@ export function catalogProblems(
 					path: diagnostic.path,
 					resource: view.resource,
 					source: 'catalog',
-					severity: 'error',
+					severity: severityOf('catalog'),
 					checkState,
 					widgetId: widget.id,
 					widgetType: widget.type,
