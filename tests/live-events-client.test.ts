@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { FALLBACK_POLL_MS, HELLO_TIMEOUT_MS, LIVE_BATCH_MS, LIVE_EVENTS_PATH, LIVENESS_FAILURES_BEFORE_FALLBACK, REFUSED_RETRY_MS, SERVER_HEARTBEAT_MS, SILENCE_TIMEOUT_MS, changedKeys, touchesKinds, useLiveEvents, type LiveBatch } from '../app/composables/useLiveEvents'
+import { FALLBACK_POLL_MS, HELLO_TIMEOUT_MS, LIVE_BATCH_MS, LIVE_EVENTS_PATH, LIVENESS_FAILURES_BEFORE_FALLBACK, REFUSED_RETRY_MS, SERVER_HEARTBEAT_MS, SILENCE_TIMEOUT_MS, changedKeys, observeServerInstance, resetServerInstance, touchesKinds, useLiveEvents, type LiveBatch } from '../app/composables/useLiveEvents'
 
 /**
  * The Workbench side of live refresh (Rules 01a11485-f39f-7464-9f8f-608335ed9800 and
@@ -157,6 +157,48 @@ describe('useLiveEvents', () => {
 		live.start()
 		current().emit('hello', { serverInstanceId: 'c' })
 		expect(restarts).toBe(2)
+	})
+
+	it('compares the server instance of every API response with the one seen before, and of hello with the same state (issue #317)', () => {
+		let restarts = 0
+		resetServerInstance()
+		removers.push(live.onServerRestart(() => { restarts += 1 }))
+		// The first read seeds the instance, with no stream and no hello: nothing to report yet.
+		observeServerInstance('a')
+		observeServerInstance('a')
+		observeServerInstance(null)
+		observeServerInstance('')
+		expect(restarts).toBe(0)
+
+		// A read naming another instance reports the restart once, with no stream open.
+		observeServerInstance('b')
+		observeServerInstance('b')
+		expect(restarts).toBe(1)
+
+		// The hello that follows the same restart does not report it again, and the next one is told apart.
+		live.start()
+		current().emit('hello', { serverInstanceId: 'b' })
+		expect(restarts).toBe(1)
+		current().emit('hello', { serverInstanceId: 'c' })
+		expect(restarts).toBe(2)
+		// A read of the instance the hello already named reports nothing.
+		observeServerInstance('c')
+		expect(restarts).toBe(2)
+	})
+
+	it('reports a restart seen by a read while the page polls in fallback, with no hello (issue #317)', () => {
+		let restarts = 0
+		resetServerInstance()
+		removers.push(live.onServerRestart(() => { restarts += 1 }))
+		vi.stubGlobal('EventSource', undefined)
+		live.start()
+		expect(live.state.value).toBe('fallback')
+		observeServerInstance('a')
+		vi.advanceTimersByTime(FALLBACK_POLL_MS + LIVE_BATCH_MS)
+		expect(batches.at(-1)).toEqual({ resync: true, changes: [] })
+		// The poll's re-read names a new instance.
+		observeServerInstance('b')
+		expect(restarts).toBe(1)
 	})
 
 	it('falls back to polling when the stream is refused, and tries the stream again later', () => {

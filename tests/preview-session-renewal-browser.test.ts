@@ -77,12 +77,15 @@ describe('Preview session renewal after a server restart (issue #101)', () => {
 
 			// The page reconnects and starts a new session under a fresh ID, with a fresh document.
 			await expect.poll(() => sessionParam(page), { timeout: 30_000 }).not.toBe(firstSession)
-			expect(await page.evaluate(() => (window as unknown as { __hellos: number }).__hellos)).toBeGreaterThan(hellos)
+			// The renewal may come from an API response before the stream's next `hello`; that `hello` follows.
+			await expect.poll(() => page.evaluate(() => (window as unknown as { __hellos: number }).__hellos), { timeout: 30_000 }).toBeGreaterThan(hellos)
 			const renewedSession = await sessionParam(page)
 			expect(renewedSession).toMatch(/^session-[0-9a-f]{32}$/)
 			const renewedGeneration = await expectLive(page)
 			expect(renewedGeneration).not.toBe(firstGeneration)
 			expect(await page.locator('[data-preview-failure]').count()).toBe(0)
+			// The restart was told by a response and by `hello` both, and renewed the session once.
+			expect(await sessionParam(page)).toBe(renewedSession)
 
 			// The new document's first protocol message is its ACK; every geometry request it receives
 			// belongs to the new session and generation, and the selection's geometry is acquired anew.
@@ -101,5 +104,81 @@ describe('Preview session renewal after a server restart (issue #101)', () => {
 			expect(new URL(page.url()).searchParams.get('widget')).toBe(WIDGET_ID)
 		}
 		finally { await context.close() }
+	}, 120_000)
+})
+
+/**
+ * Restart detection from the `X-UIUX-Server-Instance` header of every `/api/*` response (issue
+ * #317, Clause 01a175ec-c8cb-7cf3-bc94-1168ed11e3a9): a restart is detected while the Workbench
+ * polls in fallback and before the page's first `hello`, not only from the stream's `hello`.
+ */
+describe('Preview session renewal from the server instance header (issue #317)', () => {
+	/** Opens the Workbench on the View with the Widget selected, after `init` ran in the page, and waits for a live session. */
+	async function openLivePage(init?: () => void): Promise<{ page: Page; session: string; close: () => Promise<void> }> {
+		const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light' })
+		await context.addInitScript(() => {
+			localStorage.setItem('nuxt-color-mode', 'light')
+			localStorage.setItem('uiux.workbench.locale', 'en-US')
+		})
+		if (init) await context.addInitScript(init)
+		await context.addCookies([{ ...server.cookie, url: server.origin, httpOnly: true, sameSite: 'Strict' }])
+		const page = await context.newPage()
+		await page.goto(`${server.origin}/views/${VIEW_ID}?widget=${WIDGET_ID}`, { waitUntil: 'networkidle' })
+		await expectLive(page)
+		return { page, session: await sessionParam(page), close: () => context.close() }
+	}
+	const instanceOf = (page: Page) => page.evaluate(async () => (await fetch('/api/health', { cache: 'no-store' })).headers.get('x-uiux-server-instance'))
+
+	it('starts a new Preview session when the server restarted while the Workbench polls in fallback', async () => {
+		// No event stream at all: the Workbench polls every 15 seconds.
+		const opened = await openLivePage(() => { Reflect.deleteProperty(window, 'EventSource') })
+		try {
+			expect(await opened.page.evaluate(() => typeof EventSource)).toBe('undefined')
+			await server.restart()
+			await expect.poll(() => sessionParam(opened.page), { timeout: 45_000 }).not.toBe(opened.session)
+			await expectLive(opened.page)
+		}
+		finally { await opened.close() }
+	}, 120_000)
+
+	it('starts a new Preview session when the server restarted before the page received a first hello', async () => {
+		// A stream that never connects: no `hello` ever arrives. The page's first reads seeded the instance.
+		const opened = await openLivePage(() => {
+			window.EventSource = class {
+				static readonly CONNECTING = 0
+				static readonly OPEN = 1
+				static readonly CLOSED = 2
+				readyState = 0
+				onerror: (() => void) | null = null
+				addEventListener(): void {}
+				close(): void {}
+			} as unknown as typeof EventSource
+		})
+		try {
+			const before = await instanceOf(opened.page)
+			expect(before).toBeTruthy()
+			await server.restart()
+			// The next read of any kind names the new instance, with no `hello` involved.
+			expect(await instanceOf(opened.page)).not.toBe(before)
+			await expect.poll(() => sessionParam(opened.page), { timeout: 30_000 }).not.toBe(opened.session)
+			await expectLive(opened.page)
+		}
+		finally { await opened.close() }
+	}, 120_000)
+
+	it('keeps the Preview session while the server instance stays the same, and names the instance on a refusal', async () => {
+		const opened = await openLivePage()
+		try {
+			const first = await instanceOf(opened.page)
+			expect(first).toMatch(/^[0-9a-f-]{36}$/)
+			for (let read = 0; read < 3; read += 1) expect(await instanceOf(opened.page)).toBe(first)
+			// An authentication refusal names the instance too.
+			const refused = await fetch(`${server.origin}/api/session`)
+			expect(refused.status).toBe(401)
+			expect(refused.headers.get('x-uiux-server-instance')).toBe(first)
+			await opened.page.waitForTimeout(2000)
+			expect(await sessionParam(opened.page)).toBe(opened.session)
+		}
+		finally { await opened.close() }
 	}, 120_000)
 })

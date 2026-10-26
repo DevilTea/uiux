@@ -49,8 +49,9 @@ const lockListeners = new Set<() => void>()
 const accessListeners = new Set<() => void>()
 const restartListeners = new Set<() => void>()
 /**
- * The `serverInstanceId` of the last `hello` this page received. It outlives `stop()`, so a page
- * that signs in again after the server restarted still tells the new instance apart.
+ * The server instance ID last seen by this page, from any `/api/*` response (the
+ * `X-UIUX-Server-Instance` header) or a `hello`'s `serverInstanceId`. It outlives `stop()`, so a
+ * page that signs in again after the server restarted still tells the new instance apart.
  */
 let serverInstanceId: string | undefined
 
@@ -73,6 +74,24 @@ function call(listeners: ReadonlySet<() => void>): void {
 		try { listener() }
 		catch (error) { console.error(error) }
 	}
+}
+
+/**
+ * The one comparison behind restart detection (Rule 01a1161c-3b51-7ebd-bff2-987863a7c1cb, Clause
+ * 01a175ec-c8cb-7cf3-bc94-1168ed11e3a9), fed by every `/api/*` response and every `hello`: the
+ * first ID seen seeds it, an ID that differs from the last one seen reports a restart once, and a
+ * later sighting of that same ID (the `hello` after the header that already told) reports nothing.
+ */
+export function observeServerInstance(instance: unknown): void {
+	if (typeof instance !== 'string' || !instance || instance === serverInstanceId) return
+	const restarted = serverInstanceId !== undefined
+	serverInstanceId = instance
+	if (restarted) call(restartListeners)
+}
+
+/** Forgets the seen server instance (tests). */
+export function resetServerInstance(): void {
+	serverInstanceId = undefined
 }
 
 function flush(): void {
@@ -181,14 +200,9 @@ function connect(): void {
 	/** Any event is a sign of life once `hello` arrived. */
 	const alive = () => { if (state.value === 'open' && source === stream) armLiveness(stream, SILENCE_TIMEOUT_MS) }
 	stream.addEventListener('hello', (event) => {
-		// A `hello` naming another server instance than the last one: the server restarted, and every
-		// Preview session of the page starts over (Rule 01a1161c-3b51-7ebd-bff2-987863a7c1cb).
-		const instance = parse(event as MessageEvent)?.serverInstanceId
-		if (typeof instance === 'string' && instance) {
-			const restarted = serverInstanceId !== undefined && serverInstanceId !== instance
-			serverInstanceId = instance
-			if (restarted) call(restartListeners)
-		}
+		// A `hello` naming another server instance than the last one seen: the server restarted, and
+		// every Preview session of the page starts over (Rule 01a1161c-3b51-7ebd-bff2-987863a7c1cb).
+		observeServerInstance(parse(event as MessageEvent)?.serverInstanceId)
 		livenessFailures = 0
 		stopFallback()
 		state.value = 'open'
@@ -274,8 +288,8 @@ export function useLiveEvents() {
 		/** A lease was acquired, released, ended or force-released, or a resync is due. */
 		onLocks: (listener: () => void) => subscribe(lockListeners, listener),
 		/**
-		 * A `hello` named a server instance other than the previous one: the server restarted. Called
-		 * at once, before the resync that `hello` also queues.
+		 * An `/api/*` response or a `hello` named a server instance other than the previous one: the
+		 * server restarted. Called once, at once (before the resync a `hello` also queues).
 		 */
 		onServerRestart: (listener: () => void) => subscribe(restartListeners, listener),
 		/** The roster or the member's keys changed, or a resync is due. */

@@ -1,6 +1,7 @@
 import { defineNuxtPlugin, navigateTo, useRouter } from '#imports'
 import { useAccess } from '../composables/useAccess'
 import { useConnectivity } from '../composables/useConnectivity'
+import { observeServerInstance } from '../composables/useLiveEvents'
 import { isRetryableRead, shouldRetryRead, transientRetryDelay } from '../utils/fetch-retry'
 
 /**
@@ -68,6 +69,9 @@ export default defineNuxtPlugin({
 			}
 			if (api) {
 				connectivity.markReachable()
+				// Any `/api/*` response, an error included, names the server instance: a restart shows up
+				// in polling fallback and before the first `hello` too (Clause 01a175ec-c8cb-7cf3-bc94-1168ed11e3a9).
+				observeServerInstance(response.headers.get('x-uiux-server-instance'))
 				if (response.status === 401) sessionEnded(path)
 				// A refusal may mean the member's keys changed since the session was read: re-read it,
 				// so the Workbench stops offering what the server now refuses (Rule 01a116f0-963f).
