@@ -47,6 +47,19 @@ export const MULTI_TARGET_GEOMETRY_FEATURE = 'geometry.multi-target'
  * own document to a Widget (Clause 01a11a59-d8be-78aa-bdc7-28aa62bd9444; Discussion #131 decision 2).
  */
 export const REVEAL_GEOMETRY_FEATURE = 'geometry.reveal'
+/**
+ * Capability feature of the `regionStatus` member of `geometry.acquire.response` (Clause
+ * 01a11a59-dbda-79e5-9337-307bb9c1798b; Discussion #131 decision 5, issue #106). Optional for both sides.
+ */
+export const REGION_STATUS_GEOMETRY_FEATURE = 'geometry.region-status'
+/**
+ * What a report says about its Widget's regions, per report and never per region: `translucent`
+ * (the regions are non-empty and proven translucent coverage over the Widget leaves it discernible)
+ * or `unavailable` (`regions` is `[]` because the visible region or contour precision cannot be
+ * established). Absent when neither applies.
+ */
+export type RegionStatus = 'translucent' | 'unavailable'
+export const REGION_STATUSES: readonly RegionStatus[] = Object.freeze(['translucent', 'unavailable'])
 /** Open geometry streams per runtime generation, counting every consumer (decision 6). */
 export const MAX_TRACKED_WIDGETS = 64
 export type ProtocolEnvelope<
@@ -80,7 +93,7 @@ export type GeometryAcquireRequest = ProtocolEnvelope<Record<string, never>, Geo
 export type GeometryRevealRequest = ProtocolEnvelope<Record<string, never>, GeometryAcquireContext> & Readonly<{ type: 'geometry.reveal' }>
 /** Ends one geometry stream (Workbench → runtime). One-way and best-effort, like `contour.cancel`. */
 export type GeometryReleaseRequest = ProtocolEnvelope<Record<string, never>, GeometryAcquireContext> & Readonly<{ type: 'geometry.release' }>
-export type GeometryAcquireResponse = ProtocolEnvelope<{ rect: WidgetRect; regions: readonly VisibleRegion[] }, GeometryRevisionContext> & Readonly<{ type: 'geometry.acquire.response' }>
+export type GeometryAcquireResponse = ProtocolEnvelope<{ rect: WidgetRect; regions: readonly VisibleRegion[]; regionStatus?: RegionStatus }, GeometryRevisionContext> & Readonly<{ type: 'geometry.acquire.response' }>
 export type FullContourRequest = ProtocolEnvelope<{ sequence: number; targetMaxError: number }, GeometryRevisionContext> & Readonly<{ type: 'contour.full.request' }>
 export type FullContourResponse = ProtocolEnvelope<{ sequence: number; regions: readonly VisibleRegion[] }, GeometryRevisionContext> & Readonly<{ type: 'contour.full.response' }>
 export type PartialContourRequest = ProtocolEnvelope<{ sequence: number; baseSnapshotVersion: number; regionIds: readonly string[]; targetMaxError: number }, GeometryRevisionContext> & Readonly<{ type: 'contour.partial.request' }>
@@ -187,6 +200,7 @@ export function validateGeometryMessage(input: unknown): ValidationResult<Geomet
 			forbidRuntimeSnapshotVersion(payload, '/payload', v)
 			validateWidgetRect(payload.rect, '/payload/rect', v)
 			validateRegions(payload.regions, '/payload/regions', v, true)
+			validateRegionStatus(payload.regionStatus, payload.regions, v)
 			break
 		case 'contour.full.request':
 			validateSequence(payload.sequence, '/payload/sequence', v)
@@ -260,6 +274,23 @@ function validateWidgetRect(input: unknown, path: string, v: Validator): void {
 		if ((key === 'width' || key === 'height') && value !== undefined && value < 0)
 			v.issue('protocol.invalid_widget_rect_extent', `${path}/${key}`, 'Widget rectangle width/height must be greater than or equal to zero.')
 	}
+}
+
+/**
+ * A `regionStatus` is one of the two known values and goes with its regions: `translucent` with a
+ * non-empty region set, `unavailable` with `[]`. The decoder codes are non-normative (owner ruling Q1).
+ */
+function validateRegionStatus(status: unknown, regions: unknown, v: Validator): void {
+	if (status === undefined) return
+	if (status !== 'translucent' && status !== 'unavailable') {
+		v.issue('protocol.invalid_region_status', '/payload/regionStatus', 'regionStatus must be translucent or unavailable when present.')
+		return
+	}
+	if (!Array.isArray(regions)) return
+	if (status === 'translucent' && regions.length === 0)
+		v.issue('protocol.region_status_mismatch', '/payload/regionStatus', 'A translucent status goes with a non-empty region set.')
+	if (status === 'unavailable' && regions.length !== 0)
+		v.issue('protocol.region_status_mismatch', '/payload/regionStatus', 'An unavailable status goes with an empty region set.')
 }
 
 function validateRegions(value: unknown, path: string, v: Validator, requireUniqueIds: boolean): void {

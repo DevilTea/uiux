@@ -305,11 +305,29 @@ const drawnHighlight = computed(() => {
 		? { ...geometry, regions: precision.regions }
 		: undefined
 })
+/** The selected Widget when its report says that its visible region cannot be established (Rule 01a11687-2d04-704b-887a-4b599e54e887). */
+const unavailableRegion = computed(() => {
+	const unavailable = preview.selectionUnavailable.value
+	return unavailable && !props.prototype && !preview.isCommentMode.value && unavailable.widgetId !== 'root' ? unavailable : undefined
+})
 const precisionNotice = computed(() => {
 	const geometry = highlightGeometry.value
 	const precision = highlightVerdict.value
-	return geometry && precision.status === 'unavailable' ? { widgetId: geometry.widgetId, reason: precision.reason, ...(precision.bounds ? { bounds: precision.bounds } : {}) } : undefined
+	if (geometry && precision.status === 'unavailable') return { widgetId: geometry.widgetId, reason: precision.reason, ...(precision.bounds ? { bounds: precision.bounds } : {}) }
+	// A report whose status is `unavailable` has no region to bound: the notice sits on the Widget's rectangle.
+	const unavailable = unavailableRegion.value
+	if (!geometry && unavailable) {
+		const rect = unavailable.rect
+		const left = Math.max(0, rect.x)
+		const top = Math.max(0, rect.y)
+		const right = Math.min(dims.value.width, rect.x + rect.width)
+		const bottom = Math.min(dims.value.height, rect.y + rect.height)
+		return { widgetId: unavailable.widgetId, reason: 'region-status', bounds: { x: left, y: top, width: Math.max(0, right - left), height: Math.max(0, bottom - top) } }
+	}
+	return undefined
 })
+/** The highlight is drawn and its report states proven translucent coverage: the one shared notice (issue #106). */
+const translucentNotice = computed(() => !!drawnHighlight.value && preview.translucentCoverage.value === drawnHighlight.value.widgetId)
 const pinsTracked = computed(() => preview.pinPlacements.value.length > 0)
 /** Threads whose Widget is gone (never drawn, never rebound): the unplaced tray (brief c, section 6). */
 const unplacedThreads = computed(() => comments?.threads.value.filter(item => !item.anchorValid && item.status !== 'resolved' && comments.inFilter(item)) ?? [])
@@ -335,9 +353,9 @@ async function showNotOnCanvas(): Promise<void> {
 		return
 	}
 }
-const overlayActive = computed(() => !!highlightGeometry.value || !!hoverCandidate.value || pinsTracked.value)
+const overlayActive = computed(() => !!highlightGeometry.value || !!unavailableRegion.value || !!hoverCandidate.value || pinsTracked.value)
 /** Highlight and targeting overlays keep the accepted per-frame loop; pins alone are event-driven. */
-const mappingMode = computed(() => highlightGeometry.value || hoverCandidate.value ? 'continuous' as const : 'event-driven' as const)
+const mappingMode = computed(() => highlightGeometry.value || unavailableRegion.value || hoverCandidate.value ? 'continuous' as const : 'event-driven' as const)
 const { mapping, status: mappingStatus, markDirty: markMappingDirty } = useCanvasMapping({
 	iframe: preview.previewIframe,
 	overlay: overlayLayer,
@@ -501,6 +519,10 @@ watch(() => ({ ...contextSummary.value }), (next, previous) => {
 // Precise highlighting that is unavailable is said, not only drawn: the overlay is hidden from assistive technology.
 watch(() => precisionNotice.value?.reason, (reason) => {
 	if (reason) announcement.value = t(`canvas.precisionAnnounce.${reason}`)
+})
+// The translucent-obstruction notice is drawn in the aria-hidden overlay, so it is also said here (issue #106).
+watch(translucentNotice, (shown) => {
+	if (shown) announcement.value = t('canvas.translucentAnnounce')
 })
 watch(() => preview.selectionGeometry.value, (geometry, previous) => {
 	if (!geometry || geometry.widgetId === 'root' || geometry.widgetId === previous?.widgetId) return
@@ -775,6 +797,7 @@ function switchToBase(): void {
               :mapping="mapping"
               :geometry="drawnHighlight"
               :precision-notice="precisionNotice"
+              :translucent="translucentNotice"
               :widget-type="widgetNode?.type"
               :hover="hoverCandidate"
               :hover-type="hoverNode?.type"

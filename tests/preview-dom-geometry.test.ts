@@ -1169,3 +1169,152 @@ describe('Occluder paint reach (computed values)', () => {
 		expect(trailingLength('1em')).toBeUndefined()
 	})
 })
+
+/**
+ * What a report says about its regions (issue #106; Clause 01a11a59-dbda-79e5-9337-307bb9c1798b): `translucent`
+ * when proven translucent coverage lies over what the regions keep, `unavailable` when the regions could not
+ * be established, and neither when the answer is proven (nothing visible, or visible with no such coverage).
+ */
+describe('Runtime DOM measurer: region status (#106)', () => {
+	const OVERLAY = 'position:absolute;left:LEFTpx;top:TOPpx;width:50px;height:100px'
+
+	it('states translucent coverage for paint proven over the Widget, keeps every covered pixel and cuts none of it as opaque', async () => {
+		const cases = [
+			['fill', `<div style="${OVERLAY};background:rgba(0,0,0,0.3)"></div>`],
+			['opacity', `<div style="${OVERLAY};opacity:0.5;background:#000"></div>`],
+			['border', '<div style="position:absolute;left:LEFTpx;top:TOPpx;width:60px;height:100px;border:6px solid rgba(0,0,0,0.5)"></div>'],
+			['clipped-overlay', `<div style="position:absolute;left:LEFTpx;top:TOPpx;width:80px;height:100px;overflow:hidden"><div style="position:absolute;left:0;top:0;width:200px;height:100px;background:rgba(0,0,0,0.3)"></div></div>`],
+		] as const
+		const result = await measureGrid(cases)
+		const audit = await auditPixels(result)
+		for (const [id] of cases) {
+			expect(result[id]!.regionStatus, id).toBe('translucent')
+			expect(valid(result[id]!), id).toBe(true)
+			// The whole Widget stays: translucent paint is never an opaque cut, and what it covers is still the Widget's.
+			expect(area(result[id]!), id).toBe(300 * 100)
+			expect(result[id]!.regions, id).toHaveLength(1)
+			expect(audit[id]!.lost, id).toBe(0)
+		}
+		// The pixels that the paint changed lie inside the kept region: foreign to the Widget's own colour, yet reported.
+		expect(audit.fill!.foreign).toBe(50 * 100)
+		expect(audit.opacity!.foreign).toBe(50 * 100)
+		expect(audit['clipped-overlay']!.foreign).toBe(80 * 100)
+	})
+
+	it('classifies mixed coverage area by area: the opaque part is cut, the translucent part is kept and stated', async () => {
+		const cases = [
+			['mixed', `<div style="${OVERLAY};background:rgba(0,0,0,0.3)"></div><div style="position:absolute;left:calc(LEFTpx + 100px);top:TOPpx;width:40px;height:100px;background:#000"></div>`],
+			// The translucent paint lies wholly under the opaque cut: nothing that the regions keep is covered translucently.
+			['under-opaque', `<div style="${OVERLAY};background:rgba(0,0,0,0.3)"></div><div style="position:absolute;left:calc(LEFTpx - 10px);top:TOPpx;width:70px;height:100px;background:#000"></div>`],
+		] as const
+		const result = await measureGrid(cases)
+		const audit = await auditPixels(result)
+		expect(result.mixed!.regionStatus).toBe('translucent')
+		expect(result.mixed!.regions).toHaveLength(2)
+		expect(area(result.mixed!)).toBe(300 * 100 - 40 * 100)
+		// Only the translucent area differs from the Widget's colour inside the regions; the opaque paint is outside them.
+		expect(audit.mixed!.foreign).toBe(50 * 100)
+		expect(audit.mixed!.lost).toBe(0)
+		expect(result['under-opaque']!.regionStatus).toBeUndefined()
+		expect(area(result['under-opaque']!)).toBe(300 * 100 - 70 * 100)
+		expect(audit['under-opaque']!.foreign).toBe(0)
+		expect(Object.values(result).every(geometry => valid(geometry))).toBe(true)
+	})
+
+	it('states no coverage for translucent paint that is not proven over the Widget, and still keeps what it covers', async () => {
+		const cases = [
+			// Overlapping the Widget's box but clipped away by its own ancestor, so nothing is painted over the Widget.
+			['clipped-away', '<div style="position:absolute;left:calc(LEFTpx + 250px);top:TOPpx;width:30px;height:100px;overflow:hidden"><div style="position:absolute;left:-250px;top:0;width:250px;height:100px;background:rgba(0,0,0,0.3)"></div></div>'],
+			// Text under an opacity below 1 paints no area that is proven.
+			['text-only', '<div style="position:absolute;left:LEFTpx;top:TOPpx;opacity:0.5;color:#000;font:16px sans-serif">Faded text</div>'],
+			['apart', '<div style="position:absolute;left:calc(LEFTpx + 250px);top:TOPpx;width:30px;height:100px;background:rgba(0,0,0,0.3)"></div>'],
+		] as const
+		const result = await measureGrid(cases)
+		for (const [id] of cases) {
+			expect(result[id]!.regionStatus, id).toBeUndefined()
+			expect(result[id]!.regions.length, id).toBeGreaterThan(0)
+			expect(valid(result[id]!), id).toBe(true)
+		}
+		expect(area(result['clipped-away']!)).toBe(300 * 100)
+		// An undecided paint order is not a proven coverage either: the paint may lie below the Widget.
+		const flow = await measure(`
+			<div data-widget-id="w" style="width:300px;height:100px;background:#eee"></div>
+			<div style="width:100px;height:100px;margin-top:-50px;background:rgba(0,0,0,0.3)"></div>`, ['w'])
+		expect(flow.w!.regionStatus).toBeUndefined()
+		expect(area(flow.w!)).toBe(300 * 100)
+	})
+
+	it('states translucent coverage by the translucent backdrop of a modal dialog over a Widget outside it only', async () => {
+		const body = `
+			<div data-widget-id="behind" style="position:absolute;left:0;top:0;width:300px;height:100px;background:#eee"></div>
+			<dialog id="d" style="width:100px;height:60px;margin:0;left:450px;top:300px;padding:0;border:0"><div data-widget-id="inside" style="width:100px;height:60px;background:#eee"></div></dialog>
+			<script>document.getElementById('d').showModal()</script>`
+		const result = await measure(body, ['behind', 'inside'])
+		expect(result.behind!.regionStatus).toBe('translucent')
+		expect(result.inside!.regionStatus).toBeUndefined()
+		expect(area(result.behind!)).toBe(300 * 100)
+		expect(valid(result.behind!)).toBe(true)
+	})
+
+	it('states unavailable, with no region, when the visible region cannot be established', async () => {
+		const result = await measure(`
+			<div style="filter:blur(2px)"><div data-widget-id="filtered-ancestor" style="position:absolute;left:0;top:0;width:100px;height:50px;background:#eee"></div></div>
+			<div data-widget-id="rotated" style="position:absolute;left:200px;top:0;width:100px;height:50px;transform:rotate(10deg);background:#eee"></div>
+			<div data-widget-id="masked" style="position:absolute;left:400px;top:0;width:100px;height:50px;background:#eee;mask-image:linear-gradient(black, transparent);-webkit-mask-image:linear-gradient(black, transparent)"></div>
+			<div data-widget-id="path-clip" style="position:absolute;left:600px;top:0;width:100px;height:50px;background:#eee;clip-path:path('M0 0 L50 0 L50 50 Z')"></div>
+			<div data-widget-id="unbounded-above" style="position:absolute;left:0;top:200px;width:300px;height:100px;background:#eee"></div>
+			<div style="position:absolute;left:100px;top:200px;width:20px;height:20px;background:#000;filter:url(#f)"></div>`, ['filtered-ancestor', 'rotated', 'masked', 'path-clip', 'unbounded-above'])
+		for (const id of ['filtered-ancestor', 'rotated', 'masked', 'path-clip', 'unbounded-above']) {
+			expect(result[id]!.rect.width, id).toBeGreaterThan(0)
+			expect(result[id]!.regions, id).toEqual([])
+			expect(result[id]!.regionStatus, id).toBe('unavailable')
+			expect(valid(result[id]!), id).toBe(true)
+		}
+	})
+
+	it('states nothing for an empty region set that is proven: hidden, clipped away, wholly covered or without a box', async () => {
+		const result = await measure(`
+			<div data-widget-id="hidden" style="position:absolute;left:0;top:0;width:100px;height:50px;visibility:hidden;background:#eee"></div>
+			<div data-widget-id="transparent" style="position:absolute;left:200px;top:0;width:100px;height:50px;opacity:0;background:#eee"></div>
+			<div style="position:absolute;left:400px;top:0;width:50px;height:50px;overflow:hidden"><div data-widget-id="clipped-away" style="position:absolute;left:60px;top:0;width:100px;height:50px;background:#eee"></div></div>
+			<div data-widget-id="covered" style="position:absolute;left:0;top:200px;width:100px;height:50px;background:#eee"></div>
+			<div style="position:absolute;left:0;top:190px;width:200px;height:100px;background:#000"></div>
+			<div data-widget-id="no-box" style="display:none"></div>`, ['hidden', 'transparent', 'clipped-away', 'covered', 'no-box'])
+		for (const id of ['hidden', 'transparent', 'clipped-away', 'covered', 'no-box']) {
+			expect(result[id]!.regions, id).toEqual([])
+			expect(result[id]!.regionStatus, id).toBeUndefined()
+		}
+	})
+
+	it('counts only the opacity below the common ancestor: an opaque sibling in the same faded group is an exact cut and no translucent coverage', async () => {
+		const result = await measure(`
+			<div style="position:absolute;left:0;top:0;width:400px;height:200px;opacity:0.5">
+				<div data-widget-id="grouped" style="position:absolute;left:0;top:0;width:300px;height:100px;background:#eee"></div>
+				<div style="position:absolute;left:100px;top:0;width:50px;height:100px;background:#000"></div>
+			</div>
+			<div style="position:absolute;left:0;top:300px;width:400px;height:200px">
+				<div data-widget-id="plain-group" style="position:absolute;left:0;top:0;width:300px;height:100px;background:#eee"></div>
+				<div style="position:absolute;left:100px;top:0;width:50px;height:100px;opacity:0.5;background:#000"></div>
+			</div>`, ['grouped', 'plain-group'])
+		// Faded together, the opaque sibling still hides what it covers of the Widget.
+		expect(result.grouped!.regionStatus).toBeUndefined()
+		expect(area(result.grouped!)).toBe(300 * 100 - 50 * 100)
+		// Its own opacity below the common ancestor does make it translucent coverage.
+		expect(result['plain-group']!.regionStatus).toBe('translucent')
+		expect(area(result['plain-group']!)).toBe(300 * 100)
+	})
+
+	it('claims no coverage from an overlap that is only a sliver of rounding', async () => {
+		const result = await measure(`
+			<div data-widget-id="w" style="position:absolute;left:0;top:0;width:300px;height:100px;background:#eee"></div>
+			<div style="position:absolute;left:299.98px;top:99.98px;width:50px;height:50px;background:rgba(0,0,0,0.3)"></div>`, ['w'])
+		expect(result.w!.regionStatus).toBeUndefined()
+		expect(area(result.w!)).toBe(300 * 100)
+	})
+
+	it('never reports a status for a plain, uncovered Widget', async () => {
+		const result = await measure('<div data-widget-id="plain" style="position:absolute;left:0;top:0;width:100px;height:50px;background:#eee"></div>', ['plain'])
+		expect(result.plain!.regionStatus).toBeUndefined()
+		expect(Object.keys(result.plain!)).toEqual(['rect', 'regions'])
+	})
+})

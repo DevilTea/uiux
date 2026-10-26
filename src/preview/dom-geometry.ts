@@ -4,7 +4,7 @@ import { planOcclusion, type OcclusionEvidence, type ProvenOccluderShapeKind } f
 import type { ContourCommand, Point, VisibleRegion, WidgetRect } from './protocol/schema'
 import { subtractAxisAlignedRectangularOcclusion } from './rectangular-occlusion'
 import { basicShapePolygon, EMPTY_SHAPE, parseClipPath, roundedRectShape, svgPrimitiveShape, type ClipSide, type SvgPrimitive } from './clip-shapes'
-import { boundsOf, intersectShapes, MAX_CUT_SHAPES, MAX_CUT_VERTICES, outerRings, rectangleShape, subtractShapes, unionShapes, vertexCount, type PolygonShape } from './polygon-occlusion'
+import { areaOf, boundsOf, intersectShapes, MAX_CUT_SHAPES, MAX_CUT_VERTICES, outerRings, rectangleShape, subtractShapes, unionShapes, vertexCount, type PolygonShape } from './polygon-occlusion'
 import type { RoundedRectRadii } from './rounded-contour'
 
 /**
@@ -78,6 +78,9 @@ type Box = Readonly<{ left: number; top: number; right: number; bottom: number }
 type RoundedShape = Readonly<{ rect: WidgetRect; radii: RoundedRectRadii }>
 /** What an occluder removes: a rectangle, or polygons containing its true shape (a curve, a clip). */
 type CutShape = WidgetRect | PolygonShape
+
+/** The smallest area, in px², of an overlap that proves translucent coverage: less is a sliver of rounding. */
+const MIN_OVERLAP_AREA = 0.25
 
 /** The most cuts of any kind a curved subtraction takes on. */
 const MAX_TOTAL_CUTS = 400
@@ -509,19 +512,30 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 		const bounds = rectOf(element)
 		const rect: WidgetRect = Object.freeze({ x: bounds.left, y: bounds.top, width: bounds.width, height: bounds.height })
 		if (!(rect.width > 0) || !(rect.height > 0)) return Object.freeze({ rect, regions: Object.freeze([]) })
-		return Object.freeze({ rect, regions: Object.freeze(visibleRegions(element, rect)) })
+		const { regions, status } = visibleRegions(element, rect)
+		return Object.freeze({ rect, regions: Object.freeze(regions), ...(status ? { regionStatus: status } : {}) })
 	}
 
-	function visibleRegions(element: Element, rect: WidgetRect): readonly VisibleRegion[] {
+	/**
+	 * The regions of a Widget and what the report says about them (Clause 01a11a59-dbda-79e5-9337-307bb9c1798b):
+	 * `unavailable` for every empty set that means "not established" (an unprovable chain, clip, occluder
+	 * or contour), and none for an empty set that is proven (hidden, clipped away or wholly covered).
+	 */
+	type Regions = Readonly<{ regions: readonly VisibleRegion[]; status?: 'translucent' | 'unavailable' }>
+	const NOTHING_VISIBLE: Regions = Object.freeze({ regions: Object.freeze([]) })
+	const UNAVAILABLE: Regions = Object.freeze({ regions: Object.freeze([]), status: 'unavailable' as const })
+
+	function visibleRegions(element: Element, rect: WidgetRect): Regions {
 		const style = styleOf(element)
-		if (style.visibility !== 'visible') return []
+		if (style.visibility !== 'visible') return NOTHING_VISIBLE
 		const chain = chainOf(element)
-		if (chain.opacity === 0 || !chain.transformOk || chain.compositing || chain.mask) return []
+		if (chain.opacity === 0) return NOTHING_VISIBLE
+		if (!chain.transformOk || chain.compositing || chain.mask) return UNAVAILABLE
 
 		const clips = clipChainOf(element, false, true)
-		if (clips === 'unsupported') return []
+		if (clips === 'unsupported') return UNAVAILABLE
 		const visible = intersect(boxOfRect(rect), clips.box)
-		if (!visible) return []
+		if (!visible) return NOTHING_VISIBLE
 
 		// Shapes the Widget stays inside, each approximated from inside: its own rounded corners and
 		// those of a rounded overflow clip whose corners reach the visible area, then every clip path.
@@ -532,50 +546,78 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 		for (const shape of clips.rounded) if (cornersReach(shape, visible)) roundedClips.push(shape)
 		for (const shape of roundedClips) {
 			const approximated = roundedRectShape(shape.rect, shape.radii, 'contain', roundedTargetMaxError)
-			if (!approximated) return []
+			if (!approximated) return UNAVAILABLE
 			contained.push(approximated)
 		}
 		if (chain.clipPath) {
 			const shapes = chainClipShapes(element, 'contain')
-			if (shapes === 'unsupported') return []
+			if (shapes === 'unsupported') return UNAVAILABLE
 			contained.push(...shapes)
 		}
 
 		const occlusion = occlusionEvidence(element, visible)
-		if (occlusion === 'unsupported') return []
+		if (occlusion === 'unsupported') return UNAVAILABLE
 		const plan = planOcclusion(occlusion)
-		if (plan.status !== 'precise') return []
+		if (plan.status !== 'precise') return UNAVAILABLE
 
 		// A bounded cut lying wholly inside the visible area would leave only an interior hole, which
 		// is never reported (Rule 01a11687-3037): no precise region (Discussion #241 owner decision 1).
 		for (const cut of plan.subtract) {
 			if (cut.kind !== 'paint-bound') continue
 			const { x, y, width, height } = cut.shape as WidgetRect
-			if (x > visible.left && y > visible.top && x + width < visible.right && y + height < visible.bottom) return []
+			if (x > visible.left && y > visible.top && x + width < visible.right && y + height < visible.bottom) return UNAVAILABLE
+		}
+
+		// `translucent` when proven translucent paint lies over what the regions keep (Rule 01a11687-3190).
+		const withStatus = (regions: readonly VisibleRegion[], remaining: () => PolygonShape | undefined): Regions => {
+			if (regions.length === 0) return NOTHING_VISIBLE
+			return plan.translucentAreas.length > 0 && translucentOver(remaining(), plan.translucentAreas)
+				? { regions, status: 'translucent' }
+				: { regions }
 		}
 
 		const curved = contained.length > 0 || plan.subtract.some(cut => isPolygonCut(cut.shape))
 		if (!curved) {
 			const contours = subtractAxisAlignedRectangularOcclusion(rectOfBox(visible), plan.subtract.map(item => item.shape as WidgetRect))
-			if (!contours) return []
-			return contours.map((contour, index) => Object.freeze({ regionId: `r${index}`, maxError: 0, contour }))
+			if (!contours) return UNAVAILABLE
+			const regions = contours.map((contour, index) => Object.freeze({ regionId: `r${index}`, maxError: 0, contour }))
+			return withStatus(regions, () => subtractShapes(
+				rectangleShape(visible.left, visible.top, visible.right, visible.bottom),
+				plan.subtract.map(cut => rectangleOf(cut.shape as WidgetRect)),
+			))
 		}
 
 		// Curved shapes on either side: polygons, with the largest approximation error they carry.
 		let base: PolygonShape | undefined = rectangleShape(visible.left, visible.top, visible.right, visible.bottom)
 		if (contained.length > 0) base = intersectShapes(base, contained)
-		if (!base) return []
-		const cuts = cappedCuts(plan.subtract.map(cut => isPolygonCut(cut.shape) ? cut.shape : rectangleShape(cut.shape.x, cut.shape.y, cut.shape.x + cut.shape.width, cut.shape.y + cut.shape.height)))
-		if (!cuts) return []
+		if (!base) return UNAVAILABLE
+		const cuts = cappedCuts(plan.subtract.map(cut => isPolygonCut(cut.shape) ? cut.shape : rectangleOf(cut.shape)))
+		if (!cuts) return UNAVAILABLE
 		const result = subtractShapes(base, cuts)
-		if (!result) return []
+		if (!result) return UNAVAILABLE
 		const rings = outerRings(result)
-		if (!rings) return []
-		return rings.map((ring, index) => Object.freeze({
+		if (!rings) return UNAVAILABLE
+		const regions = rings.map((ring, index) => Object.freeze({
 			regionId: `r${index}`,
 			maxError: result.maxError,
 			contour: Object.freeze({ commands: Object.freeze(polygonCommands(ring.map(([x, y]) => ({ x, y })))) }),
 		}))
+		return withStatus(regions, () => result)
+	}
+
+	/**
+	 * Whether some proven translucent area lies over what the regions keep. `remaining` is the shape
+	 * the regions outline, holes included; one that cannot be computed proves nothing. Mixed coverage is
+	 * decided area by area: translucent paint under an opaque cut lies over nothing that is kept.
+	 */
+	function translucentOver(remaining: PolygonShape | undefined, areas: readonly (CutShape | 'everywhere')[]): boolean {
+		if (!remaining || remaining.polygons.length === 0) return false
+		for (const area of areas) {
+			if (area === 'everywhere') return true
+			const overlap = intersectShapes(remaining, [isPolygonCut(area) ? area : rectangleOf(area)])
+			if (overlap && areaOf(overlap.polygons) >= MIN_OVERLAP_AREA) return true
+		}
+		return false
 	}
 
 	/**
@@ -748,6 +790,18 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 		}
 	}
 
+	/** The product of the opacities of an element and its ancestors below the nearest one that also holds the target. */
+	function opacityBelowCommonAncestor(candidate: Element, target: Element): number {
+		const shared = new Set<Element>()
+		for (let node: Element | null = target; node; node = flatTreeParent(node)) shared.add(node)
+		let opacity = 1
+		for (let node: Element | null = candidate; node && !shared.has(node); node = flatTreeParent(node)) {
+			const value = Number.parseFloat(styleOf(node).opacity)
+			opacity *= Number.isFinite(value) ? value : 1
+		}
+		return opacity
+	}
+
 	/** Classifies every element whose paint can reach the visible area and is not the Widget's own. */
 	function occlusionEvidence(target: Element, visible: Box): OcclusionEvidence<CutShape>[] | 'unsupported' {
 		const { elements, boxes } = candidateBoxes()
@@ -767,7 +821,7 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 		// The `::backdrop` of a top-layer element paints over the whole viewport, wherever the element is.
 		for (const root of topLayerRoots()) {
 			if (root === target || root.contains(target)) continue
-			const items = backdropEvidence(root)
+			const items = backdropEvidence(root, target)
 			if (items === 'unsupported') return 'unsupported'
 			evidence.push(...items)
 		}
@@ -793,7 +847,7 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 	 * paint that is not proven translucent (an opaque or image fill, a filter, a blend, a border or
 	 * shadow): its box is the viewport only by default, so that is unsupported, not a cut.
 	 */
-	function backdropEvidence(root: Element): Evidence[] | 'unsupported' {
+	function backdropEvidence(root: Element, target: Element): Evidence[] | 'unsupported' {
 		const facts = view.getComputedStyle(root, '::backdrop')
 		const alpha = colorAlpha(facts.backgroundColor)
 		if (alpha === undefined) return 'unsupported'
@@ -805,13 +859,96 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 		if (!marks || opacity === 0) return []
 		if (facts.visibility === 'hidden') return []
 		if (set(facts.filter) || set(facts.backdropFilter) || (facts.mixBlendMode !== '' && facts.mixBlendMode !== 'normal')) return 'unsupported'
-		if (opacity < 1) return [TRANSLUCENT]
+		// The backdrop covers the whole viewport above the document, so where a Widget of the document lies is
+		// covered by it; a Widget in the top layer itself has an undecided order against it.
+		const covering: Evidence = inTopLayer(target) ? TRANSLUCENT : Object.freeze({ classification: 'translucent', targetContribution: 'proven-nonzero', area: 'everywhere' })
+		if (opacity < 1) return [covering]
 		if (alpha === 1 || image || border || set(facts.boxShadow) || (facts.outlineStyle !== 'none' && px(facts.outlineWidth) > 0)) return 'unsupported'
-		return [TRANSLUCENT]
+		return [covering]
 	}
 
 	type Evidence = OcclusionEvidence<CutShape>
+	/** Translucent paint whose extent is not proven: it keeps what it covers, but no status claims coverage from it. */
 	const TRANSLUCENT: Evidence = Object.freeze({ classification: 'translucent', targetContribution: 'proven-nonzero' })
+
+	/**
+	 * Translucent evidence for paint with the areas it is proven to cover; `above` is whether the paint is
+	 * proven to lie above the Widget. Paint of an undecided order or of an unproven extent keeps what it
+	 * covers without a claim of coverage (Rule 01a11687-3190).
+	 */
+	function translucentEvidence(areas: readonly (PolygonShape | undefined)[], above: boolean): Evidence[] {
+		const proven = above ? areas.filter((area): area is PolygonShape => area !== undefined && area.polygons.length > 0) : []
+		return proven.length > 0 ? proven.map(area => ({ classification: 'translucent', targetContribution: 'proven-nonzero', area })) : [TRANSLUCENT]
+	}
+
+	/**
+	 * The area of an element's background paint, as a polygon contained in it: the background painting
+	 * area within the element's own clips, its rounded corners and those of its clips taken from inside.
+	 * Undefined when it is unproven.
+	 */
+	function fillArea(candidate: Element, style: StyleFacts): PolygonShape | undefined {
+		const bounds = rectOf(candidate)
+		const inset = backgroundInset(style, scaleOf(candidate))
+		const covered = { left: bounds.left + inset.left, top: bounds.top + inset.top, right: bounds.right - inset.right, bottom: bounds.bottom - inset.bottom }
+		const clips = clipChainOf(candidate)
+		if (clips === 'unsupported') return undefined
+		const painted = intersect(covered, clips.box)
+		if (!painted) return undefined
+		const inside: PolygonShape[] = []
+		const outer = radiiOf(candidate, { x: bounds.left, y: bounds.top, width: bounds.width, height: bounds.height })
+		if (outer) {
+			const shape: RoundedShape = { rect: rectOfBox(covered), radii: insetRadii(outer, inset) }
+			if (cornersReach(shape, painted)) {
+				const approximated = exactScaleOf(candidate) === undefined ? undefined : roundedRectShape(shape.rect, shape.radii, 'contain', roundedTargetMaxError)
+				if (!approximated) return undefined
+				inside.push(approximated)
+			}
+		}
+		for (const shape of clips.rounded) {
+			if (!cornersReach(shape, painted)) continue
+			const approximated = roundedRectShape(shape.rect, shape.radii, 'contain', roundedTargetMaxError)
+			if (!approximated) return undefined
+			inside.push(approximated)
+		}
+		const base = rectangleShape(painted.left, painted.top, painted.right, painted.bottom)
+		return inside.length > 0 ? intersectShapes(base, inside) : base
+	}
+
+	/**
+	 * The strips of an element's borders on the given sides, each spanning the whole side, corners
+	 * included, within the element's clips. Undefined when the border's shape is not a plain rectangle
+	 * frame: rounded corners, a clip path or a rounded clip, an image.
+	 */
+	function borderStrips(element: Element, style: StyleFacts, sides: readonly ('Top' | 'Right' | 'Bottom' | 'Left')[]): Box[] | undefined {
+		if (style.borderImageSource !== 'none' && style.borderImageSource !== '') return undefined
+		const bounds = rectOf(element)
+		const outer = radiiOf(element, { x: bounds.left, y: bounds.top, width: bounds.width, height: bounds.height })
+		const clips = clipChainOf(element)
+		if (outer || clips === 'unsupported' || clips.rounded.length > 0 || chainOf(element).clipPath) return undefined
+		const scale = scaleOf(element)
+		const strips: Readonly<Record<'Top' | 'Right' | 'Bottom' | 'Left', Box>> = {
+			Top: { left: bounds.left, top: bounds.top, right: bounds.right, bottom: bounds.top + px(style.borderTopWidth) * scale },
+			Bottom: { left: bounds.left, top: bounds.bottom - px(style.borderBottomWidth) * scale, right: bounds.right, bottom: bounds.bottom },
+			Left: { left: bounds.left, top: bounds.top, right: bounds.left + px(style.borderLeftWidth) * scale, bottom: bounds.bottom },
+			Right: { left: bounds.right - px(style.borderRightWidth) * scale, top: bounds.top, right: bounds.right, bottom: bounds.bottom },
+		}
+		const shown: Box[] = []
+		for (const side of sides) {
+			const strip = intersect(strips[side], clips.box)
+			if (strip) shown.push(strip)
+		}
+		return shown
+	}
+
+	/** The proven areas of the visible borders of an element, whatever their alpha (paint under an opacity below 1). */
+	function visibleBorderAreas(element: Element, style: StyleFacts): (PolygonShape | undefined)[] {
+		const sides = (['Top', 'Right', 'Bottom', 'Left'] as const).filter((side) => {
+			const lineStyle = style[`border${side}Style`]
+			return px(style[`border${side}Width`]) > 0 && lineStyle !== 'none' && lineStyle !== 'hidden' && colorAlpha(style[`border${side}Color`]) !== 0
+		})
+		if (sides.length === 0) return []
+		return borderStrips(element, style, sides)?.map(box => rectangleShape(box.left, box.top, box.right, box.bottom)) ?? [undefined]
+	}
 
 	/**
 	 * The evidence of one element, for every pixel it paints (its children are candidates of their
@@ -837,13 +974,19 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 		}
 		if (replaced || chain.compositing || chain.mask || !chain.transformOk || chain.reflect) return bounded()
 		// Under an opacity below 1 everything the element paints, text and borders included, lets the Widget show.
-		if (chain.opacity < 1) return chain.clipPath ? bounded() : [TRANSLUCENT]
+		// Only the opacity below the nearest common ancestor counts: a group that holds both the element and
+		// the Widget fades them together, and the element stays opaque over the Widget inside it.
+		if (opacityBelowCommonAncestor(candidate, target) < 1) {
+			if (chain.clipPath) return bounded()
+			// The areas that the element's fill and borders paint; its text and other paint keep what they cover without a claim.
+			return translucentEvidence([...(fill === 'none' ? [] : [fillArea(candidate, style)]), ...visibleBorderAreas(candidate, style)], order === 'above')
+		}
 		if (fill === 'unknown') return bounded()
 
 		const evidence: Evidence[] = []
 		if (fill === 'translucent') {
 			if (chain.clipPath) return bounded()
-			evidence.push(TRANSLUCENT)
+			evidence.push(...translucentEvidence([fillArea(candidate, style)], order === 'above'))
 		}
 		let exact: ExactCut | undefined
 		if (fill === 'opaque') {
@@ -862,7 +1005,7 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 		}
 		// A border an opaque fill does not lie under (a fill clipped to the padding or content box).
 		if (!(fill === 'opaque' && (style.backgroundClip === 'border-box' || style.backgroundClip === ''))) {
-			const borders = borderEvidence(candidate, style)
+			const borders = borderEvidence(candidate, style, order === 'above')
 			if (borders === 'bounded') return bounded()
 			evidence.push(...borders)
 		}
@@ -972,46 +1115,38 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 
 	/**
 	 * Evidence for an element's borders: a solid opaque border without rounded corners is four exact
-	 * rectangles, a translucent one keeps what it covers, and any other border (dashed, double,
-	 * rounded, an image) is `bounded`.
+	 * rectangles, a translucent one keeps what it covers (over the strips it paints, when proven), and
+	 * any other border (dashed, double, rounded, an image) is `bounded`.
 	 */
-	function borderEvidence(element: Element, style: StyleFacts): Evidence[] | 'bounded' {
+	function borderEvidence(element: Element, style: StyleFacts, above: boolean): Evidence[] | 'bounded' {
 		const sides = (['Top', 'Right', 'Bottom', 'Left'] as const).filter((side) => {
 			const lineStyle = style[`border${side}Style`]
 			return px(style[`border${side}Width`]) > 0 && lineStyle !== 'none' && lineStyle !== 'hidden' && colorAlpha(style[`border${side}Color`]) !== 0
 		})
 		if (sides.length === 0) return []
 		if (style.borderImageSource !== 'none' && style.borderImageSource !== '') return 'bounded'
-		const evidence: Evidence[] = []
-		let opaque = false
+		const translucent: (typeof sides[number])[] = []
+		const solid: (typeof sides[number])[] = []
 		for (const side of sides) {
 			const alpha = colorAlpha(style[`border${side}Color`])
 			if (alpha === undefined) return 'bounded'
 			if (alpha < 1) {
-				if (!evidence.includes(TRANSLUCENT)) evidence.push(TRANSLUCENT)
+				translucent.push(side)
 				continue
 			}
 			if (style[`border${side}Style`] !== 'solid') return 'bounded'
-			opaque = true
+			solid.push(side)
 		}
-		if (!opaque) return evidence
-		const bounds = rectOf(element)
-		const outer = radiiOf(element, { x: bounds.left, y: bounds.top, width: bounds.width, height: bounds.height })
-		const clips = clipChainOf(element)
-		if (outer || clips === 'unsupported' || clips.rounded.length > 0 || chainOf(element).clipPath) return 'bounded'
-		const scale = scaleOf(element)
+		const evidence: Evidence[] = []
+		if (translucent.length > 0) {
+			const strips = borderStrips(element, style, translucent)
+			evidence.push(...translucentEvidence(strips ? strips.map(box => rectangleShape(box.left, box.top, box.right, box.bottom)) : [undefined], above))
+		}
+		if (solid.length === 0) return evidence
+		const shown = borderStrips(element, style, solid)
+		if (!shown) return 'bounded'
 		// Each strip spans the whole side, corners included: where two solid opaque sides meet, that is exactly what they paint.
-		const strips: Readonly<Record<typeof sides[number], Box>> = {
-			Top: { left: bounds.left, top: bounds.top, right: bounds.right, bottom: bounds.top + px(style.borderTopWidth) * scale },
-			Bottom: { left: bounds.left, top: bounds.bottom - px(style.borderBottomWidth) * scale, right: bounds.right, bottom: bounds.bottom },
-			Left: { left: bounds.left, top: bounds.top, right: bounds.left + px(style.borderLeftWidth) * scale, bottom: bounds.bottom },
-			Right: { left: bounds.right - px(style.borderRightWidth) * scale, top: bounds.top, right: bounds.right, bottom: bounds.bottom },
-		}
-		for (const side of sides) {
-			if (colorAlpha(style[`border${side}Color`]) !== 1) continue
-			const shown = intersect(strips[side], clips.box)
-			if (shown) evidence.push({ classification: 'opaque', targetContribution: 'proven-zero', shape: { kind: 'rectangle', shape: rectOfBox(shown) } })
-		}
+		for (const strip of shown) evidence.push({ classification: 'opaque', targetContribution: 'proven-zero', shape: { kind: 'rectangle', shape: rectOfBox(strip) } })
 		return evidence
 	}
 
@@ -2000,6 +2135,11 @@ function px(value: string | undefined): number {
 
 function boxOfRect(rect: WidgetRect): Box {
 	return { left: rect.x, top: rect.y, right: rect.x + rect.width, bottom: rect.y + rect.height }
+}
+
+/** A rectangle as a polygon shape. */
+function rectangleOf(rect: WidgetRect): PolygonShape {
+	return rectangleShape(rect.x, rect.y, rect.x + rect.width, rect.y + rect.height)
 }
 
 function rectOfBox(box: Box): WidgetRect {

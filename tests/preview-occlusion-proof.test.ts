@@ -23,6 +23,7 @@ describe('Preview occlusion proof policy', () => {
 				{ kind: 'clip-polygon', shape: { id: 'poly' } },
 			],
 			translucentObstruction: false,
+			translucentAreas: [],
 		})
 	})
 
@@ -38,7 +39,16 @@ describe('Preview occlusion proof policy', () => {
 			{ classification: 'translucent', targetContribution: 'proven-nonzero' },
 			{ classification: 'translucent', targetContribution: 'proven-nonzero' },
 		])
-		expect(result).toEqual({ status: 'precise', subtract: [], translucentObstruction: true })
+		expect(result).toEqual({ status: 'precise', subtract: [], translucentObstruction: true, translucentAreas: [] })
+	})
+
+	it('hands over the proven areas of translucent paint, and none for paint whose extent is unproven (issue #106)', () => {
+		const result = planOcclusion<Shape>([
+			{ classification: 'translucent', targetContribution: 'proven-nonzero', area: { id: 'fill' } },
+			{ classification: 'translucent', targetContribution: 'proven-nonzero', area: 'everywhere' },
+			{ classification: 'translucent', targetContribution: 'proven-nonzero' },
+		])
+		expect(result).toEqual({ status: 'precise', subtract: [], translucentObstruction: true, translucentAreas: [{ id: 'fill' }, 'everywhere'] })
 	})
 
 	it('can combine opaque subtraction with a single aggregate translucent-obstruction signal', () => {
@@ -49,6 +59,7 @@ describe('Preview occlusion proof policy', () => {
 			status: 'precise',
 			subtract: [{ kind: 'rectangle', shape: { id: 'rectangle' } }],
 			translucentObstruction: true,
+			translucentAreas: [],
 		})
 	})
 
@@ -83,7 +94,7 @@ describe('Preview occlusion proof policy', () => {
 	})
 
 	it('returns a precise empty subtraction plan when there are no occluders', () => {
-		expect(planOcclusion<Shape>([])).toEqual({ status: 'precise', subtract: [], translucentObstruction: false })
+		expect(planOcclusion<Shape>([])).toEqual({ status: 'precise', subtract: [], translucentObstruction: false, translucentAreas: [] })
 	})
 
 	it('defensively owns reliable clipping-shape evidence', () => {
@@ -98,6 +109,7 @@ describe('Preview occlusion proof policy', () => {
 			status: 'precise',
 			subtract: [{ kind: 'clip-polygon', shape: { id: 'shape', points: [[1, 2], [3, 4]] } }],
 			translucentObstruction: false,
+			translucentAreas: [],
 		})
 	})
 
@@ -111,6 +123,7 @@ describe('Preview occlusion proof policy', () => {
 			status: 'precise',
 			subtract: [{ kind: 'rectangle', shape: { id: 'rectangle' } }, { kind: 'paint-bound', shape: { id: 'image' } }],
 			translucentObstruction: true,
+			translucentAreas: [],
 		})
 	})
 

@@ -73,7 +73,8 @@ function ringArea(ring: PolygonRing): number {
 	return Math.abs(twice) / 2
 }
 
-function areaOf(shape: MultiPolygon): number {
+/** The area of a shape, holes taken out. */
+export function areaOf(shape: MultiPolygon): number {
 	return shape.reduce((sum, polygon) => sum + ringArea(polygon[0] ?? []) - polygon.slice(1).reduce((holes, hole) => holes + ringArea(hole), 0), 0)
 }
 

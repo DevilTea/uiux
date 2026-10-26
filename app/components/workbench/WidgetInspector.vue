@@ -227,6 +227,18 @@ function onKeydown(event: KeyboardEvent): void {
           />
           {{ t('canvas.notVisible') }}
         </p>
+        <!-- Not "not visible": the region could not be established, so precise highlighting is unavailable (issue #106). -->
+        <p
+          v-else-if="visibility === 'unavailable'"
+          class="col-span-3 mt-2 flex items-center gap-1.5 text-sm text-muted"
+          data-widget-precision-unavailable
+        >
+          <UIcon
+            name="i-lucide-scan-line"
+            class="size-4 shrink-0"
+          />
+          {{ t('canvas.precisionUnavailable') }}
+        </p>
       </header>
 
       <!-- Where. A definition list: no Nuxt UI component renders <dl> semantics. -->
@@ -279,7 +291,7 @@ function onKeydown(event: KeyboardEvent): void {
           </dd>
         </template>
 
-        <template v-if="visibility !== 'hidden' && visibility !== 'none'">
+        <template v-if="visibility !== 'hidden' && visibility !== 'unavailable' && visibility !== 'none'">
           <dt class="text-xs/5 text-muted">
             {{ t('inspect.size') }}
           </dt>
