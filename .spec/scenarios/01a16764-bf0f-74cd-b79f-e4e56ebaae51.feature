@@ -5,9 +5,10 @@ Feature: Reconnecting to a restarted server starts a new Preview session
   # Status: built as of 99f9d0e for the restart it shows, detected from the stream's `hello`; comparison frames renew the same way, without a browser test of their own. A restart during polling fallback or before the first `hello` is not detected: see the Implementation gaps entry of 01a1161c-3b51-7ebd-bff2-987863a7c1cb in its owner (issue #317).
   @spec:id:01a16764-bf0f-7c55-bb66-fa8a4c5ae6ef
   @spec:demonstrates:01a1161c-3b51-7ebd-bff2-987863a7c1cb
+  @spec:demonstrates:01a175ec-c8cb-7cf3-bc94-1168ed11e3a9
   Scenario: Reconnecting to a restarted server starts a new Preview session
     Given a Workbench page shows Preview in an open Preview session with a Widget selected
-    When the server restarts and the page's change-event stream reconnects to the new server instance
+    When the server restarts and the page next reads an API response or receives a hello that names the new server instance ID
     Then the Workbench starts a new Preview session under a fresh session ID with a fresh Preview document
     Then the new document's first protocol message is the capability acknowledgement of its new generation
     Then the selected Widget's geometry is acquired again under the new session and generation

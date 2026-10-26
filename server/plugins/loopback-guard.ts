@@ -1,5 +1,6 @@
 import { configureServerNetwork, createLoopbackGuardHandler } from '../../src/server/loopback-guard'
 import { createAccessGuardHandler } from '../../src/server/access/http'
+import { createServerInstanceHeaderHandler } from '../../src/server/instance-header'
 import { setServerNetwork, startupLines } from '../../src/server/network-access'
 import { getSelectedWorkspaceServerRuntime, resolveInternalServerOrigin } from '../../src/server/selected-workspace'
 import { diagnostics } from '../../src/logging/diagnostics'
@@ -17,7 +18,8 @@ import { diagnostics } from '../../src/logging/diagnostics'
  * - Requests: the gate is placed ahead of every h3 layer, including Nitro's static asset
  *   middleware, so `/mcp`, `/api/*` and SPA assets all pass the same Host/Origin gate.
  * - Authentication runs right after the baseline gates: every `/api/*` and `/mcp` request
- *   resolves to one principal or gets 401; `/.well-known/*` is a JSON 404.
+ *   resolves to one principal or gets 401; every `/api/*` response carries `X-UIUX-Server-Instance`
+ *   (Clause 01a175ec-c8cb-7cf3-bc94-1168ed11e3a9), set just before authentication so a 401 has it too; `/.well-known/*` is a JSON 404.
  */
 export default defineNitroPlugin((nitroApp) => {
 	const unixSocket = Boolean(process.env.NITRO_UNIX_SOCKET)
@@ -39,6 +41,10 @@ export default defineNitroPlugin((nitroApp) => {
 		{
 			route: '',
 			handler: createLoopbackGuardHandler({ anyPort: import.meta.dev, localSocket }),
+		},
+		{
+			route: '',
+			handler: createServerInstanceHeaderHandler(() => getSelectedWorkspaceServerRuntime().events.serverInstanceId),
 		},
 		{
 			route: '',
