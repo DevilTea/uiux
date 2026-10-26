@@ -231,3 +231,60 @@ describe('RuntimeChecksObserver', () => {
 		first.controller.dispose()
 	})
 })
+
+describe('coverage: the declared translation-result Properties the Runtime did not evaluate (issue #95)', () => {
+	it('lists every declared Property nothing evaluated, evaluates none to say so, and drops one once it is evaluated', async () => {
+		const { controller, observer, observations, read } = await setup([label('b', 'greeting'), label('a', 'nowhere')])
+		observer.attach(controller.runtime)
+		await tick()
+		const never = { resultProperty: 'titleResult', catalogField: 'title', reason: 'The Property was not evaluated.' }
+		// In the View's tree order, and observing twice evaluates nothing.
+		expect(observer.observe().unevaluated).toEqual([{ widgetId: 'b', ...never }, { widgetId: 'a', ...never }])
+		expect(observer.observe().unevaluated).toHaveLength(2)
+		expect(observations.at(-1)?.unevaluated).toHaveLength(2)
+
+		read('a', 'titleResult')
+		await tick()
+		expect(observations.at(-1)?.unevaluated).toEqual([{ widgetId: 'b', ...never }])
+		read('b', 'titleResult')
+		await tick()
+		expect(observations.at(-1)?.unevaluated).toEqual([])
+		controller.dispose()
+	})
+
+	it('counts a Property that failed, or evaluated to no translation result, as not evaluated', async () => {
+		const { controller, observer, read } = await setup([label('a', 'diag'), label('b', 'shape'), label('c', 'greeting')])
+		observer.attach(controller.runtime)
+		read('a', 'titleResult')
+		read('b', 'label')
+		read('c', 'titleResult')
+		expect(observer.observe().unevaluated).toEqual([
+			{ widgetId: 'a', resultProperty: 'titleResult', catalogField: 'title', reason: 'The evaluation failed.' },
+			{ widgetId: 'b', resultProperty: 'titleResult', catalogField: 'title', reason: 'The result is not a { text, warnings } translation result.' },
+		])
+		controller.dispose()
+	})
+
+	it('forgets what a Locale change invalidated: nothing counts as evaluated until it completes a new result', async () => {
+		const { controller, observer, read } = await setup([label('a', 'greeting')])
+		observer.attach(controller.runtime)
+		read('a', 'titleResult')
+		expect(observer.observe().unevaluated).toEqual([])
+		observer.reset()
+		expect(observer.observe().unevaluated).toHaveLength(1)
+		controller.updateLocale('zh-TW')
+		read('a', 'titleResult')
+		expect(observer.observe().unevaluated).toEqual([])
+		controller.dispose()
+	})
+
+	it('claims nothing while no Runtime is attached', async () => {
+		const { controller, observer } = await setup([label('a', 'greeting')])
+		expect(observer.observe().unevaluated).toBeUndefined()
+		observer.attach(controller.runtime)
+		expect(observer.observe().unevaluated).toHaveLength(1)
+		observer.detach()
+		expect(observer.observe().unevaluated).toBeUndefined()
+		controller.dispose()
+	})
+})

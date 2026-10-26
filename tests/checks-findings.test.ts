@@ -7,7 +7,9 @@ import {
 	compareFindings,
 	filterFindings,
 	groupFindings,
+	previewSourceStates,
 	previewTranslationFindings,
+	unevaluatedCount,
 	runtimeErrorFindings,
 	sectionFindings,
 	SOURCE_SEVERITY,
@@ -359,5 +361,46 @@ describe('the findings of the live Preview (issue #347)', () => {
 		const list = previewTranslationFindings(report({ variantId: 'Quiet', translationWarnings: [{ widgetId: 'b1', resultProperty: 'labelResult', warning: missing('cta') }] }), input)
 		expect(filterFindings(list, { variant: 'Quiet' })).toHaveLength(1)
 		expect(filterFindings(list, { source: 'runtime' })).toHaveLength(0)
+	})
+})
+
+describe('the check states of the Preview sources (issue #95)', () => {
+	const entry = { widgetId: 'b1', resultProperty: 'labelResult', catalogField: 'label', reason: 'The Property was not evaluated.' }
+	const held = (overrides: Partial<LivePreviewChecks> = {}): LivePreviewChecks => ({
+		runtimeGenerationId: 'g', viewId: 'view-checkout', runtimeContextVersion: 1, sequence: 1, translationWarnings: [], runtimeErrors: [], ...overrides,
+	})
+
+	it('follows the Preview until it has reported: not checked without one, checking until its report', () => {
+		expect(previewSourceStates({ state: 'not_checked' })).toEqual({ translation: 'not_checked', runtime: 'not_checked' })
+		expect(previewSourceStates({ state: 'checking' })).toEqual({ translation: 'checking', runtime: 'checking' })
+	})
+
+	it('is completed when the report says every declared Property was evaluated, and incomplete when it names one it did not', () => {
+		expect(previewSourceStates({ state: 'completed', report: held({ coverage: { complete: true, unevaluated: [] } }) })).toEqual({ translation: 'completed', runtime: 'completed' })
+		expect(previewSourceStates({ state: 'completed', report: held({ coverage: { complete: false, unevaluated: [entry] } }) })).toEqual({ translation: 'incomplete', runtime: 'completed' })
+		// A report that makes no claim keeps the reading it had before coverage existed.
+		expect(previewSourceStates({ state: 'completed', report: held() })).toEqual({ translation: 'completed', runtime: 'completed' })
+	})
+
+	it('is failed for the translation source when the Preview could not evaluate, whatever the coverage says', () => {
+		for (const reason of ['runtime.view_load_failed', 'runtime.adapter_invalid', 'runtime.adapter_unavailable', 'runtime.preview_blocked'])
+			expect(previewSourceStates({ state: 'completed', report: held({ runtimeErrors: [{ reason }] }) })).toEqual({ translation: 'failed', runtime: 'completed' })
+		// A Property that failed is an error to list, and its Property is counted as unevaluated, not a failed Preview.
+		expect(previewSourceStates({ state: 'completed', report: held({ runtimeErrors: [{ reason: 'runtime.property_failed', widgetId: 'b1' }], coverage: { complete: false, unevaluated: [entry] } }) }))
+			.toEqual({ translation: 'incomplete', runtime: 'completed' })
+	})
+
+	it('makes the runtime source incomplete when the report says errors were left out', () => {
+		expect(previewSourceStates({ state: 'completed', report: held({ runtimeErrors: [{ reason: 'runtime.report_truncated', detail: '3 runtime errors were left out.' }] }) })).toEqual({ translation: 'completed', runtime: 'incomplete' })
+	})
+
+	it('reads the last report of a Preview that is closed as incomplete, never completed', () => {
+		expect(previewSourceStates({ state: 'stale', report: held({ coverage: { complete: true, unevaluated: [] } }) })).toEqual({ translation: 'incomplete', runtime: 'incomplete' })
+	})
+
+	it('counts the unevaluated Properties a report names', () => {
+		expect(unevaluatedCount(undefined)).toBe(0)
+		expect(unevaluatedCount(held())).toBe(0)
+		expect(unevaluatedCount(held({ coverage: { complete: false, unevaluated: [entry, { ...entry, widgetId: 'b2' }] } }))).toBe(2)
 	})
 })

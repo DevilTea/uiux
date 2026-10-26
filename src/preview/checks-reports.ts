@@ -1,4 +1,4 @@
-import type { ChecksReportMessage, ChecksRuntimeError, ChecksTranslationWarning } from './protocol/checks-report'
+import type { ChecksCoverage, ChecksReportMessage, ChecksRuntimeError, ChecksTranslationWarning } from './protocol/checks-report'
 
 /**
  * What the Workbench holds of the live Preview for Checks (owner ruling 1 of 2026-10-26,
@@ -16,6 +16,8 @@ export type LivePreviewChecks = Readonly<{
 	/** Only the warnings of the Locale the Workbench renders. */
 	translationWarnings: readonly ChecksTranslationWarning[]
 	runtimeErrors: readonly ChecksRuntimeError[]
+	/** What the runtime declared but did not evaluate (issue #95); absent when the report makes no claim. */
+	coverage?: ChecksCoverage
 }>
 
 /** What the Workbench renders now: the context a report must match to be current. */
@@ -68,6 +70,7 @@ export class PreviewChecksReports {
 				? payload.translationWarnings
 				: payload.translationWarnings.filter(entry => entry.warning.requestedLocale === rendering.locale),
 			runtimeErrors: payload.runtimeErrors,
+			...(payload.coverage ? { coverage: payload.coverage } : {}),
 		})
 		return { status: 'accepted' }
 	}

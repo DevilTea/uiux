@@ -11,6 +11,7 @@ import {
 	MAX_CHECKS_REPORT_LENGTH,
 	MAX_CHECKS_RUNTIME_ERRORS,
 	MAX_CHECKS_TRANSLATION_WARNINGS,
+	MAX_CHECKS_UNEVALUATED,
 	validateChecksReportMessage,
 	type ChecksReportMessage,
 } from '../src/preview/protocol/checks-report'
@@ -130,6 +131,49 @@ describe('checks.report decoder', () => {
 		expect(issues(report({ payload: { translationWarnings: warnings(MAX_CHECKS_TRANSLATION_WARNINGS + 1) } }))).toContain('protocol.too_many_translation_warnings')
 		expect(issues(report({ payload: { runtimeErrors: errors(MAX_CHECKS_RUNTIME_ERRORS) } }))).toEqual([])
 		expect(issues(report({ payload: { runtimeErrors: errors(MAX_CHECKS_RUNTIME_ERRORS + 1) } }))).toContain('protocol.too_many_runtime_errors')
+	})
+
+	describe('coverage (issue #95; owner ruling 5 of Discussion #241, 2026-10-26)', () => {
+		const entry = (index = 0) => ({ widgetId: `w${index}`, resultProperty: 'labelResult', catalogField: 'label', reason: 'The Property was not evaluated.' })
+		const coverage = (value: unknown) => report({ payload: { coverage: value } })
+
+		it('is optional: a report without it decodes without one, never as complete', () => {
+			expect(decoded(report()).payload.coverage).toBeUndefined()
+			expect('coverage' in decoded(report()).payload).toBe(false)
+		})
+
+		it('decodes the unevaluated Properties of an incomplete coverage, and drops additive members', () => {
+			const message = decoded(coverage({ complete: false, unevaluated: [{ ...entry(1), extra: 1 }, entry(2)], extra: true }))
+			expect(message.payload.coverage).toEqual({ complete: false, unevaluated: [entry(1), entry(2)] })
+			expect(decoded(coverage({ complete: true, unevaluated: [] })).payload.coverage).toEqual({ complete: true, unevaluated: [] })
+		})
+
+		it('requires complete to agree with the list: complete lists nothing, incomplete lists at least one', () => {
+			expect(issues(coverage({ complete: true, unevaluated: [entry()] }))).toContain('protocol.invalid_coverage')
+			expect(issues(coverage({ complete: false, unevaluated: [] }))).toContain('protocol.invalid_coverage')
+			expect(issues(coverage({ unevaluated: [] }))).toContain('protocol.invalid_coverage')
+			expect(issues(coverage({ complete: 'yes', unevaluated: [] }))).toContain('protocol.invalid_coverage')
+			expect(issues(coverage({ complete: true }))).not.toEqual([])
+			expect(issues(coverage('complete'))).not.toEqual([])
+			expect(issues(coverage(null))).not.toEqual([])
+		})
+
+		it('bounds each entry as the other report text and caps the list', () => {
+			for (const key of ['widgetId', 'resultProperty', 'catalogField', 'reason']) {
+				const missing = { ...entry() } as Record<string, unknown>
+				delete missing[key]
+				expect(issues(coverage({ complete: false, unevaluated: [missing] }))).not.toEqual([])
+				expect(issues(coverage({ complete: false, unevaluated: [{ ...entry(), [key]: 'x'.repeat(501) }] }))).toContain('protocol.unsafe_text')
+				expect(issues(coverage({ complete: false, unevaluated: [{ ...entry(), [key]: 'a\u0000b' }] }))).toContain('protocol.unsafe_text')
+			}
+			const many = (count: number) => Array.from({ length: count }, (_, index) => entry(index))
+			expect(issues(coverage({ complete: false, unevaluated: many(MAX_CHECKS_UNEVALUATED) }))).toEqual([])
+			expect(issues(coverage({ complete: false, unevaluated: many(MAX_CHECKS_UNEVALUATED + 1) }))).toContain('protocol.too_many_unevaluated')
+		})
+
+		it('belongs in the payload, never in shared context', () => {
+			expect(issues(report({ context: { coverage: { complete: true, unevaluated: [] } } }))).toContain('protocol.identity_in_wrong_envelope')
+		})
 	})
 
 	it('bounds the session, generation and Variant identities and the size of the whole report', () => {
@@ -259,6 +303,18 @@ describe('Workbench state: the held report', () => {
 		expect(state.current()?.translationWarnings.map(entry => entry.widgetId)).toEqual(['button-1'])
 	})
 
+	it('holds the coverage of the latest report, and replaces it with the report', () => {
+		const state = new PreviewChecksReports()
+		const unevaluated = [{ widgetId: 'button-1', resultProperty: 'labelResult', catalogField: 'label', reason: 'The Property was not evaluated.' }]
+		state.accept(message({ payload: { sequence: 0, coverage: { complete: false, unevaluated } } }), rendering)
+		expect(state.current()?.coverage).toEqual({ complete: false, unevaluated })
+		state.accept(message({ payload: { sequence: 1, coverage: { complete: true, unevaluated: [] } } }), rendering)
+		expect(state.current()?.coverage).toEqual({ complete: true, unevaluated: [] })
+		// A report that makes no claim holds none: the earlier one is not carried over.
+		state.accept(message({ payload: { sequence: 2 } }), rendering)
+		expect(state.current()?.coverage).toBeUndefined()
+	})
+
 	it('starts over with a new generation', () => {
 		const state = new PreviewChecksReports()
 		state.accept(message({ payload: { sequence: 7 } }), rendering)
@@ -284,6 +340,53 @@ describe('what the runtime reports', () => {
 		})
 		// A Preview with nothing evaluated and nothing failed reports empty lists, never a made-up entry.
 		expect(buildChecksReportBody({ materialization: { status: 'ready' }, observation: observation() })).toEqual({ translationWarnings: [], runtimeErrors: [] })
+	})
+
+	describe('coverage', () => {
+		const unevaluatedEntry = (index: number) => ({ widgetId: `w${index}`, resultProperty: 'labelResult', catalogField: 'label', reason: 'The Property was not evaluated.' })
+
+		it('says nothing without an observation of a mounted Runtime', () => {
+			expect(buildChecksReportBody({ loadError: 'x' }).coverage).toBeUndefined()
+			expect(buildChecksReportBody({ materialization: { status: 'ready' }, observation: observation() }).coverage).toBeUndefined()
+		})
+
+		it('is complete when the Runtime left no declared Property unevaluated, and incomplete with the list when it did', () => {
+			expect(buildChecksReportBody({ observation: observation({ unevaluated: [] }) }).coverage).toEqual({ complete: true, unevaluated: [] })
+			const body = buildChecksReportBody({ observation: observation({ unevaluated: [unevaluatedEntry(1), unevaluatedEntry(2)] }) })
+			expect(body.coverage).toEqual({ complete: false, unevaluated: [unevaluatedEntry(1), unevaluatedEntry(2)] })
+			// It decodes, and the Workbench receives it unchanged.
+			expect(decoded({ ...report(), payload: { sequence: 0, ...body } }).payload.coverage).toEqual(body.coverage)
+		})
+
+		it('caps the list, keeps the coverage incomplete and says it cut it', () => {
+			const entries = Array.from({ length: MAX_CHECKS_UNEVALUATED + 7 }, (_, index) => unevaluatedEntry(index))
+			const body = buildChecksReportBody({ observation: observation({ unevaluated: entries }) })
+			expect(body.coverage?.complete).toBe(false)
+			expect(body.coverage?.unevaluated).toHaveLength(MAX_CHECKS_UNEVALUATED)
+			expect(body.runtimeErrors.at(-1)).toMatchObject({ reason: 'runtime.report_truncated', detail: '7 unevaluated Properties were left out.' })
+			expect(issues({ ...report(), payload: { sequence: 0, ...body } })).toEqual([])
+		})
+
+		it('keeps a report of maximal entries within the size bound', () => {
+			const long = (index: number) => ({ widgetId: 'w'.repeat(497) + String(index).padStart(3, '0'), resultProperty: 'p'.repeat(500), catalogField: 'c'.repeat(500), reason: 'r'.repeat(600) })
+			const warnings = Array.from({ length: 500 }, (_, index) => ({ widgetId: 'w'.repeat(497) + String(index).padStart(3, '0'), resultProperty: 'p'.repeat(500), warning: { code: 'missing-parameter', key: 'k'.repeat(500), requestedLocale: 'en-US', parameter: 'a'.repeat(500) } as const }))
+			const body = buildChecksReportBody({ observation: observation({ translationWarnings: warnings, unevaluated: Array.from({ length: 500 }, (_, index) => long(index)) }) })
+			expect(body.coverage?.complete).toBe(false)
+			expect(body.coverage!.unevaluated.length).toBeGreaterThan(0)
+			expect(issues({ ...report(), payload: { sequence: 0, ...body } })).toEqual([])
+		})
+
+		it('makes a changed coverage a new report, and an unchanged one a repeat', () => {
+			const sent: ChecksReportMessage[] = []
+			const publisher = new ChecksReportPublisher((message) => { sent.push(message); return 'sent' })
+			const context = { previewSessionId: 'session-a', runtimeGenerationId: 'generation-a', viewId: VIEW_ID, runtimeContextVersion: 1 }
+			const base = { translationWarnings: [], runtimeErrors: [] }
+			expect(publisher.publish(context, { ...base, coverage: { complete: false, unevaluated: [unevaluatedEntry(1)] } })).toBe('sent')
+			expect(publisher.publish(context, { ...base, coverage: { complete: false, unevaluated: [unevaluatedEntry(1)] } })).toBe('unchanged')
+			expect(publisher.publish(context, { ...base, coverage: { complete: true, unevaluated: [] } })).toBe('sent')
+			expect(sent.map(message => message.payload.coverage?.complete)).toEqual([false, true])
+			expect(sent.every(message => validateChecksReportMessage(message).ok)).toBe(true)
+		})
 	})
 
 	it('reports View and Adapter load errors as runtime errors', () => {
