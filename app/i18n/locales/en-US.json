@@ -81,6 +81,13 @@
     "notRunTitle": "Checks haven't run yet",
     "notRunDescription": "Run Checks to read every resource and list its findings. Review threads stay in Reviews.",
     "lastRun": "Ran at {time}. No findings. | Ran at {time}. {n} finding. | Ran at {time}. {n} findings.",
+    "record": {
+      "unknown": "The server could not store it.",
+      "recording": "Recording this run as Evidence…",
+      "recorded": "Recorded as Evidence {id}, run at {time}.",
+      "failed": "This run was not recorded as Evidence: {message}",
+      "notPermitted": "This run was not recorded as Evidence. Recording needs the permission key {key}."
+    },
     "clean": "No findings",
     "cleanDescription": "Every resource in this Workspace validates.",
     "allCategories": "All categories",
@@ -2565,6 +2572,8 @@
     "evidence": {
       "flow_trace_mismatch": "The Flow trace does not agree with its recipe and captures.",
       "invalid_flow_trace": "The Flow trace record is not valid.",
+      "invalid_checks_run": "This Run Checks result is not valid, so it was not recorded.",
+      "checks_run_mismatch": "The Run Checks result does not agree with itself, so it was not recorded.",
       "duplicate_adapter": "The Evidence records the same Adapter more than once.",
       "invalid_coverage": "The Evidence coverage record is not valid.",
       "invalid_translation_coverage": "The Evidence translation coverage record is not valid.",

@@ -435,6 +435,24 @@ const captureFlowEvidenceSchema = z.object({
 	recipe: flowRecipeSchema.optional(),
 }).strict()
 
+// The enumerated members are checked by the domain (Clause 01a17670-d442-7068-8a08-c6e4ab9c09ae), so a wrong one is
+// an `invalid` result with diagnostics, as over HTTP.
+const recordChecksRunSchema = z.object({
+	ranAt: z.string(),
+	sources: z.array(z.object({ source: z.string(), state: z.string() }).strict()),
+	findings: z.array(z.object({
+		source: z.string(),
+		code: z.string(),
+		message: z.string(),
+		path: z.string(),
+		resource: z.object({ kind: z.string(), key: z.string(), name: z.string() }).strict(),
+		severity: z.string(),
+		checkState: z.string(),
+		widgetId: z.string().optional(),
+		variantName: z.string().optional(),
+	}).strict()),
+}).strict()
+
 const handoffRootSchema = z.discriminatedUnion('type', [
 	z.object({ type: z.literal('workspace') }).strict(),
 	z.object({ type: z.literal('view'), viewId: z.string() }).strict(),
@@ -1312,6 +1330,24 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 				content: [{ type: 'text' as const, text: JSON.stringify(outcome) }],
 				structuredContent: outcome,
 				...(outcome.status === 'captured' ? {} : { isError: true }),
+			}
+		},
+	)
+
+	server.registerTool(
+		'record_checks_run',
+		{
+			title: 'Record a Run Checks result as Evidence',
+			description: 'Store the result of a Run Checks as one immutable checks_run Evidence record: { ranAt (RFC 3339 UTC), sources: [{ source, state }] for validation, translation, catalog and product-kit in that order, each state completed, incomplete or failed, findings: [{ source, code, message, path, resource: { kind, key, name }, severity (error or warning), checkState, widgetId?, variantName? }] }. At most 2000 findings. The findings are what the caller reports, not checked again, and the record is never a formal capture or part of the live Checks list. Returns { status: "recorded", evidenceDigest, evidence } or { status: "invalid", diagnostics }; an invalid input records nothing.',
+			inputSchema: recordChecksRunSchema,
+			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+		},
+		async input => {
+			const outcome = await app.recordChecksRun(input)
+			return {
+				content: [{ type: 'text' as const, text: JSON.stringify(outcome) }],
+				structuredContent: outcome,
+				...(outcome.status === 'recorded' ? {} : { isError: true }),
 			}
 		},
 	)
