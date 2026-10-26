@@ -144,6 +144,7 @@ describe('shared HTTP/MCP point-resource reads', { timeout: HEAVY_SERVER_SUITE_T
 				'list_versions',
 				'promote_review_to_decision',
 				'reanchor_review_thread',
+				'record_checks_run',
 				'release_lock',
 				'reopen_decision',
 				'reopen_review_thread',

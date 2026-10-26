@@ -81,6 +81,13 @@
     "notRunTitle": "尚未執行檢查",
     "notRunDescription": "執行檢查會讀取每個資源並列出問題。Review 討論串仍在 Reviews 中。",
     "lastRun": "於 {time} 執行，沒有問題。 | 於 {time} 執行，{n} 個問題。 | 於 {time} 執行，{n} 個問題。",
+    "record": {
+      "unknown": "伺服器無法儲存。",
+      "recording": "正在將這次執行記錄為 Evidence…",
+      "recorded": "已記錄為 Evidence {id}，執行於 {time}。",
+      "failed": "這次執行未記錄為 Evidence：{message}",
+      "notPermitted": "這次執行未記錄為 Evidence。記錄需要權限鍵 {key}。"
+    },
     "clean": "沒有問題",
     "cleanDescription": "這個 Workspace 的所有資源都通過驗證。",
     "allCategories": "所有類別",
@@ -2565,6 +2572,8 @@
     "evidence": {
       "flow_trace_mismatch": "Flow 軌跡與其配方和擷取內容不一致。",
       "invalid_flow_trace": "Flow 軌跡紀錄無效。",
+      "invalid_checks_run": "這次執行檢查的結果無效，因此未記錄。",
+      "checks_run_mismatch": "這次執行檢查的結果前後不一致，因此未記錄。",
       "duplicate_adapter": "Evidence 重複記錄了同一個 Adapter。",
       "invalid_coverage": "Evidence 的涵蓋範圍紀錄無效。",
       "invalid_translation_coverage": "Evidence 的翻譯涵蓋範圍紀錄無效。",

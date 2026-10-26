@@ -42,6 +42,16 @@ import type { I18nResource, I18nWarning } from '../../../src/domain/i18n/schema'
 import WbErrorDescription from '../workbench/WbErrorDescription.vue'
 import { diagnosticText } from '../../utils/diagnostic-copy'
 import { missingDefaultLocaleDiagnostic } from '../../../src/i18n/runtime'
+import {
+	MAX_CHECKS_RUN_CODE_LENGTH,
+	MAX_CHECKS_RUN_IDENTIFIER_LENGTH,
+	MAX_CHECKS_RUN_MESSAGE_LENGTH,
+	MAX_CHECKS_RUN_PATH_LENGTH,
+	MAX_CHECKS_RUN_RESOURCE_KEY_LENGTH,
+	MAX_CHECKS_RUN_RESOURCE_NAME_LENGTH,
+	type ChecksRunInput,
+	type ChecksRunState,
+} from '../../../src/domain/evidence/checks-run'
 
 /**
  * Overview › Checks (Part 5): one normalized findings surface for the Workspace, grouped
@@ -55,6 +65,12 @@ import { missingDefaultLocaleDiagnostic } from '../../../src/i18n/runtime'
  * 01a11bb1-a88c-7d78-8633-1c3b55588910): nothing here gates Preview, capture or Handoff. They need
  * `evidence.capture`, and their props and emits check `product-kit.source.read` (Clause
  * 01a11485-fa44-7b6a-99f8-de4e1e8edcfc): without the first, Run Checks never asks for them.
+ *
+ * After a run has finished, every source of it, the Workbench writes the result as one immutable
+ * `checks_run` Evidence record (`POST /api/checks/runs`, issue #348, Rule 01a115cd-bc2c-795f-babe-0d19eb80de96).
+ * It needs `evidence.capture`: without it the run works and says it was not recorded. The record is the
+ * Workbench's report of the run: the Preview's two sources are the live Preview's and are not part of it, and
+ * the record never joins the findings listed here.
  *
  * Every finding keeps its origin (`source`), scope, check state and original severity (issue #95,
  * Rules 01a115cd-bb64-75c2-a7df-2c8dd338453d and 01a115cd-bb96-7131-99d9-a3882829590c). Each source
@@ -122,9 +138,13 @@ async function listAll<T>(kind: string): Promise<Readonly<{ items: readonly T[];
 async function runChecks(): Promise<void> {
 	if (running.value) return
 	running.value = true
+	const serial = ++runSerial
+	const ranAt = new Date().toISOString()
 	readStates.value = { validation: 'checking', translation: 'checking', catalog: 'checking' }
 	catalogError.value = undefined
-	if (!kitRunning.value && canRunKitChecks.value) void runKitChecks()
+	// A run that finds the Product Kit checks already running waits for that run rather than starting another.
+	if (!kitRunning.value && canRunKitChecks.value) kitPromise = runKitChecks()
+	const kitDone = canRunKitChecks.value ? kitPromise : undefined
 	const collected: Finding[] = []
 	const localeResources = new Map<string, I18nResource>()
 	const localeStates: CheckState[] = []
@@ -224,6 +244,9 @@ async function runChecks(): Promise<void> {
 	failures.value = failed
 	lastRun.value = new Date()
 	running.value = false
+	await kitDone
+	// A newer run records its own result; this one is superseded.
+	if (serial === runSerial) await recordRun(ranAt, serial)
 }
 
 // ---- Product Kit Checks -----------------------------------------------------------------------
@@ -240,6 +263,7 @@ const api = $fetch as unknown as <T = unknown>(url: string, options?: Readonly<R
 const kitRunning = ref(false)
 const canRunKitChecks = computed(() => access.can('evidence.capture'))
 const canReadKitSource = computed(() => access.can('product-kit.source.read'))
+let kitPromise: Promise<void> | undefined
 const kitResult = shallowRef<KitChecksResponse>()
 const kitError = shallowRef<FetchErrorDetails>()
 
@@ -284,6 +308,71 @@ function kitFinding(finding: KitFinding): Finding {
 		...(finding.check === 'registry' ? {} : { group: { key: finding.check, title: finding.code ? diagnosticText({ code: finding.code }) : t(`checks.kit.groups.${finding.check}`) } }),
 	}
 }
+
+// ---- Recording the run (issue #348) -----------------------------------------------------------
+
+type RecordNote =
+	| Readonly<{ state: 'recording' }>
+	| Readonly<{ state: 'failed'; error: FetchErrorDetails }>
+	| Readonly<{ state: 'not_permitted' }>
+let runSerial = 0
+const canRecordRun = computed(() => access.can('evidence.capture'))
+const lastRecorded = shallowRef<Readonly<{ evidenceDigest: string; ranAt: string }>>()
+const recordNote = shallowRef<RecordNote>()
+
+const clip = (text: string, max: number): string => text.length > max ? text.slice(0, max) : text
+/** A finding's state as a run records it: a source that is still checking or was not checked did not finish. */
+const runState = (state: CheckState): ChecksRunState => state === 'completed' || state === 'failed' ? state : 'incomplete'
+
+/** A finding as the record holds it: its own members only, each within the record's bounds. */
+function recordedFinding(finding: Finding): ChecksRunInput['findings'][number] {
+	return {
+		source: finding.source as ChecksRunInput['findings'][number]['source'],
+		code: clip(finding.code, MAX_CHECKS_RUN_CODE_LENGTH),
+		message: clip(finding.message, MAX_CHECKS_RUN_MESSAGE_LENGTH),
+		path: clip(finding.path, MAX_CHECKS_RUN_PATH_LENGTH),
+		resource: { kind: finding.resource.kind, key: clip(finding.resource.key, MAX_CHECKS_RUN_RESOURCE_KEY_LENGTH), name: clip(finding.resource.name, MAX_CHECKS_RUN_RESOURCE_NAME_LENGTH) },
+		severity: finding.severity,
+		checkState: runState(finding.checkState),
+		...(finding.widgetId ? { widgetId: clip(finding.widgetId, MAX_CHECKS_RUN_IDENTIFIER_LENGTH) } : {}),
+		...(finding.variantName ? { variantName: clip(finding.variantName, MAX_CHECKS_RUN_IDENTIFIER_LENGTH) } : {}),
+	}
+}
+
+/**
+ * Writes the finished run as Evidence. Only what the run itself gathered goes in (its four sources),
+ * never the live Preview's findings; a failure to record never changes the result the page shows.
+ */
+async function recordRun(ranAt: string, serial: number): Promise<void> {
+	if (!canRecordRun.value) {
+		recordNote.value = { state: 'not_permitted' }
+		return
+	}
+	recordNote.value = { state: 'recording' }
+	const kit = kitResult.value && 'findings' in kitResult.value ? kitResult.value.findings.map(kitFinding) : []
+	const body: ChecksRunInput = {
+		ranAt,
+		sources: [
+			{ source: 'validation', state: runState(readStates.value.validation) },
+			{ source: 'translation', state: runState(readStates.value.translation) },
+			{ source: 'catalog', state: runState(readStates.value.catalog) },
+			{ source: 'product-kit', state: runState(kitState.value) },
+		],
+		findings: [...resourceFindings.value, ...translationFindings.value, ...catalogFindings.value, ...kit].map(recordedFinding),
+	}
+	try {
+		const response = await api<Readonly<{ evidenceDigest: string }>>('/api/checks/runs', { method: 'POST', body })
+		// A superseded run's record is still the last recorded one while no later run has been recorded.
+		if (!lastRecorded.value || lastRecorded.value.ranAt < ranAt) lastRecorded.value = { evidenceDigest: response.evidenceDigest, ranAt }
+		if (serial === runSerial) recordNote.value = undefined
+	}
+	catch (cause) {
+		if (serial === runSerial) recordNote.value = { state: 'failed', error: describeFetchError(cause, t('checks.record.unknown')) }
+	}
+}
+
+/** The first characters of an Evidence identity, enough to tell two runs apart. */
+const shortDigest = (digest: string): string => digest.replace(/^sha256:/u, '').slice(0, 12)
 
 // ---- The live Preview's report (issue #347) -----------------------------------------------------
 
@@ -639,6 +728,31 @@ const items = computed<CheckTreeItem[]>(() => sectionFindings(filtered.value, gr
         <template v-else-if="lastRun">{{ t('checks.lastRun', { time: fmt.time(lastRun), n: findings.length }, findings.length) }}</template>
         <template v-else>{{ t('checks.notRun', workspaceFindingCount) }}</template>
       </span>
+      <p
+        v-if="recordNote"
+        class="basis-full text-xs text-muted"
+        role="status"
+        :data-checks-record-note="recordNote.state"
+      >
+        <template v-if="recordNote.state === 'recording'">
+          {{ t('checks.record.recording') }}
+        </template>
+        <template v-else-if="recordNote.state === 'failed'">
+          {{ t('checks.record.failed', { message: recordNote.error.message }) }}
+        </template>
+        <template v-else>
+          {{ t('checks.record.notPermitted', { key: 'evidence.capture' }) }}
+        </template>
+      </p>
+      <p
+        v-if="lastRecorded"
+        class="basis-full text-xs text-muted"
+        data-checks-recorded
+        :data-evidence-digest="lastRecorded.evidenceDigest"
+        :title="lastRecorded.evidenceDigest"
+      >
+        {{ t('checks.record.recorded', { id: shortDigest(lastRecorded.evidenceDigest), time: fmt.time(new Date(lastRecorded.ranAt)) }) }}
+      </p>
     </div>
 
     <section
