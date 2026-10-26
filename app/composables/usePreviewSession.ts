@@ -28,6 +28,7 @@ import {
 import type { AffineOuterMapping } from '../../src/preview/outer-precision'
 import {
 	MULTI_TARGET_GEOMETRY_FEATURE,
+	REVEAL_GEOMETRY_FEATURE,
 	type GeometryAcquireResponse,
 	type PreviewFailureDiagnostic,
 	type VisibleRegion,
@@ -227,6 +228,13 @@ export function createPreviewSession(state: WorkbenchState) {
 	let commentEscapeHandler: (() => boolean) | undefined
 	/** The Checks/selection highlight request; its reports may update the selection overlay. */
 	let selectionTarget: PreviewNavigationTarget | undefined
+	/**
+	 * The Checks navigation that has not yet asked the Preview to reveal its target (issue #105). It is
+	 * sent once, with the first stream the navigation opens, and it survives a generation boundary; a
+	 * newer Checks navigation, a selection that is no Checks navigation, or another View, Variant or
+	 * Widget opened by an address replaces or ends it.
+	 */
+	let pendingReveal: Readonly<{ viewId: string; variantId: string; widgetId: string }> | undefined
 	let interactionSequence = 0
 	const targeting = new PreviewTargetingState<{ widgetId: string }>()
 	let armSequence = 0
@@ -271,7 +279,7 @@ export function createPreviewSession(state: WorkbenchState) {
 	/** Every geometry stream of this session (Part 2, 2026-10-05 multi-target decision group). */
 	const geometryStreams = new GeometryStreamCoordinator({
 		send(message) {
-			workbenchBridge?.sendGeometry(message)
+			return workbenchBridge?.sendGeometry(message).status === 'sent'
 		},
 		requestFrame: callback => requestAnimationFrame(callback),
 		cancelFrame: handle => cancelAnimationFrame(handle),
@@ -353,7 +361,11 @@ export function createPreviewSession(state: WorkbenchState) {
 		const viewport = state.contextOptions.value.viewports.selectedDimensions
 		const zeroArea = rect.width === 0 || rect.height === 0
 		const intersects = rect.x < viewport.width && rect.y < viewport.height && rect.x + rect.width > 0 && rect.y + rect.height > 0
-		return zeroArea || !regions.length ? 'hidden' : intersects ? 'visible' : 'offscreen'
+		// A rendered Widget wholly outside the content viewport is offscreen whatever its regions say: it has
+		// none there, which is no reason to call it hidden (Rule 01a11a59-eba4-7d32-a10e-1241b5337460).
+		if (zeroArea) return 'hidden'
+		if (!intersects) return 'offscreen'
+		return regions.length ? 'visible' : 'hidden'
 	}
 	const pinEngine = new PinPlacementEngine()
 
@@ -474,12 +486,70 @@ export function createPreviewSession(state: WorkbenchState) {
 		})
 	}
 
-	function selectWidget(id: string): void {
+	/**
+	 * Selects a Widget. Only a Checks navigation (`reveal: true`) asks the Preview to reveal it
+	 * (Rules 01a11a59-e876-780b-832c-0a139baabc95 and 01a11a59-ea08-74ff-8a88-6e70b4fa3a84); every
+	 * other selection (tree, canvas, Inspector, mentions) discards a request still waiting.
+	 */
+	function selectWidget(id: string, options: Readonly<{ reveal?: boolean }> = {}): void {
+		if (!options.reveal) {
+			pendingReveal = undefined
+			state.selectedWidgetId.value = id
+			return
+		}
+		const viewId = state.selectedViewId.value
+		if (!viewId) {
+			state.selectedWidgetId.value = id
+			return
+		}
+		pendingReveal = { viewId, variantId: currentVariantId() ?? '', widgetId: id }
+		const unchanged = state.selectedWidgetId.value === id
 		state.selectedWidgetId.value = id
+		// The Widget stays selected, so nothing reopens its stream: a navigation still asks for a fresh one.
+		if (unchanged) acquireSelectionGeometry()
+	}
+
+	/**
+	 * A Checks navigation that reaches the View page by its address (Overview › Checks): the request
+	 * waits for its View, Variant and Widget to be selected, and for the stream that opens for them.
+	 */
+	function queueChecksReveal(target: Readonly<{ viewId: string; variantId?: string; widgetId: string }>): void {
+		pendingReveal = { viewId: target.viewId, variantId: target.variantId ?? '', widgetId: target.widgetId }
+	}
+
+	/**
+	 * The View page applied an address: a request waiting for another View, Variant or Widget belonged to a
+	 * navigation that was replaced, so it goes (a request for this very context stays and is sent once).
+	 */
+	function noteOpenedContext(context: Readonly<{ viewId: string; variantId?: string; widgetId: string }>): void {
+		const pending = pendingReveal
+		if (!pending) return
+		if (pending.viewId !== context.viewId || pending.variantId !== (context.variantId ?? '') || pending.widgetId !== (context.widgetId || 'root'))
+			pendingReveal = undefined
+	}
+
+	/**
+	 * Sends the waiting reveal request, once, right after the stream of its target is open in an
+	 * acknowledged generation that declared `geometry.reveal`. Before that generation is open the request
+	 * stays and goes with the navigation's first stream; a generation that is open without the feature
+	 * ends it, because the Workbench then sends nothing.
+	 */
+	function sendPendingReveal(): void {
+		const pending = pendingReveal
+		const target = selectionTarget
+		// Without a Preview document nothing can receive it, so the request keeps waiting for the next one.
+		if (!pending || !target || isCommentMode.value || handshakePhase.value !== 'open' || !previewIframe.value?.contentWindow) return
+		if (target.viewId !== pending.viewId || target.widgetId !== pending.widgetId) return
+		if (!runtimeFeatures.value.includes(REVEAL_GEOMETRY_FEATURE)) {
+			pendingReveal = undefined
+			return
+		}
+		if (geometryStreams.reveal(target.widgetId, target.navigationRequestId)) pendingReveal = undefined
 	}
 
 	/** A Checks navigation failed (its View is gone): the previous highlight is hidden; the selection stays. */
 	function hideSelectionHighlight(): void {
+		pendingReveal = undefined
 		selectionTarget = undefined
 		selectionGeometry.value = undefined
 		selectionVisibility.value = 'none'
@@ -558,6 +628,8 @@ export function createPreviewSession(state: WorkbenchState) {
 			selectionTarget = target
 		}
 		updateGeometryDemand()
+		// The stream of a Checks navigation is open now (when the generation is): it asks for its reveal.
+		sendPendingReveal()
 	}
 
 	function receiveGeometryReport(message: GeometryAcquireResponse): void {
@@ -940,12 +1012,15 @@ export function createPreviewSession(state: WorkbenchState) {
 		if (contextDiffersFromSource()) notifyIframeContext()
 		syncGeometryContext()
 		geometryStreams.setMultiTarget(features.includes(MULTI_TARGET_GEOMETRY_FEATURE))
+		geometryStreams.setRevealSupported(features.includes(REVEAL_GEOMETRY_FEATURE))
 		if (runtimeGenerationId.value) targeting.markGenerationReady(runtimeGenerationId.value)
 		// The new document knows no targeting interaction yet: enter a fresh one for the current tool.
 		applyToolInteraction()
 		// Declare the selection first so its own request identity opens the Widget's stream once.
 		acquireSelectionGeometry()
 		geometryStreams.setReady(true)
+		// The selection's stream opened with the gate: a Checks navigation carried over asks for its reveal now.
+		sendPendingReveal()
 	}
 
 	/**
@@ -1261,6 +1336,8 @@ export function createPreviewSession(state: WorkbenchState) {
 		pinPlacements,
 		geometryStreams,
 		selectWidget,
+		queueChecksReveal,
+		noteOpenedContext,
 		hideSelectionHighlight,
 		failureDiagnostic,
 		retryInFlight,

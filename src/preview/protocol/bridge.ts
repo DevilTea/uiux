@@ -1,5 +1,6 @@
 import type { Diagnostic } from '../../domain/validation'
 import {
+	REVEAL_GEOMETRY_FEATURE,
 	validateCapabilityMessage,
 	validateGeometryMessage,
 	type CapabilityAckMessage,
@@ -220,6 +221,11 @@ export class WorkbenchPreviewProtocolBridge {
 		if (!isGeometryRequest(decoded.value)) return { status: 'wrong-direction' }
 		const gate = this.workbenchOutboundGate(decoded.value)
 		if (gate) return { status: gate }
+		// A message type that an optional feature introduces goes only to a generation that declared it
+		// (Clause 01a11a59-d728-751f-bbac-287a77b75610).
+		if (decoded.value.type === 'geometry.reveal'
+			&& !this.session.currentGenerationDeclares(decoded.value.context.runtimeGenerationId, REVEAL_GEOMETRY_FEATURE))
+			return { status: 'not-permitted' }
 		this.transport.send(decoded.value)
 		return { status: 'sent' }
 	}
@@ -436,6 +442,9 @@ export class RuntimePreviewProtocolBridge {
 		if (!isGeometryRequest(decoded.value)) return { status: 'wrong-direction' }
 		const gate = this.runtimeGate(decoded.value)
 		if (gate) return { status: gate }
+		// A runtime that did not declare `geometry.reveal` does not know the command: it drops it without
+		// effect, as it drops any unknown type of an acknowledged generation (Clause 01a11a59-d728-751f-bbac-287a77b75610).
+		if (decoded.value.type === 'geometry.reveal' && !this.declaration.features.includes(REVEAL_GEOMETRY_FEATURE)) return { status: 'gated' }
 		return { status: 'accepted', message: decoded.value }
 	}
 
@@ -568,6 +577,7 @@ export class RuntimePreviewProtocolBridge {
 function isGeometryRequest(message: GeometryMessage): message is GeometryRequestMessage {
 	return message.type === 'geometry.acquire.request'
 		|| message.type === 'geometry.release'
+		|| message.type === 'geometry.reveal'
 		|| message.type === 'contour.full.request'
 		|| message.type === 'contour.partial.request'
 		|| message.type === 'contour.cancel'

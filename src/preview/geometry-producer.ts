@@ -6,6 +6,7 @@ import {
 	type GeometryAcquireRequest,
 	type GeometryAcquireResponse,
 	type GeometryReleaseRequest,
+	type GeometryRevealRequest,
 	type PartialContourRequest,
 	type PartialContourResponse,
 	type ProtocolContext,
@@ -58,6 +59,11 @@ export type GeometryProducerDependencies = Readonly<{
 	/** Reports contour work that failed for good; that work ends without a response. */
 	reportWorkFailure?(failure: ContourWorkFailure): void
 	measurer: WidgetMeasurer
+	/**
+	 * Scrolls the Preview document to the Widget when a reveal applies to it (see `reveal.ts`) and says
+	 * whether anything moved. Without it the runtime does not support `geometry.reveal`.
+	 */
+	reveal?(widgetId: string): boolean
 	requestFrame(callback: () => void): number
 	cancelFrame(handle: number): void
 	/** Monotonic clock for the optional per-frame work statistics. */
@@ -72,6 +78,9 @@ export type GeometryRequestOutcome =
 	| 'released'
 	| 'ignored-over-cap'
 	| 'ignored-unknown-stream'
+
+/** `revealed`: the Preview scrolled. `no-op`: the reveal named an open stream but did not apply to its Widget. */
+export type RevealRequestOutcome = 'revealed' | 'no-op' | 'ignored-stale' | 'ignored-unsupported'
 
 export type ContourRequestOutcome = 'queued' | 'canceled' | 'ignored-stale' | 'ignored-unsupported'
 
@@ -168,6 +177,28 @@ export class RuntimeGeometryProducer {
 		this.streams.set(widgetId, { request, context: streamContext(request), reported: false, dirty: true })
 		this.schedule()
 		return current ? 'superseded' : 'opened'
+	}
+
+	/**
+	 * One `geometry.reveal` (Clauses 01a11a59-d8be-78aa-bdc7-28aa62bd9444, 01a11a59-da48-7437-bee8-67787175cbda
+	 * and 01a11a70-3d8d-7e52-9412-8a92797814e6): a one-way command on an open stream. It is stale, and ignored,
+	 * unless it names the open stream of its Widget in the render context that stream was acquired for. There is
+	 * no reply: a scroll that moved the Widget reaches the Workbench only as the stream's next report.
+	 */
+	receiveReveal(request: GeometryRevealRequest): RevealRequestOutcome {
+		this.assertLive()
+		const { widgetId, navigationRequestId } = request.context
+		const stream = this.streams.get(widgetId)
+		if (!stream || stream.request.context.navigationRequestId !== navigationRequestId) return 'ignored-stale'
+		const acquired = stream.context
+		if (request.context.viewId !== acquired.viewId || request.context.variantId !== acquired.variantId
+			|| request.context.runtimeContextVersion !== acquired.runtimeContextVersion) return 'ignored-stale'
+		if (!this.context || !matchesContext(stream.request, this.context)) return 'ignored-stale'
+		if (!this.deps.reveal) return 'ignored-unsupported'
+		if (!this.deps.reveal(widgetId)) return 'no-op'
+		// Scroll signals reach the producer too, in a later task; this one need not wait for them.
+		this.invalidate('layout')
+		return 'revealed'
 	}
 
 	/**

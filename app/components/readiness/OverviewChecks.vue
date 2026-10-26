@@ -519,6 +519,8 @@ async function open(finding: Finding): Promise<void> {
 			feedback.notice(t('checks.viewGone.title'), t('checks.viewGone.description', { name: resource.name }))
 			return
 		}
+		// The address carries the View, Variant and Widget; this marks the navigation as a Checks navigation, so its Preview is asked to reveal the Widget.
+		if (finding.widgetId) preview.queueChecksReveal({ viewId: resource.key, ...(finding.variantName ? { variantId: finding.variantName } : {}), widgetId: finding.widgetId })
 		void navigateTo(viewLocation(resource.key, { ...(finding.variantName ? { variant: finding.variantName } : {}), ...(finding.widgetId ? { widget: finding.widgetId, panel: 'inspect' } : { panel: 'readiness' }) }))
 	}
 	else if (resource.kind === 'product-kit') void navigateTo('/workspace/product-kit')
