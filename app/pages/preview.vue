@@ -24,6 +24,7 @@ import {
 	type PreviewTargetingPurpose,
 } from '../../src/preview/protocol/transport'
 import type { TargetingContext, TargetingRuntimeMessage } from '../../src/preview/protocol/targeting'
+import { FAILURE_REPORTS_FEATURE } from '../../src/preview/protocol/failure-report'
 import { declaredRuntimeFeatures } from '../../src/preview/declared-features'
 import type { ChecksObservation } from '../../src/preview/checks-observer'
 import { buildChecksReportBody, ChecksReportPublisher, MaxWaitDebouncer } from '../../src/preview/checks-report-builder'
@@ -388,7 +389,8 @@ function initBridge() {
 			},
 			// A frame pass that threw ends the producer for good: the generation reports itself unavailable
 			// (Clause 01a11a70-4261-7155-8aed-28bed7a89064, issue #339).
-			reportFailure: (detail) => { bridge.reportRuntimeUnavailable(`geometry producer failed: ${detail}`) },
+			// Only a generation that declared `failure.reports` can report; any other keeps running as before.
+			...(declaredFeatures().includes(FAILURE_REPORTS_FEATURE) ? { reportFailure: (detail: string) => { bridge.reportRuntimeUnavailable(`geometry producer failed: ${detail}`) } } : {}),
 			// `regionStatus` goes in a report only when this runtime declared `geometry.region-status`.
 			regionStatus: declaredFeatures().includes(REGION_STATUS_GEOMETRY_FEATURE),
 			measurer: createDomGeometryMeasurer({ document }),

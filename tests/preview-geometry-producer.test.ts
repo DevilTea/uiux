@@ -385,6 +385,9 @@ describe('Runtime geometry producer (multi-target streams)', () => {
 		producer.setContext({ viewId })
 		producer.receive(acquire('a', 'n1'))
 		expect(() => producer.flush()).toThrow('measure exploded')
+		// Without failure.reports (a version frame, a harness) the producer is not disposed: it keeps serving.
+		expect(() => producer.receive(acquire('b', 'n2'))).not.toThrow()
+		expect(() => producer.flush()).toThrow('measure exploded')
 	})
 
 	it('stops all work on dispose', () => {
