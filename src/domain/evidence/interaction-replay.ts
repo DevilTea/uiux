@@ -44,8 +44,8 @@ export type InteractionStep = Readonly<{
 }>
 
 export type InteractionExpectation =
-	| Readonly<{ widgetEvent: Readonly<{ widgetId?: string; name: string; payload?: readonly JsonValue[] }> }>
-	| Readonly<{ state: Readonly<{ widgetId?: string; key: string; value: JsonValue }> }>
+	| Readonly<{ widgetEvent: Readonly<{ widgetId: string; name: string; payload?: readonly JsonValue[]; count?: number }> }>
+	| Readonly<{ state: Readonly<{ widgetId: string; key: string; value: JsonValue }> }>
 export type InteractionAssertionInput = Readonly<{ expect: InteractionExpectation }>
 export type InteractionResult = 'pass' | 'fail'
 export type InteractionAssertion = Readonly<{ expect: InteractionExpectation; result: InteractionResult }>
@@ -63,10 +63,30 @@ function byteLength(value: unknown): number {
 	return new TextEncoder().encode(JSON.stringify(value)).length
 }
 
-/** The Widget an assertion is about: its own `widgetId`, else the Widget of the last step. */
-export function assertionWidgetId(expect: InteractionExpectation, steps: readonly InteractionStep[]): string | undefined {
-	const own = 'widgetEvent' in expect ? expect.widgetEvent.widgetId : expect.state.widgetId
-	return own ?? steps.at(-1)?.target.widgetId
+/** The Widget an assertion is about: its own `widgetId`, required on every expectation (owner ruling 2 of #89 follow-up). */
+export function assertionWidgetId(expect: InteractionExpectation): string {
+	return 'widgetEvent' in expect ? expect.widgetEvent.widgetId : expect.state.widgetId
+}
+
+/** One observed Widget Event, as the Preview reports it. */
+export type ObservedWidgetEvent = Readonly<{ widgetId: string; name: string; args: readonly JsonValue[] }>
+
+/**
+ * Whether a `widgetEvent` expectation holds (owner ruling 1 of the #89 follow-up): the occurrences of the named
+ * Event of the Widget whose arguments equal `payload` (every occurrence when there is none) number `count` when
+ * it is given, else at least one.
+ */
+export function widgetEventHolds(expectation: Readonly<{ widgetId: string; name: string; payload?: readonly JsonValue[]; count?: number }>, occurrences: readonly ObservedWidgetEvent[]): boolean {
+	const wanted = expectation.payload === undefined ? undefined : JSON.stringify(canonicalize(expectation.payload))
+	const matching = occurrences.filter(occurrence => occurrence.widgetId === expectation.widgetId && occurrence.name === expectation.name
+		&& (wanted === undefined || JSON.stringify(canonicalize(occurrence.args)) === wanted)).length
+	return expectation.count === undefined ? matching >= 1 : matching === expectation.count
+}
+
+function canonicalize(value: unknown): unknown {
+	if (Array.isArray(value)) return value.map(canonicalize)
+	if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([key, item]) => [key, canonicalize(item)]))
+	return value
 }
 
 function identifier(v: Validator, value: unknown, path: string, code: string, limit = MAX_INTERACTION_IDENTIFIER_LENGTH): void {
@@ -142,8 +162,10 @@ export function validateInteractionRecipe(
 		if (!body) return
 		const bodyPath = `${path}/expect/${kinds[0]}`
 		if (kinds[0] === 'widgetEvent') {
-			rejectUnknownKeys(body, ['widgetId', 'name', 'payload'], bodyPath, v)
+			rejectUnknownKeys(body, ['widgetId', 'name', 'payload', 'count'], bodyPath, v)
 			identifier(v, body.name, `${bodyPath}/name`, codes.shape)
+			if (Object.hasOwn(body, 'count') && (typeof body.count !== 'number' || !Number.isInteger(body.count) || body.count < 0 || body.count > 1000))
+				v.issue(codes.shape, `${bodyPath}/count`, 'A count is an integer from 0 to 1000.')
 			if (Object.hasOwn(body, 'payload')) {
 				if (!Array.isArray(body.payload)) v.issue(codes.shape, `${bodyPath}/payload`, 'A payload is the JSON array of the Event\'s arguments.')
 				else validateJsonBound(v, body.payload, `${bodyPath}/payload`, codes.shape)
@@ -155,7 +177,7 @@ export function validateInteractionRecipe(
 			if (!Object.hasOwn(body, 'value')) v.issue(codes.shape, `${bodyPath}/value`, 'A state assertion names the expected value.')
 			else validateJsonBound(v, body.value, `${bodyPath}/value`, codes.shape)
 		}
-		if (Object.hasOwn(body, 'widgetId')) identifier(v, body.widgetId, `${bodyPath}/widgetId`, codes.shape)
+		identifier(v, body.widgetId, `${bodyPath}/widgetId`, codes.shape)
 	})
 }
 

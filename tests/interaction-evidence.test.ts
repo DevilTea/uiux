@@ -41,7 +41,7 @@ afterEach(async () => {
 })
 
 const click = { action: 'click', target: { viewId: VIEW, widgetId: 'pay-button' } }
-const eventAssertion = { expect: { widgetEvent: { name: 'click' } } }
+const eventAssertion = { expect: { widgetEvent: { widgetId: 'pay-button', name: 'click' } } }
 
 describe('interaction recipe input (Clauses 01a17762-b467-… and 01a17762-b631-…)', () => {
 	const codes = (patch: Record<string, unknown> = {}, variant?: string) => validateInteractionRecipeInput({
@@ -64,7 +64,7 @@ describe('interaction recipe input (Clauses 01a17762-b467-… and 01a17762-b631-
 			],
 			assertions: [
 				{ expect: { widgetEvent: { widgetId: 'a', name: 'click', payload: [1, { x: 'y' }] } } },
-				{ expect: { state: { key: 'value', value: { text: 'hello' } } } },
+				{ expect: { state: { widgetId: 'pay-button', key: 'value', value: { text: 'hello' } } } },
 			],
 		})).toEqual([])
 	})
@@ -85,14 +85,21 @@ describe('interaction recipe input (Clauses 01a17762-b467-… and 01a17762-b631-
 		expect(codes({ steps: [{ ...click, extra: 1 }] })).toEqual(['schema.unknown_field'])
 		expect(codes({ steps: [{ action: 'click', target: { viewId: VIEW } }] })).toContain('interaction.invalid_recipe')
 		expect(codes({ assertions: [{ expect: {} }] })).toEqual(['interaction.invalid_recipe'])
-		expect(codes({ assertions: [{ expect: { widgetEvent: { name: 'click' }, state: { key: 'a', value: 1 } } }] })).toEqual(['interaction.invalid_recipe'])
-		expect(codes({ assertions: [{ expect: { widgetEvent: { name: 'click', payload: 'x' } } }] })).toEqual(['interaction.invalid_recipe'])
-		expect(codes({ assertions: [{ expect: { widgetEvent: { name: 'click', payload: ['x'.repeat(9000)] } } }] })).toEqual(['interaction.invalid_recipe'])
-		expect(codes({ assertions: [{ expect: { state: { key: 'a' } } }] })).toEqual(['interaction.invalid_recipe'])
+		expect(codes({ assertions: [{ expect: { widgetEvent: { widgetId: 'pay-button', name: 'click' }, state: { widgetId: 'pay-button', key: 'a', value: 1 } } }] })).toEqual(['interaction.invalid_recipe'])
+		expect(codes({ assertions: [{ expect: { widgetEvent: { widgetId: 'pay-button', name: 'click', payload: 'x' } } }] })).toEqual(['interaction.invalid_recipe'])
+		expect(codes({ assertions: [{ expect: { widgetEvent: { widgetId: 'pay-button', name: 'click', payload: ['x'.repeat(9000)] } } }] })).toEqual(['interaction.invalid_recipe'])
+		expect(codes({ assertions: [{ expect: { state: { widgetId: 'pay-button', key: 'a' } } }] })).toEqual(['interaction.invalid_recipe'])
+		// widgetId is required on every expectation, and count is an integer from 0 to 1000.
+		expect(codes({ assertions: [{ expect: { widgetEvent: { name: 'click' } } }] })).toEqual(['interaction.invalid_recipe'])
+		expect(codes({ assertions: [{ expect: { state: { key: 'a', value: 1 } } }] })).toEqual(['interaction.invalid_recipe'])
+		expect(codes({ assertions: [{ expect: { widgetEvent: { widgetId: 'a', name: 'click', count: -1 } } }] })).toEqual(['interaction.invalid_recipe'])
+		expect(codes({ assertions: [{ expect: { widgetEvent: { widgetId: 'a', name: 'click', count: 1.5 } } }] })).toEqual(['interaction.invalid_recipe'])
+		expect(codes({ assertions: [{ expect: { widgetEvent: { widgetId: 'a', name: 'click', count: 1001 } } }] })).toEqual(['interaction.invalid_recipe'])
+		expect(codes({ assertions: [{ expect: { widgetEvent: { widgetId: 'a', name: 'click', count: 1 } } }] })).toEqual([])
 		// A caller does not decide a result.
 		expect(codes({ assertions: [{ ...eventAssertion, result: 'pass' }] })).toEqual(['schema.unknown_field'])
 		// The whole recipe is bounded, so a record stays readable.
-		const wide = { expect: { state: { key: 'k', value: 'v'.repeat(8000) } } }
+		const wide = { expect: { state: { widgetId: 'pay-button', key: 'k', value: 'v'.repeat(8000) } } }
 		expect(codes({ steps: Array.from({ length: 50 }, () => ({ ...click, action: 'type', text: 'x'.repeat(1000) })), assertions: Array.from({ length: 50 }, () => wide) })).toContain('interaction.invalid_recipe')
 	})
 
@@ -147,7 +154,7 @@ describe('capture_interaction_evidence with a fake capture and replay', () => {
 		const { persistence } = await seededSession()
 		const seen: unknown[] = []
 		const service = fakeService(persistence, { results: ['pass', 'fail'], seen })
-		const assertions = [eventAssertion, { expect: { state: { key: 'value', value: 1 } } }]
+		const assertions = [eventAssertion, { expect: { state: { widgetId: 'pay-button', key: 'value', value: 1 } } }]
 		const outcome = await service.capture({ viewId: VIEW, renderContext, steps: [click as never], assertions: assertions as never })
 		expect(outcome.status, JSON.stringify(outcome)).toBe('captured')
 		if (outcome.status !== 'captured') return

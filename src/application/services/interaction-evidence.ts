@@ -82,8 +82,8 @@ export function createInteractionEvidenceService(
 					if (!known.has(step.target.widgetId)) diagnostics.push({ code: 'interaction.unknown_widget', path: `${jsonPointer('/steps', index)}/target/widgetId`, message: `The View has no Widget ${step.target.widgetId}.` })
 				})
 				command.assertions.forEach((assertion, index) => {
-					const widgetId = assertionWidgetId(assertion.expect, command.steps)
-					if (widgetId !== undefined && !known.has(widgetId)) diagnostics.push({ code: 'interaction.unknown_widget', path: `/assertions/${index}/expect`, message: `The View has no Widget ${widgetId}.` })
+					const widgetId = assertionWidgetId(assertion.expect)
+					if (!known.has(widgetId)) diagnostics.push({ code: 'interaction.unknown_widget', path: `/assertions/${index}/expect`, message: `The View has no Widget ${widgetId}.` })
 				})
 			}
 		}

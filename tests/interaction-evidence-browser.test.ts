@@ -1,4 +1,5 @@
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
+import { chromium } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { validateFormalEvidenceRecord } from '../src/domain/evidence/schema'
@@ -74,13 +75,13 @@ describe('replayable interaction Evidence over a real replay', () => {
 			renderContext,
 			steps: [{ action: 'click', target: target('pay-button') }],
 			assertions: [
-				{ expect: { widgetEvent: { name: 'click' } } },
+				{ expect: { widgetEvent: { widgetId: 'pay-button', name: 'click' } } },
 				// The Button emits click with no argument.
-				{ expect: { widgetEvent: { name: 'click', payload: [] } } },
-				{ expect: { widgetEvent: { name: 'click', payload: [1] } } },
+				{ expect: { widgetEvent: { widgetId: 'pay-button', name: 'click', payload: [] } } },
+				{ expect: { widgetEvent: { widgetId: 'pay-button', name: 'click', payload: [1] } } },
 				// An Event the Button does not declare is never observed.
 				{ expect: { widgetEvent: { widgetId: 'pay-button', name: 'press' } } },
-				{ expect: { state: { key: 'disabled', value: false } } },
+				{ expect: { state: { widgetId: 'pay-button', key: 'disabled', value: false } } },
 			],
 		})
 		expect(response.status, JSON.stringify(response.body)).toBe(200)
@@ -108,11 +109,11 @@ describe('replayable interaction Evidence over a real replay', () => {
 				renderContext,
 				steps: [{ action: 'click', target: target('pay-button') }],
 				assertions: [
-					{ expect: { widgetEvent: { name: 'click' } } },
-					{ expect: { widgetEvent: { name: 'click', payload: [] } } },
-					{ expect: { widgetEvent: { name: 'click', payload: [1] } } },
+					{ expect: { widgetEvent: { widgetId: 'pay-button', name: 'click' } } },
+					{ expect: { widgetEvent: { widgetId: 'pay-button', name: 'click', payload: [] } } },
+					{ expect: { widgetEvent: { widgetId: 'pay-button', name: 'click', payload: [1] } } },
 					{ expect: { widgetEvent: { widgetId: 'pay-button', name: 'press' } } },
-					{ expect: { state: { key: 'disabled', value: false } } },
+					{ expect: { state: { widgetId: 'pay-button', key: 'disabled', value: false } } },
 				],
 			},
 		})
@@ -125,10 +126,10 @@ describe('replayable interaction Evidence over a real replay', () => {
 			viewId,
 			renderContext,
 			steps: [{ action: 'hover', target: target('pay-button') }],
-			assertions: [{ expect: { widgetEvent: { name: 'click' } } }],
+			assertions: [{ expect: { widgetEvent: { widgetId: 'pay-button', name: 'click' } } }],
 		})
 		expect(response.status, JSON.stringify(response.body)).toBe(200)
-		expect(response.body.evidence!.data.assertions).toEqual([{ expect: { widgetEvent: { name: 'click' } }, result: 'fail' }])
+		expect(response.body.evidence!.data.assertions).toEqual([{ expect: { widgetEvent: { widgetId: 'pay-button', name: 'click' } }, result: 'fail' }])
 		expect(response.body.evidence!.data.captures).toEqual([response.body.captures![0]!.evidenceDigest])
 		expect(response.body.evidence!.coverage.complete).toBe(true)
 	}, 120_000)
@@ -146,7 +147,7 @@ describe('replayable interaction Evidence over a real replay', () => {
 			assertions: [
 				{ expect: { state: { widgetId: 'name-input', key: 'value', value: 'hell' } } },
 				{ expect: { state: { widgetId: 'name-input', key: 'value', value: 'hello' } } },
-				{ expect: { widgetEvent: { name: 'click' } } },
+				{ expect: { widgetEvent: { widgetId: 'pay-button', name: 'click' } } },
 			],
 		})
 		expect(response.status, JSON.stringify(response.body)).toBe(200)
@@ -161,7 +162,7 @@ describe('replayable interaction Evidence over a real replay', () => {
 			variant: 'blocked',
 			renderContext,
 			steps: [{ action: 'hover', target: target('pay-button', 'blocked') }],
-			assertions: [{ expect: { state: { key: 'disabled', value: true } } }],
+			assertions: [{ expect: { state: { widgetId: 'pay-button', key: 'disabled', value: true } } }],
 		})
 		expect(state.status, JSON.stringify(state.body)).toBe(200)
 		expect(state.body.evidence!.data.assertions.map(assertion => assertion.result)).toEqual(['pass'])
@@ -174,7 +175,7 @@ describe('replayable interaction Evidence over a real replay', () => {
 			variant: 'blocked',
 			renderContext,
 			steps: [{ action: 'click', target: target('pay-button', 'blocked') }],
-			assertions: [{ expect: { widgetEvent: { name: 'click' } } }],
+			assertions: [{ expect: { widgetEvent: { widgetId: 'pay-button', name: 'click' } } }],
 		})
 		expect(failed.status).toBe(422)
 		expect(failed.body).toMatchObject({ status: 'failed', viewId, diagnostics: [{ code: 'interaction.step_failed' }] })
@@ -184,10 +185,56 @@ describe('replayable interaction Evidence over a real replay', () => {
 	}, 120_000)
 
 	it('refuses an input the Clauses refuse over HTTP without launching a browser', async () => {
-		const response = await post({ viewId, renderContext: { ...renderContext, viewportId: 'tv' }, steps: [{ action: 'click', target: target('pay-button') }], assertions: [{ expect: { widgetEvent: { name: 'click' } } }] })
+		const response = await post({ viewId, renderContext: { ...renderContext, viewportId: 'tv' }, steps: [{ action: 'click', target: target('pay-button') }], assertions: [{ expect: { widgetEvent: { widgetId: 'pay-button', name: 'click' } } }] })
 		expect(response.status).toBe(422)
 		expect(response.body).toMatchObject({ status: 'invalid', diagnostics: [{ code: 'render_context.unknown_viewport' }] })
-		expect((await post({ viewId, renderContext, steps: [{ action: 'click', target: target('ghost') }], assertions: [{ expect: { widgetEvent: { name: 'click' } } }] })).body)
-			.toMatchObject({ status: 'invalid', diagnostics: [{ code: 'interaction.unknown_widget', path: '/steps/0/target/widgetId' }, { code: 'interaction.unknown_widget', path: '/assertions/0/expect' }] })
+		expect((await post({ viewId, renderContext, steps: [{ action: 'click', target: target('ghost') }], assertions: [{ expect: { widgetEvent: { widgetId: 'pay-button', name: 'click' } } }] })).body)
+			.toMatchObject({ status: 'invalid', diagnostics: [{ code: 'interaction.unknown_widget', path: '/steps/0/target/widgetId' }] })
+		// widgetId is required on every expectation: there is no default to the last step's Widget.
+		expect((await post({ viewId, renderContext, steps: [{ action: 'click', target: target('pay-button') }], assertions: [{ expect: { widgetEvent: { name: 'click' } } }] })).body)
+			.toMatchObject({ status: 'invalid', diagnostics: [{ code: 'interaction.invalid_recipe', path: '/assertions/0/expect/widgetEvent/widgetId' }] })
+	}, 60_000)
+
+	it('counts matching occurrences exactly with count, and passes on any matching occurrence without it', async () => {
+		const click = { widgetId: 'pay-button', name: 'click' }
+		const response = await post({
+			viewId,
+			renderContext,
+			steps: [{ action: 'click', target: target('pay-button') }, { action: 'click', target: target('pay-button') }],
+			assertions: [
+				{ expect: { widgetEvent: click } },
+				{ expect: { widgetEvent: { ...click, count: 2 } } },
+				{ expect: { widgetEvent: { ...click, count: 1 } } },
+				{ expect: { widgetEvent: { ...click, payload: [], count: 2 } } },
+				{ expect: { widgetEvent: { ...click, payload: [1], count: 0 } } },
+			],
+		})
+		expect(response.status, JSON.stringify(response.body)).toBe(200)
+		expect(response.body.evidence!.data.assertions.map(assertion => assertion.result)).toEqual(['pass', 'pass', 'fail', 'pass', 'pass'])
+	}, 120_000)
+
+	it('installs the capture harness hooks, including the interaction probe, only when harness is formal', async () => {
+		const browser = await chromium.launch({ headless: true })
+		try {
+			const context = await browser.newContext({ viewport: { width: 1280, height: 800 } })
+			await context.addCookies([{ ...server.cookie, url: server.origin, httpOnly: true, sameSite: 'Strict' }])
+			const hookNames = async (harness: boolean) => {
+				const page = await context.newPage()
+				const url = new URL(`${server.origin}/preview`)
+				for (const [key, value] of Object.entries({ viewId, locale: 'en-US', viewportId: 'desktop', viewportWidth: '1280', viewportHeight: '800', themeId: 'light' })) url.searchParams.set(key, value)
+				if (harness) url.searchParams.set('harness', 'formal')
+				await page.goto(url.href, { waitUntil: 'load' })
+				await page.waitForSelector('[data-preview-status]:not([data-preview-status="loading"])', { timeout: 15_000 })
+				const names = await page.evaluate(() => {
+					const hooks = (window as unknown as Record<string, Record<string, unknown> | undefined>).__UIUX_CAPTURE_HARNESS__
+					return hooks ? Object.keys(hooks).sort() : null
+				})
+				await page.close()
+				return names
+			}
+			expect(await hookNames(false)).toBeNull()
+			expect(await hookNames(true)).toEqual(['applyVariantStateLive', 'evaluateTranslations', 'readWidgetState', 'watchWidgetEvent', 'widgetEventOccurrences'])
+		}
+		finally { await browser.close() }
 	}, 60_000)
 })

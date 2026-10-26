@@ -2783,6 +2783,7 @@
     "interaction": {
       "invalid_recipe": "步驟或斷言的格式不符，或超出上限。",
       "invalid_render_context": "請為互動 Evidence 選擇 Locale、檢視區與主題。",
+      "preview_left": "重播離開了預覽文件，因此未記錄。",
       "recipe_mismatch": "有步驟沒有指向正在擷取的 View 與 Variant。",
       "replay_failed": "互動重播未能完成。",
       "step_failed": "有步驟無法在預覽中執行。",

@@ -2783,6 +2783,7 @@
     "interaction": {
       "invalid_recipe": "The steps or assertions are not in the expected shape or exceed a limit.",
       "invalid_render_context": "Choose a Locale, viewport and theme for the interaction Evidence.",
+      "preview_left": "The replay left the Preview document, so it was not recorded.",
       "recipe_mismatch": "A step does not target the View and Variant being captured.",
       "replay_failed": "The interaction replay did not finish.",
       "step_failed": "A step could not be performed in the Preview.",
