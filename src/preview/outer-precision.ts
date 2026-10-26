@@ -76,7 +76,11 @@ export function evaluateRegionPrecision(
 	if (finalMaxError <= finalTolerance) return { status: 'eligible', finalMaxError }
 	if (amplification.value === 0) return { status: 'eligible', finalMaxError: 0 }
 	const rawTarget = finalTolerance / amplification.value
-	const targetInnerMaxError = nextDown(rawTarget)
+	let targetInnerMaxError = nextDown(rawTarget)
+	// A response whose bound equals the requested target must itself pass this check, which inflates
+	// the product by more than one step: step the target down until it does.
+	for (let step = 0; step < 64 && targetInnerMaxError > 0 && conservativeProduct(amplification.value, targetInnerMaxError) > finalTolerance; step++)
+		targetInnerMaxError = nextDown(targetInnerMaxError)
 	if (!(targetInnerMaxError > 0) || !Number.isFinite(targetInnerMaxError))
 		return { status: 'precision-unavailable', reason: 'invalid-mapping' }
 	return { status: 'refinement-required', finalMaxError, targetInnerMaxError }

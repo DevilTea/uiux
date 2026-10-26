@@ -419,8 +419,16 @@ function streamContext(request: GeometryAcquireRequest): StreamContext {
 
 /** The context of a contour response or work failure: the stream's, without its identity, at one revision. */
 function workContext(stream: Stream, geometryRevision: number): ProtocolContext & Readonly<{ geometryRevision: number }> {
-	const { navigationRequestId: _stream, ...context } = stream.context
-	return { ...context, geometryRevision }
+	const { previewSessionId, runtimeGenerationId, viewId, variantId, runtimeContextVersion, widgetId } = stream.context
+	return {
+		previewSessionId,
+		runtimeGenerationId,
+		viewId,
+		...(variantId !== undefined ? { variantId } : {}),
+		...(runtimeContextVersion !== undefined ? { runtimeContextVersion } : {}),
+		widgetId,
+		geometryRevision,
+	}
 }
 
 const CORRESPONDENCE_EPSILON = 1e-6

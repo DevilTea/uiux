@@ -87,6 +87,15 @@ describe('Preview outer mapping precision', () => {
 		expect(result.targetInnerMaxError).toBeGreaterThan(0.249999999999)
 	})
 
+	it('asks for a target that a response at exactly that bound passes, whatever the scale', () => {
+		for (const scale of [1.1, 1.5, 2, 3, 7.3, 16, 123.456]) {
+			const mapping = affine(scale, 0, 0, scale)
+			const required = evaluateRegionPrecision(0.5, mapping)
+			if (required.status !== 'refinement-required') throw new Error('unreachable')
+			expect(evaluateRegionPrecision(required.targetInnerMaxError, mapping).status).toBe('eligible')
+		}
+	})
+
 	it('returns empty for an empty visible-region set without requesting refinement', () => {
 		expect(evaluateSnapshotPrecision([], affine(100, 0, 0, 100))).toEqual({ status: 'empty' })
 	})
