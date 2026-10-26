@@ -188,8 +188,27 @@
     "sources": {
       "title": "來源",
       "description": "每個來源各有自己的狀態。尚未執行、正在執行或未完成的來源，絕不代表沒有問題。",
-      "notGathered": "預覽尚未向檢查回報。",
+      "previewNotOpen": "目前沒有開啟預覽，所以尚未檢查。開啟 View 的預覽即可收集。",
+      "previewStale": "來自最後一次預覽，該預覽已關閉，內容可能已過時：{view} · {variant} · {locale} · {time}。",
+      "previewScope": "來自 {view} 的預覽，只含它已計算過的屬性。",
       "catalogElsewhere": "有 {n} 個型錄問題不在 View 使用的項目中，請見 Product Kit 頁面。 | 有 {n} 個型錄問題不在 View 使用的項目中，請見 Product Kit 頁面。"
+    },
+    "preview": {
+      "property": "屬性 {name}",
+      "warning": {
+        "missingTranslation": "「{key}」在 {locale} 沒有翻譯，改顯示 {fallback} 的文字。",
+        "unresolvedKey": "「{key}」不在任何 Locale 檔案中，直接顯示翻譯鍵。",
+        "missingParameter": "「{key}」缺少參數 {parameter}。"
+      },
+      "runtime": {
+        "view_load_failed": "無法載入 View",
+        "adapter_invalid": "無法使用 Adapter",
+        "adapter_unavailable": "View 使用了 Adapter 未提供的 Widget",
+        "preview_blocked": "預覽已被擋下",
+        "property_failed": "有屬性計算失敗",
+        "report_truncated": "回報被截短",
+        "other": "預覽回報了錯誤"
+      }
     },
     "catalog": {
       "entry": "{type}：{text}",

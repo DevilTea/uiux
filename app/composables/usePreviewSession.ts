@@ -4,12 +4,15 @@ import { describeFetchError } from '../utils/fetch-error'
 import {
 	envelopeGenerationId,
 	isCapabilityDeclaration,
+	isChecksReport,
 	isFailureReport,
 	WorkbenchPreviewProtocolBridge,
 	type BridgeReceiveResult,
 } from '../../src/preview/protocol/bridge'
 import { deriveWorkbenchFailure, recorrelatePreviewFailure, retryStallGraceMs } from '../../src/preview/failure-diagnostic'
 import { failureReportDiagnostic } from '../../src/preview/protocol/failure-report'
+import { CHECKS_REPORTS_FEATURE } from '../../src/preview/protocol/checks-report'
+import { PreviewChecksReports, type LivePreviewChecks } from '../../src/preview/checks-reports'
 import { createPreviewSessionId } from '../../src/preview/protocol/generation-id'
 import { workbenchPreviewSessions } from '../../src/preview/protocol/session'
 import { PreviewNavigationState, type PreviewNavigationTarget } from '../../src/preview/navigation-state'
@@ -37,6 +40,7 @@ import {
 	type PreviewTargetingPurpose,
 } from '../../src/preview/protocol/transport'
 import type { TargetingContext, TargetingRuntimeMessage } from '../../src/preview/protocol/targeting'
+import type { ChecksReportMessage } from '../../src/preview/protocol/checks-report'
 import { WIDGET_EVENTS_FEATURE } from '../../src/preview/protocol/widget-events'
 import { WidgetEventArming } from '../../src/preview/widget-event-arming'
 import type { Point } from '../../src/preview/protocol/schema'
@@ -83,6 +87,21 @@ export type HoverCandidate = Readonly<{
 	/** The candidate Widget's latest accepted report; absent until its stream reports. */
 	geometry?: GeometryReport
 }>
+
+/**
+ * What Checks can say about the live Preview (issue #347; Rules 01a115cd-bb96-7131-99d9-a3882829590c
+ * and 01a115cd-bc5e-710e-bbe2-a3d5f51469fb). `not_checked`: no Preview generation of this session
+ * reports to Checks, so nothing is known, which is never zero findings. `checking`: a Preview that
+ * reports is open and has not reported for its current View, Variant and Locale yet. `completed`: the
+ * latest report of the open Preview is held. `stale`: the Preview document is gone (the person left the
+ * View) and the last report is kept, with when and under which Locale it was made; it may be out of
+ * date and is never shown as completed.
+ */
+export type LivePreviewChecksState = Readonly<
+	| { state: 'not_checked' | 'checking'; report?: undefined }
+	| { state: 'completed'; report: LivePreviewChecks }
+	| { state: 'stale'; report: LivePreviewChecks; receivedAt: Date; locale?: string }
+>
 
 /** The measured canvas mapping, published by the canvas for pins and other overlay consumers. */
 export type CanvasMappingState = Readonly<{
@@ -223,6 +242,27 @@ export function createPreviewSession(state: WorkbenchState) {
 		context: () => targetingContext(),
 		send: message => workbenchBridge?.sendWidgetEventArm(message).status === 'sent',
 		mintArmId: () => `arm-${previewSessionId.value}-${++armSequence}-${Date.now()}`,
+	})
+	/**
+	 * The accepted `checks.report` of the current generation (issue #347). It is cleared by every
+	 * change of View, Variant or Locale and by every generation boundary, so nothing of an earlier
+	 * Preview, Variant or Locale ever reads as current.
+	 */
+	const checksReports = new PreviewChecksReports()
+	/** Bumps whenever `checksReports` changes, so `liveChecks` recomputes. */
+	const checksVersion = ref(0)
+	/** When the held report arrived and the Locale the Workbench rendered then. */
+	let checksReceived: { receivedAt: Date; locale?: string } | undefined
+	const liveChecks = computed<LivePreviewChecksState>(() => {
+		void checksVersion.value
+		const report = checksReports.current()
+		if (report) {
+			// Without its Preview document the report cannot follow later changes: it is the last one, not the current one.
+			if (!previewIframe.value) return { state: 'stale', report, receivedAt: checksReceived?.receivedAt ?? new Date(0), ...(checksReceived?.locale ? { locale: checksReceived.locale } : {}) }
+			return { state: 'completed', report }
+		}
+		const reporting = handshakePhase.value === 'open' && runtimeFeatures.value.includes(CHECKS_REPORTS_FEATURE) && !!previewIframe.value && !!state.selectedViewId.value
+		return { state: reporting ? 'checking' : 'not_checked' }
 	})
 	/** Whether the open generation declared `widget.events`; undefined until its handshake opens. */
 	const widgetEventsSupported = computed<boolean | undefined>(() =>
@@ -734,6 +774,9 @@ export function createPreviewSession(state: WorkbenchState) {
 		if (previousGeneration) targeting.onGenerationTeardown(previousGeneration)
 		hoverWidgetId.value = undefined
 		hoverPurpose.value = undefined
+		checksReports.reset()
+		checksReceived = undefined
+		checksVersion.value++
 		navigationCoordinator?.onRuntimeGenerationBoundary()
 		resetSelectionGeometry()
 		// Generation boundary: every stream is void until the new generation's capability ACK.
@@ -906,6 +949,29 @@ export function createPreviewSession(state: WorkbenchState) {
 	}
 
 	/**
+	 * A `checks.report` that passed the bridge's session, generation, ACK and feature gates. It
+	 * replaces the held report when it is about the View and Variant the Workbench renders and is
+	 * newer than what was accepted (Clause 01a17619-ab3f-797d-ae93-4038a48ee31f).
+	 */
+	function receiveChecksReport(message: ChecksReportMessage): void {
+		const viewId = state.selectedViewId.value
+		const generation = runtimeGenerationId.value
+		if (!viewId || !generation) return
+		const variantId = currentVariantId()
+		const accepted = checksReports.accept(message, {
+			runtimeGenerationId: generation,
+			viewId,
+			...(variantId ? { variantId } : {}),
+			...(state.contextOptions.value.locales.selected ? { locale: state.contextOptions.value.locales.selected } : {}),
+		})
+		if (accepted.status === 'accepted') {
+			const locale = state.contextOptions.value.locales.selected
+			checksReceived = { receivedAt: new Date(), ...(locale ? { locale } : {}) }
+			checksVersion.value++
+		}
+	}
+
+	/**
 	 * Targeting traffic that passed the bridge's session, generation and ACK gates. Workbench then
 	 * gates on the mounted View and Variant, then on the exact active `targetingInteractionId`
 	 * (item 2.3); late traffic of a superseded interaction is stale and changes nothing.
@@ -1012,6 +1078,8 @@ export function createPreviewSession(state: WorkbenchState) {
 		// So is a runtime-reported failure: it ends a generation, which only the requested document's
 		// runtime may do (issue #312, on top of the generation check of the bridge).
 		if (isFailureReport(input) && !requestedDocumentIsCommitted()) return
+		// A Checks report of a replaced document is no report of the Preview the Workbench shows.
+		if (isChecksReport(input) && !requestedDocumentIsCommitted()) return
 		const phase = handshakePhase.value
 		const admittedGenerationId = runtimeGenerationId.value
 		const result = workbenchBridge.receive(input)
@@ -1024,6 +1092,7 @@ export function createPreviewSession(state: WorkbenchState) {
 			if (message.type === 'geometry.acquire.response') receiveGeometryReport(message)
 			else if (message.type === 'targeting.hover' || message.type === 'targeting.select' || message.type === 'targeting.escape') receiveTargeting(message)
 			else if (message.type === 'widget.event.occurrence') widgetEvents.receive(message)
+			else if (message.type === 'checks.report') receiveChecksReport(message)
 			else if (message.type === 'contour.full.response' || message.type === 'contour.partial.response') refinement.receiveResponse(message)
 			// A work-scoped failure report ends one contour work as a non-recoverable refinement failure and
 			// leaves its stream and generation alone (Clause 01a11a59-def9-797a-8d08-5e4b02ecd900).
@@ -1129,6 +1198,18 @@ export function createPreviewSession(state: WorkbenchState) {
 		if (key && key !== iframeSourceContext.value?.viewId) replaceGeneration()
 	})
 
+	// A change of View, Variant or Locale ends the live warnings and errors of the previous context
+	// (Rule 01a115cd-b9fc-71d9-8bf9-91d65acd1096): the next report of the new context replaces them.
+	watch(
+		() => [state.selectedViewId.value, state.contextOptions.value.variants.selected, state.contextOptions.value.locales.selected] as const,
+		(next, previous) => {
+			if (previous && next.every((value, index) => value === previous[index])) return
+			checksReports.clear()
+			checksReceived = undefined
+			checksVersion.value++
+		},
+	)
+
 	// A new selected Widget, a Variant change (new runtime context) or a content-viewport size change
 	// (Part 3: inner geometry is invalidated) reopens the selection request with a fresh identity.
 	// A Variant change ends every stream and reopens it under the new context; a content-box size
@@ -1194,6 +1275,7 @@ export function createPreviewSession(state: WorkbenchState) {
 		replaceGeneration,
 		widgetEvents,
 		widgetEventsSupported,
+		liveChecks,
 		mount,
 		unmount,
 	}

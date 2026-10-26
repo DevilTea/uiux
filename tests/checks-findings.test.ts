@@ -7,6 +7,8 @@ import {
 	compareFindings,
 	filterFindings,
 	groupFindings,
+	previewTranslationFindings,
+	runtimeErrorFindings,
 	sectionFindings,
 	SOURCE_SEVERITY,
 	severityOf,
@@ -15,8 +17,10 @@ import {
 	variantOfPath,
 	type Finding,
 	type FindingResource,
+	type PreviewFindingText,
 	type ViewUsage,
 } from '../app/utils/checks'
+import type { LivePreviewChecks } from '../src/preview/checks-reports'
 import { localeCellLocation, parseLocaleCell } from '../app/utils/workbench-routes'
 
 /**
@@ -258,8 +262,8 @@ describe('Catalog problems of used entries (Rules 01a115cd-be51-740b-8472-c08dc7
 })
 
 describe('severity derivation (issue #349, owner ruling 3 of Discussion #241)', () => {
-	it('lists read diagnostics and Catalog problems as errors, reminders and Product Kit findings as warnings', () => {
-		expect(SOURCE_SEVERITY).toEqual({ validation: 'error', catalog: 'error', translation: 'warning', 'product-kit': 'warning' })
+	it('lists read diagnostics, Catalog problems and Runtime errors as errors, reminders, Preview translation warnings and Product Kit findings as warnings', () => {
+		expect(SOURCE_SEVERITY).toEqual({ validation: 'error', catalog: 'error', translation: 'warning', 'product-kit': 'warning', 'preview-translation': 'warning', runtime: 'error' })
 		expect(severityOf('validation')).toBe('error')
 	})
 
@@ -295,5 +299,65 @@ describe('Variant attribution of View diagnostics (issue #349)', () => {
 	it('lets the Variant filter match an attributed finding', () => {
 		const list = [finding({ code: 'view.bad', resource: checkout, variantName: 'error' }), finding({ code: 'view.bad', resource: checkout })]
 		expect(filterFindings(list, { variant: 'error' })).toHaveLength(1)
+	})
+})
+
+describe('the findings of the live Preview (issue #347)', () => {
+	const text: PreviewFindingText = {
+		warning: warning => `warning:${warning.code}:${warning.key}`,
+		runtimeReason: reason => `reason:${reason}`,
+	}
+	const input = { resource: checkout, widgetTypes: new Map([['b1', 'Button'], ['b2', 'Button']]), text }
+	const missing = (key: string) => ({ code: 'missing-translation', key, requestedLocale: 'ja-JP', fallbackLocale: 'en-US' }) as const
+	const report = (overrides: Partial<LivePreviewChecks> = {}): LivePreviewChecks => ({
+		runtimeGenerationId: 'g', viewId: 'view-checkout', runtimeContextVersion: 1, sequence: 1, translationWarnings: [], runtimeErrors: [], ...overrides,
+	})
+
+	it('attributes a warning to its View, Variant, Widget and result Property, as a warning of its own source', () => {
+		const [item] = previewTranslationFindings(report({ variantId: 'Quiet', translationWarnings: [{ widgetId: 'b1', resultProperty: 'labelResult', warning: missing('cta') }] }), input)
+		expect(item).toMatchObject({
+			code: 'i18n.missing_translation', source: 'preview-translation', severity: 'warning', checkState: 'completed',
+			resource: checkout, variantName: 'Quiet', widgetId: 'b1', widgetType: 'Button', property: 'labelResult',
+		})
+		expect(severityOf('preview-translation')).toBe('warning')
+	})
+
+	it('groups by code, then key and missing parameter, each group listing its Widget and Property occurrences in order', () => {
+		const list = previewTranslationFindings(report({ translationWarnings: [
+			{ widgetId: 'b2', resultProperty: 'labelResult', warning: missing('cta') },
+			{ widgetId: 'b1', resultProperty: 'titleResult', warning: missing('cta') },
+			{ widgetId: 'b1', resultProperty: 'labelResult', warning: missing('cta') },
+			{ widgetId: 'b1', resultProperty: 'labelResult', warning: missing('other') },
+			{ widgetId: 'b1', resultProperty: 'labelResult', warning: { code: 'missing-parameter', key: 'hi', requestedLocale: 'ja-JP', parameter: 'name' } },
+			{ widgetId: 'b2', resultProperty: 'labelResult', warning: { code: 'missing-parameter', key: 'hi', requestedLocale: 'ja-JP', parameter: 'count' } },
+		] }), input)
+		const groups = groupFindings(list)
+		expect(groups.map(group => [group.code, group.count]).sort()).toEqual([['i18n.missing_parameter', 1], ['i18n.missing_parameter', 1], ['i18n.missing_translation', 1], ['i18n.missing_translation', 3]])
+		const cta = groups.find(group => group.code === 'i18n.missing_translation' && group.count === 3)!
+		expect(cta.resources[0]!.findings.map(item => [item.widgetId, item.property])).toEqual([['b1', 'labelResult'], ['b1', 'titleResult'], ['b2', 'labelResult']])
+		// A missing parameter is one problem per parameter.
+		expect(groups.filter(group => group.code === 'i18n.missing_parameter')).toHaveLength(2)
+		// The same problem in another Widget or Property stays a separate occurrence of one group, never merged away.
+		expect(list.filter(item => item.problem === JSON.stringify(['cta', null]))).toHaveLength(3)
+	})
+
+	it('lists a load error without a Widget and a failed Property with one, as errors that group by reason', () => {
+		const list = runtimeErrorFindings(report({ runtimeErrors: [
+			{ reason: 'runtime.adapter_invalid', detail: 'adapter.bundle_invalid /adapters: No mount.' },
+			{ reason: 'runtime.property_failed', widgetId: 'b1', detail: 'label: failed' },
+		] }), input)
+		expect(list.map(item => [item.source, item.severity, item.code, item.widgetId])).toEqual([
+			['runtime', 'error', 'runtime.adapter_invalid', undefined], ['runtime', 'error', 'runtime.property_failed', 'b1'],
+		])
+		expect(list[1]).toMatchObject({ widgetType: 'Button', message: 'label: failed' })
+		expect(groupFindings(list).map(group => group.title)).toEqual(['reason:runtime.adapter_invalid', 'reason:runtime.property_failed'])
+	})
+
+	it('lists nothing for an empty report, and the Variant filter reaches its findings', () => {
+		expect(previewTranslationFindings(report(), input)).toEqual([])
+		expect(runtimeErrorFindings(report(), input)).toEqual([])
+		const list = previewTranslationFindings(report({ variantId: 'Quiet', translationWarnings: [{ widgetId: 'b1', resultProperty: 'labelResult', warning: missing('cta') }] }), input)
+		expect(filterFindings(list, { variant: 'Quiet' })).toHaveLength(1)
+		expect(filterFindings(list, { source: 'runtime' })).toHaveLength(0)
 	})
 })

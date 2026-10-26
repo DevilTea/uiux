@@ -10,7 +10,6 @@ import { resolveFrameContext } from '../../src/preview/version-frame-context'
 import type { WorkspaceManifest } from '../../src/domain/workspace/schema'
 import { RuntimePreviewProtocolBridge } from '../../src/preview/protocol/bridge'
 import { createRuntimeGenerationId } from '../../src/preview/protocol/generation-id'
-import { MULTI_TARGET_GEOMETRY_FEATURE } from '../../src/preview/protocol/schema'
 import { RuntimeGeometryProducer } from '../../src/preview/geometry-producer'
 import { createDomGeometryMeasurer } from '../../src/preview/dom-geometry'
 import { attachGeometrySignals, type GeometrySignalSubscription } from '../../src/preview/geometry-signals'
@@ -23,8 +22,10 @@ import {
 	type PreviewTargetingPurpose,
 } from '../../src/preview/protocol/transport'
 import type { TargetingContext, TargetingRuntimeMessage } from '../../src/preview/protocol/targeting'
-import { FAILURE_REPORTS_FEATURE } from '../../src/preview/protocol/failure-report'
-import { WIDGET_EVENTS_FEATURE, type WidgetEventArmMessage } from '../../src/preview/protocol/widget-events'
+import { declaredRuntimeFeatures } from '../../src/preview/declared-features'
+import type { ChecksObservation } from '../../src/preview/checks-observer'
+import { buildChecksReportBody, ChecksReportPublisher, MaxWaitDebouncer } from '../../src/preview/checks-report-builder'
+import type { WidgetEventArmMessage } from '../../src/preview/protocol/widget-events'
 import type { WidgetEventReport } from '../../src/preview/widget-event-observer'
 import type {
 	PreviewMaterializationResult,
@@ -272,15 +273,79 @@ function reportWidgetEvent(report: WidgetEventReport) {
 	})
 }
 
-/**
- * The capability features this runtime generation declares. `widget.events` and `failure.reports`
- * belong to a Workbench Preview (decision 10; issue #312): a formal capture has no Workbench parent
- * to arm it or to read a report, and a version frame is read-only with no recovery of its own.
- */
 function declaredFeatures(): string[] {
-	const features = ['geometry', MULTI_TARGET_GEOMETRY_FEATURE]
-	if (!harnessMode.value && !versionId) features.push(WIDGET_EVENTS_FEATURE, FAILURE_REPORTS_FEATURE)
-	return features
+	return declaredRuntimeFeatures({ harness: harnessMode.value, version: !!versionId })
+}
+
+// ---- Checks reports (issue #347) --------------------------------------------------------------
+//
+// The Preview reports what Checks can show about it: the translation warnings of the Properties its
+// Runtime evaluated (passively: observing evaluates nothing and invokes no `t`) and its load and
+// Runtime errors. A report is the whole of it, replaced by the next one (Clause
+// 01a17619-ab3f-797d-ae93-4038a48ee31f), sent shortly after the last change and only once the
+// document has settled, so a Preview that has not finished loading never reads as clean.
+
+const checksReportsEnabled = !harnessMode.value && !versionId
+/** What the mounted Runtime evaluated; none while no Runtime is mounted or until it has been observed. */
+let checksObservation: ChecksObservation | undefined
+/** The runtime context the reports are about; raised on every View, Variant, Locale or Runtime instance change. */
+let checksContextVersion = 0
+let lastObservationContext: number | undefined
+/** `evaluateRuntime` calls in flight, and Locale reads pending: the document is not settled meanwhile. */
+let evaluationsInFlight = 0
+let localeReadsPending = 0
+const CHECKS_REPORT_DELAY_MS = 100
+/** A Preview that keeps recomputing still reports at least this often. */
+const CHECKS_REPORT_MAX_WAIT_MS = 1000
+let checksPublisher: ChecksReportPublisher | undefined
+
+function bumpChecksContext(): void {
+	checksContextVersion++
+	checksObservation = undefined
+	scheduleChecksReport()
+}
+
+function handleChecksObservation(observation: ChecksObservation): void {
+	if (observation.context !== lastObservationContext) {
+		lastObservationContext = observation.context
+		checksContextVersion++
+	}
+	checksObservation = observation
+	scheduleChecksReport()
+}
+
+/** Whether the document has finished what it is showing, so that a report of it is complete. */
+function checksSettled(): boolean {
+	if (loading.value || evaluationsInFlight > 0 || localeReadsPending > 0) return false
+	if (error.value || themeDiagnostic.value) return true
+	const status = materializationResult.value?.status
+	if (!status) return false
+	return status !== 'ready' || !!checksObservation
+}
+
+function scheduleChecksReport(): void {
+	if (checksReportsEnabled) checksDebouncer.schedule()
+}
+
+const checksDebouncer = new MaxWaitDebouncer(() => flushChecksReport(), CHECKS_REPORT_DELAY_MS, CHECKS_REPORT_MAX_WAIT_MS)
+
+function flushChecksReport(): void {
+	const bridge = runtimeBridge
+	if (!bridge || handshakeStatus.value !== 'open' || !viewId.value || !checksSettled()) return
+	checksPublisher ??= new ChecksReportPublisher(message => bridge.sendChecksReport(message).status === 'sent' ? 'sent' : 'unsent')
+	const status = materializationResult.value
+	const body = buildChecksReportBody({
+		...(error.value ? { loadError: error.value } : {}),
+		...(status ? { materialization: status } : {}),
+		...(checksObservation ? { observation: checksObservation } : {}),
+	})
+	checksPublisher.publish({
+		previewSessionId: previewSessionId.value,
+		runtimeGenerationId,
+		viewId: viewId.value,
+		...(variantName.value ? { variantId: variantName.value } : {}),
+		runtimeContextVersion: checksContextVersion,
+	}, body)
 }
 
 function initBridge() {
@@ -418,6 +483,7 @@ function disposeCurrentRuntime() {
 		activeBridge.dispose()
 		activeBridge = undefined
 	}
+	checksObservation = undefined
 }
 
 /**
@@ -433,6 +499,17 @@ function showThemeDiagnostic() {
 }
 
 async function evaluateRuntime() {
+	evaluationsInFlight++
+	try {
+		await evaluateRuntimeOnce()
+	}
+	finally {
+		evaluationsInFlight--
+		scheduleChecksReport()
+	}
+}
+
+async function evaluateRuntimeOnce() {
 	if (!viewData.value?.resource || !viewId.value) return
 	const evaluation = ++runtimeEvaluation
 	const superseded = () => evaluation !== runtimeEvaluation
@@ -546,9 +623,13 @@ async function evaluateRuntime() {
 			themes: adapterStatus.themes ?? {},
 			onStatusChange(status: PreviewMaterializationResult) {
 				materializationResult.value = status
+				// A Runtime that is no longer mounted has nothing evaluated to report.
+				if (status.status !== 'ready') checksObservation = undefined
 			},
 			onWidgetEvent: reportWidgetEvent,
+			...(checksReportsEnabled ? { onChecksObservation: handleChecksObservation } : {}),
 		})
+		bumpChecksContext()
 		// An arm that arrived before the bundle mounted applies now, unless it already reported.
 		if (widgetEventArm && !widgetEventArm.spent) activeBridge.armWidgetEvents?.(widgetEventArm.armId, widgetEventArm.triggers)
 	}
@@ -662,6 +743,9 @@ function onWindowMessage(event: MessageEvent) {
 		else if (themeDiagnostic.value) showThemeDiagnostic()
 		else if (activeBridge) {
 			if (localeChanged && payload.locale) {
+				// The Runtime renders the new Locale from the resources it holds until this one arrives: what
+				// it would report meanwhile is not the new Locale's, so the report waits for the read.
+				localeReadsPending++
 				void uiux.readResource<{ resource?: I18nResource }>('locale', payload.locale)
 					.then(res => {
 						if (res?.resource) {
@@ -670,6 +754,10 @@ function onWindowMessage(event: MessageEvent) {
 						}
 					})
 					.catch(() => undefined)
+					.finally(() => {
+						localeReadsPending--
+						scheduleChecksReport()
+					})
 			}
 			activeBridge.updateContext(activeContext.value)
 		}
@@ -684,6 +772,13 @@ watch([viewId, variantName], () => {
 	// A View or Variant change inside the generation clears the arm (the mounted runtime clears its own).
 	widgetEventArm = undefined
 })
+
+// A View, Variant or Locale change starts a new runtime context for Checks: what was observed so far
+// is of the previous one and never reports for the new one (Rule 01a115cd-b9fc-71d9-8bf9-91d65acd1096).
+// Synchronous, so it runs before the change reaches the mounted Runtime.
+watch([viewId, variantName, locale], bumpChecksContext, { flush: 'sync' })
+// Anything the document shows changes what a report says; the debounce coalesces the changes.
+watch([loading, error, materializationResult, handshakeStatus, themeDiagnostic], scheduleChecksReport)
 
 watch(() => route.query, (nextQuery) => {
 	if (nextQuery.viewId && nextQuery.viewId !== viewId.value) {
@@ -747,6 +842,7 @@ onUnmounted(() => {
 	geometrySignals?.dispose()
 	geometryProducer?.dispose()
 	stopBlockedRecheck()
+	checksDebouncer.cancel()
 	disposeCurrentRuntime()
 })
 </script>

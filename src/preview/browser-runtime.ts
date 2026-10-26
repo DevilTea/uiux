@@ -29,6 +29,7 @@ import {
 } from '../adapters/product-integration'
 import { collectWidgetTypesFromIr } from './preview-runtime'
 import { FALLBACK_LOCALE } from './render-context-options'
+import { RuntimeChecksObserver, type ChecksObservation } from './checks-observer'
 import { evaluateTranslationProperties, type TranslationEvaluation } from './translation-evaluation'
 import { describeWidgetCatalogEntry, type DescribedWidgetCatalog } from './widget-catalog'
 import { WidgetEventObserver, type WidgetEventReport } from './widget-event-observer'
@@ -109,6 +110,12 @@ export interface PreviewRuntimeMountOptions {
 	defaultLocale?: string
 	/** Receives at most one report per Widget Event arm; never any Event argument. */
 	onWidgetEvent?: (report: WidgetEventReport) => void
+	/**
+	 * Receives what the mounted Runtime evaluated, for Checks (issue #347): the warnings of the
+	 * translation-result Properties it evaluated and the Properties whose evaluation failed. It is
+	 * passive: no Property is evaluated for it and `t` is never invoked. Without it nothing is observed.
+	 */
+	onChecksObservation?: (observation: ChecksObservation) => void
 	/**
 	 * The Product Kit stylesheet's URL. The construction links it first, at the end of the document's
 	 * head, and renders only once it has loaded; a load error fails the construction (Rules
@@ -596,12 +603,19 @@ export function createStandalonePreviewMount(input: Readonly<{
 		// Widget Event observation (decision 4): it starts once a Runtime has mounted, so creation and
 		// mount-time emissions never count, and it follows every Runtime instance swap.
 		const eventObserver = new WidgetEventObserver(report => options.onWidgetEvent?.(report))
+		// Checks observation (issue #347): the same lifecycle, over each Runtime instance once it has mounted.
+		const checksObserver = options.onChecksObservation
+			? new RuntimeChecksObserver(catalogByType, observation => options.onChecksObservation?.(observation))
+			: undefined
 
 		/** Shows a new Runtime instance and observes it once it has mounted (after the re-render). */
 		function showRuntime(runtime: WidgetSystemRuntime): void {
 			activeRuntime.value = runtime
 			void nextTick().then(() => {
-				if (!disposed && phase === 'mounted' && activeRuntime.value === runtime) eventObserver.attach(runtime)
+				if (!disposed && phase === 'mounted' && activeRuntime.value === runtime) {
+					eventObserver.attach(runtime)
+					checksObserver?.attach(runtime)
+				}
 			})
 		}
 
@@ -688,6 +702,7 @@ export function createStandalonePreviewMount(input: Readonly<{
 			stylesheetLink?.remove()
 			rootAttributes.restore()
 			eventObserver.dispose()
+			checksObserver?.dispose()
 			activeController.dispose()
 			for (const cleanup of providerCleanups.splice(0)) {
 				try {
@@ -715,6 +730,7 @@ export function createStandalonePreviewMount(input: Readonly<{
 				supportedTypes: Object.freeze([...supportedTypes]),
 			})
 			eventObserver.attach(activeRuntime.value)
+			checksObserver?.attach(activeRuntime.value)
 		}
 
 		// The Product Kit stylesheet is linked first, after UIUX's own stylesheets in the head, and the
@@ -765,6 +781,7 @@ export function createStandalonePreviewMount(input: Readonly<{
 				}
 
 				eventObserver.detach()
+				checksObserver?.detach()
 				activeController.dispose()
 				const nextController = LiveViewRuntimeController.create({
 					view: currentView,
@@ -799,6 +816,8 @@ export function createStandalonePreviewMount(input: Readonly<{
 				}
 				if (nextContext.locale !== activeController.context.locale) {
 					currentTranslationRuntime = getTranslationRuntime(nextContext.locale)
+					// Nothing evaluated for the previous Locale counts any more (Rule 01a115cd-b9fc-71d9-8bf9-91d65acd1096).
+					checksObserver?.reset()
 					activeController.updateLocale(nextContext.locale)
 				}
 				if (nextContext.themeId !== activeController.context.themeId) {
@@ -815,12 +834,16 @@ export function createStandalonePreviewMount(input: Readonly<{
 					// A Variant change clears the arm; the Workbench arms the new context itself.
 					eventObserver.clearArm()
 					eventObserver.detach()
+					checksObserver?.detach()
 					const switchResult = activeController.switchVariant(nextContext.variantName)
 					if (switchResult.state === 'ready') {
 						showRuntime(activeController.runtime)
 					}
 					else {
-						if (phase === 'mounted') eventObserver.attach(activeController.runtime)
+						if (phase === 'mounted') {
+							eventObserver.attach(activeController.runtime)
+							checksObserver?.attach(activeController.runtime)
+						}
 						reportStatus({
 							status: 'invalid',
 							diagnostics: switchResult.diagnostics,
@@ -839,6 +862,7 @@ export function createStandalonePreviewMount(input: Readonly<{
 				}
 				currentTranslationRuntime = getTranslationRuntime(activeController.context.locale)
 				eventObserver.detach()
+				checksObserver?.detach()
 				activeController.dispose()
 				const nextController = LiveViewRuntimeController.create({
 					view: currentView,
@@ -881,6 +905,7 @@ export function createStandalonePreviewMount(input: Readonly<{
 				if (phase === 'failed') return
 				rootAttributes.restore()
 				eventObserver.dispose()
+				checksObserver?.dispose()
 				if (phase === 'mounted') app.unmount()
 				activeController.dispose()
 				container.innerHTML = ''
