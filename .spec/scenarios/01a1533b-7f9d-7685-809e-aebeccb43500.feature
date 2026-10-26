@@ -1,7 +1,7 @@
 Feature: Visible Widget geometry
   # Source: Discussion #241 (Part 18, owner rulings 2026-10-18), R6: an occluder whose exact shape is unproven but whose paint has a finite bound is cut by an over-approximation of that bound, and what remains is still proven visible https://github.com/DevilTea/uiux/discussions/241; accepted 2026-10-18 https://github.com/DevilTea/uiux/discussions/241#discussioncomment-19014804. Issue #59 https://github.com/DevilTea/uiux/issues/59. Owner decisions during the review of #259 (2026-10-19) https://github.com/DevilTea/uiux/discussions/241#discussioncomment-19036379.
   # Test: code@081ce65 `tests/preview-dom-geometry.test.ts#L273` "cuts an undecided in-flow overlap and an image above by their bound and keeps the rest (#59)". https://github.com/DevilTea/uiux/blob/081ce65e2ee9041310e34f0f1e1fb5714b93c569/tests/preview-dom-geometry.test.ts#L273
-  # Test: code@869893d `tests/preview-dom-geometry.test.ts#L311` "cuts occluders of unproven shape by their box: masks, blend modes, SVG and native controls". https://github.com/DevilTea/uiux/blob/869893d20f91514778e0841b21dbd70033394a62/tests/preview-dom-geometry.test.ts#L311
+  # Test: code@11379d9 `tests/preview-dom-geometry.test.ts#L311` "cuts occluders of unproven shape by their box: masks, blend modes, SVG and native controls". https://github.com/DevilTea/uiux/blob/11379d9b021fbed04b551b3e071881cc1cd6b83a/tests/preview-dom-geometry.test.ts#L311
   # Test: code@081ce65 `tests/preview-dom-geometry.test.ts#L314` "grows the cut by filter extents, outer shadows and outlines, its own and its ancestors'". https://github.com/DevilTea/uiux/blob/081ce65e2ee9041310e34f0f1e1fb5714b93c569/tests/preview-dom-geometry.test.ts#L314
   # Test: code@081ce65 `tests/preview-dom-geometry.test.ts#L362` "keeps every pixel an occluder paints out of the regions when its size is fractional (#259 review)". https://github.com/DevilTea/uiux/blob/081ce65e2ee9041310e34f0f1e1fb5714b93c569/tests/preview-dom-geometry.test.ts#L362
   # Test: code@081ce65 `tests/preview-dom-geometry.test.ts#L377` "keeps every pixel of a fractional occluder out of the regions at device pixel ratio 2 (#259 review)". https://github.com/DevilTea/uiux/blob/081ce65e2ee9041310e34f0f1e1fb5714b93c569/tests/preview-dom-geometry.test.ts#L377
@@ -14,7 +14,7 @@ Feature: Visible Widget geometry
   # Test: code@081ce65 `tests/preview-dom-geometry.test.ts#L498` "rounds a bounded cut outward to whole device pixels, antialiased edges included". https://github.com/DevilTea/uiux/blob/081ce65e2ee9041310e34f0f1e1fb5714b93c569/tests/preview-dom-geometry.test.ts#L498
   # Test: code@081ce65 `tests/preview-dom-geometry.test.ts#L508` "grows a bound under rotation, skew and scale, and by border-image outsets, outline offsets and clip margins". https://github.com/DevilTea/uiux/blob/081ce65e2ee9041310e34f0f1e1fb5714b93c569/tests/preview-dom-geometry.test.ts#L508
   # Test: code@7000eeb `tests/preview-dom-geometry.test.ts#L662` "keeps every pixel an animating occluder paints out of the regions mid-animation, then returns to idle". https://github.com/DevilTea/uiux/blob/7000eeb515be8cd6f34f7cde27a04db1f1ae37d4/tests/preview-dom-geometry.test.ts#L662
-  # Status: built as of 869893d.
+  # Status: built as of 11379d9.
   @spec:id:01a1533b-7f9d-73ab-9533-2ad47e94371b
   @spec:demonstrates:01a11687-3109-7167-9c26-6e51c659d533
   @spec:demonstrates:01a11687-314d-761f-b0a2-a565f419b8ea
