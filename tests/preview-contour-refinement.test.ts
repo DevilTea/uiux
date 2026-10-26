@@ -1,16 +1,17 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ContourRefinement } from '../src/preview/contour-refinement'
 import type { GeometryReport, GeometryStreamContext } from '../src/preview/geometry-streams'
 import type { AffineOuterMapping } from '../src/preview/outer-precision'
 import type { FailureReportMessage } from '../src/preview/protocol/failure-report'
-import type {
-	ContourCancel,
-	FullContourRequest,
-	FullContourResponse,
-	PartialContourRequest,
-	PartialContourResponse,
-	VisibleRegion,
+import {
+	PARTIAL_CONTOUR_RESPONSE_TIMEOUT_MS,
+	type ContourCancel,
+	type FullContourRequest,
+	type FullContourResponse,
+	type PartialContourRequest,
+	type PartialContourResponse,
+	type VisibleRegion,
 } from '../src/preview/protocol/schema'
 
 /**
@@ -302,6 +303,88 @@ describe('Recoverable refinement failures', () => {
 		f.refinement.setMapping(scale(2.5))
 		expect(f.requests()).toHaveLength(1)
 		expect(f.refinement.state().work?.sequence).toBeGreaterThan(1)
+	})
+})
+
+describe('A contour request left without a verifiable response (issue #356)', () => {
+	beforeEach(() => { vi.useFakeTimers() })
+	afterEach(() => { vi.useRealTimers() })
+
+	function pendingPartial() {
+		const f = fixture()
+		f.refinement.acceptReport(report(1, [region('r0', 0.5), region('r1', 0.5, 20)]))
+		f.refinement.setMapping(scale(2))
+		return { ...f, first: f.requests()[0] as PartialContourRequest }
+	}
+
+	it('waits the whole limit, then cancels the partial request and retries it once with the full original region set', () => {
+		const f = pendingPartial()
+		vi.advanceTimersByTime(PARTIAL_CONTOUR_RESPONSE_TIMEOUT_MS - 1)
+		expect(f.requests()).toHaveLength(1)
+		expect(f.refinement.state().work?.sequence).toBe(f.first.payload.sequence)
+		vi.advanceTimersByTime(1)
+		expect(f.cancels().map(cancel => cancel.payload.sequence)).toContain(f.first.payload.sequence)
+		const retry = f.requests()[1] as PartialContourRequest
+		expect(retry.type).toBe('contour.partial.request')
+		expect(retry.payload).toMatchObject({ sequence: 2, baseSnapshotVersion: 1, regionIds: ['r0', 'r1'] })
+		expect(f.refinement.state().work).toMatchObject({ kind: 'partial', retry: true })
+		// The late response of the interrupted request commits nothing.
+		expect(f.refinement.receiveResponse(partialResponse(f.first, [region('r0', 0.1), region('r1', 0.1, 20)]))).toBe('stale')
+		expect(f.refinement.precision('w').status).toBe('pending')
+	})
+
+	it('regenerates completely when the retry is interrupted too, and never times a regeneration', () => {
+		const f = pendingPartial()
+		vi.advanceTimersByTime(PARTIAL_CONTOUR_RESPONSE_TIMEOUT_MS)
+		vi.advanceTimersByTime(PARTIAL_CONTOUR_RESPONSE_TIMEOUT_MS)
+		const regeneration = f.requests()[2] as FullContourRequest
+		expect(regeneration.type).toBe('contour.full.request')
+		expect(regeneration.payload.sequence).toBe(3)
+		// A complete regeneration may take as long as it needs.
+		vi.advanceTimersByTime(PARTIAL_CONTOUR_RESPONSE_TIMEOUT_MS * 10)
+		expect(f.requests()).toHaveLength(3)
+		expect(f.refinement.state().work).toMatchObject({ kind: 'full', sequence: 3 })
+		expect(f.refinement.receiveResponse(fullResponse(regeneration, [region('r0', 0.1), region('r1', 0.1, 20)]))).toBe('committed')
+		expect(f.refinement.precision('w').status).toBe('precise')
+	})
+
+	it('does not fire for a request that was answered, retired or dropped with its context', () => {
+		const answered = pendingPartial()
+		expect(answered.refinement.receiveResponse(partialResponse(answered.first, [region('r0', 0.1), region('r1', 0.1, 20)]))).toBe('committed')
+		vi.advanceTimersByTime(PARTIAL_CONTOUR_RESPONSE_TIMEOUT_MS * 2)
+		expect(answered.requests()).toHaveLength(1)
+
+		const retired = pendingPartial()
+		retired.refinement.setMapping(scale(0.9))
+		expect(retired.refinement.state().work).toBeUndefined()
+		vi.advanceTimersByTime(PARTIAL_CONTOUR_RESPONSE_TIMEOUT_MS * 2)
+		expect(retired.requests()).toHaveLength(1)
+
+		const replaced = pendingPartial()
+		replaced.refinement.setContext({ ...context, viewId: '22222222-2222-4222-8222-222222222222' })
+		vi.advanceTimersByTime(PARTIAL_CONTOUR_RESPONSE_TIMEOUT_MS * 2)
+		expect(replaced.requests()).toHaveLength(1)
+		replaced.refinement.dispose()
+		answered.refinement.dispose()
+		retired.refinement.dispose()
+		expect(vi.getTimerCount()).toBe(0)
+	})
+
+	it('starts the wait of a superseding partial request anew', () => {
+		const f = pendingPartial()
+		vi.advanceTimersByTime(PARTIAL_CONTOUR_RESPONSE_TIMEOUT_MS - 1000)
+		f.refinement.setMapping(scale(4))
+		const finer = f.requests().filter(request => request.type === 'contour.partial.request').at(-1) as PartialContourRequest
+		expect(finer.payload.sequence).toBeGreaterThan(f.first.payload.sequence)
+		vi.advanceTimersByTime(PARTIAL_CONTOUR_RESPONSE_TIMEOUT_MS - 1)
+		expect(f.refinement.state().work?.sequence).toBe(finer.payload.sequence)
+	})
+
+	it('leaves a failure-reported work to the latch, with no timeout recovery', () => {
+		const f = pendingPartial()
+		expect(f.refinement.receiveFailureReport(failureReport(f.first))).toBe('ended')
+		vi.advanceTimersByTime(PARTIAL_CONTOUR_RESPONSE_TIMEOUT_MS * 2)
+		expect(f.requests()).toHaveLength(1)
 	})
 })
 
