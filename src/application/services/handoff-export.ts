@@ -697,24 +697,18 @@ export function createHandoffExportService(persistence: FileNativePersistence, o
 		// and the captures they reference, enter the bundle as derived artifacts, while the canonical Flow
 		// stays an authored resource. A trace is judged like a capture (`evaluateFlowTraceStaleness`) and,
 		// like a stale capture, left out. Records carry no capture time, so every fresh trace of a Flow is
-		// referenced, as every fresh capture of a View is. A Flow with no fresh trace is noted as missing
-		// or stale, advisory only: no Rule makes Flow Evidence required for readiness.
+		// referenced, as every fresh capture of a View is. No Rule makes Flow Evidence required for readiness,
+		// so a Flow without a fresh trace adds no diagnostic.
 		const capturesByIdentity = new Map(artifactCandidates.map(candidate => [candidate.identity, candidate.value]))
 		const traceContext = {
 			...stalenessContext,
 			flows: [...flowSnapshots.entries()].map(([key, snapshot]) => ({ key, revision: snapshot.revision })),
 			captures: capturesByIdentity,
 		}
-		const freshTraceFlows = new Set<string>()
-		const staleTraceCountByFlow = new Map<string, number>()
 		for (const { identity, value: trace } of traceCandidates) {
 			const flowId = (trace.executionContext as Record<string, unknown>).flowId
 			if (typeof flowId !== 'string' || !flowSnapshots.has(flowId)) continue
-			if (evaluateFlowTraceStaleness(trace, traceContext).isStale) {
-				staleTraceCountByFlow.set(flowId, (staleTraceCountByFlow.get(flowId) ?? 0) + 1)
-				continue
-			}
-			freshTraceFlows.add(flowId)
+			if (evaluateFlowTraceStaleness(trace, traceContext).isStale) continue
 			evidenceRefs.push({ kind: trace.kind, evidence: identity })
 			referencedArtifacts.set(identity, { kind: 'flow-trace-record', artifact: identity, context: { flowId } })
 			for (const ref of trace.evidenceRefs ?? []) {
@@ -722,23 +716,6 @@ export function createHandoffExportService(persistence: FileNativePersistence, o
 				const captureViewId = (capture?.executionContext as Record<string, unknown> | undefined)?.viewId
 				if (capture && typeof captureViewId === 'string') referenceCapture(ref.evidence, capture, captureViewId)
 			}
-		}
-		for (const flowId of flowSnapshots.keys()) {
-			if (freshTraceFlows.has(flowId)) continue
-			const staleCount = staleTraceCountByFlow.get(flowId) ?? 0
-			blockingDiagnostics.push(staleCount > 0
-				? {
-						code: 'handoff.stale_flow_evidence',
-						message: `Flow ${flowId} only has stale Flow traces. A fresh trace is needed to reference one.`,
-						blocking: false,
-						path: `/flows/${flowId}`,
-					}
-				: {
-						code: 'handoff.missing_flow_evidence',
-						message: `Flow ${flowId} has no captured Flow trace.`,
-						blocking: false,
-						path: `/flows/${flowId}`,
-					})
 		}
 
 		// Check required evidence completeness

@@ -1950,7 +1950,7 @@ describe('Flow traces in a Handoff (issue #88)', { timeout: HEAVY_SERVER_SUITE_T
 
 	const flowRoot = [{ type: 'flow' as const, flowId: FLOW_1_ID }]
 
-	it('references a fresh trace and its captures as derived artifacts, without leaving a missing-trace note', async () => {
+	it('references a fresh trace and its captures as derived artifacts', async () => {
 		const { persistence, capture, flowRevision } = await flowTraceWorkspace()
 		const trace = await putFlowTrace(persistence, { flowRevision, capture })
 		const exported = await currentSchemaHandoff(persistence).exportHandoff({ roots: flowRoot })
@@ -1962,20 +1962,21 @@ describe('Flow traces in a Handoff (issue #88)', { timeout: HEAVY_SERVER_SUITE_T
 		expect(manifest.artifactRefs).toContainEqual({ kind: 'formal-evidence-record', artifact: capture, context: { viewId: VIEW_1_ID } })
 		// The canonical Flow stays an authored resource of the bundle.
 		expect(manifest.resources.some(resource => resource.type === 'flow')).toBe(true)
-		expect(manifest.readiness.blockingDiagnostics.map(item => item.code)).not.toContain('handoff.missing_flow_evidence')
-		expect(manifest.readiness.blockingDiagnostics.map(item => item.code)).not.toContain('handoff.stale_flow_evidence')
 		expect(manifest.readiness.implementationReady).toBe(true)
 	})
 
-	it('notes a Flow with no trace as advisory, never blocking readiness', async () => {
-		const { persistence } = await flowTraceWorkspace()
+	it('adds no trace reference and no diagnostic for a Flow without traces, so readiness is as before', async () => {
+		const { persistence, capture } = await flowTraceWorkspace()
 		const exported = await currentSchemaHandoff(persistence).exportHandoff({ roots: flowRoot })
-		expect(exported.manifest!.readiness.blockingDiagnostics).toContainEqual(expect.objectContaining({ code: 'handoff.missing_flow_evidence', blocking: false, path: `/flows/${FLOW_1_ID}` }))
-		expect(exported.manifest!.evidenceRefs.some(ref => ref.kind === 'flow_trace')).toBe(false)
-		expect(exported.manifest!.readiness.implementationReady).toBe(true)
+		const manifest = exported.manifest!
+		expect(manifest.resources.some(resource => resource.type === 'flow')).toBe(true)
+		expect(manifest.evidenceRefs).toEqual([{ kind: 'formal_capture', evidence: capture }])
+		expect(manifest.artifactRefs.some(ref => ref.kind === 'flow-trace-record')).toBe(false)
+		expect(manifest.readiness.blockingDiagnostics).toEqual([])
+		expect(manifest.readiness.implementationReady).toBe(true)
 	})
 
-	it('leaves out a trace once its Flow changed, and notes the Flow as having only stale traces', async () => {
+	it('leaves out a trace once its Flow changed', async () => {
 		const { persistence, capture, flowRevision } = await flowTraceWorkspace()
 		const trace = await putFlowTrace(persistence, { flowRevision, capture })
 		const flow = (await persistence.flows.readInspected(FLOW_1_ID))!
@@ -1985,8 +1986,6 @@ describe('Flow traces in a Handoff (issue #88)', { timeout: HEAVY_SERVER_SUITE_T
 		const manifest = exported.manifest!
 		expect(manifest.evidenceRefs.some(ref => ref.evidence === trace)).toBe(false)
 		expect(manifest.artifactRefs.some(ref => ref.artifact === trace)).toBe(false)
-		expect(manifest.readiness.blockingDiagnostics).toContainEqual(expect.objectContaining({ code: 'handoff.stale_flow_evidence', blocking: false, path: `/flows/${FLOW_1_ID}` }))
-		expect(manifest.readiness.blockingDiagnostics.map(item => item.code)).not.toContain('handoff.missing_flow_evidence')
 	})
 
 	it('leaves out a trace once a capture it references is stale, or no longer in the store', async () => {
@@ -2004,7 +2003,6 @@ describe('Flow traces in a Handoff (issue #88)', { timeout: HEAVY_SERVER_SUITE_T
 		expect(changed.ok).toBe(true)
 		const exportedAfter = await currentSchemaHandoff(persistence).exportHandoff({ roots: flowRoot })
 		expect(exportedAfter.manifest!.evidenceRefs.map(ref => ref.evidence)).not.toContain(trace)
-		expect(exportedAfter.manifest!.readiness.blockingDiagnostics.map(item => item.code)).toContain('handoff.stale_flow_evidence')
 	})
 
 	it('references no trace of a Flow outside the closure', async () => {
@@ -2013,6 +2011,5 @@ describe('Flow traces in a Handoff (issue #88)', { timeout: HEAVY_SERVER_SUITE_T
 		const exported = await currentSchemaHandoff(persistence).exportHandoff({ roots: [{ type: 'view', viewId: VIEW_1_ID }] })
 		expect(exported.manifest!.evidenceRefs.map(ref => ref.evidence)).toEqual([capture])
 		expect(exported.manifest!.artifactRefs.some(ref => ref.artifact === trace)).toBe(false)
-		expect(exported.manifest!.readiness.blockingDiagnostics.some(item => item.code.endsWith('_flow_evidence'))).toBe(false)
 	})
 })
