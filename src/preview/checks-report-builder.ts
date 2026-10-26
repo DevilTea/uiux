@@ -6,9 +6,12 @@ import {
 	MAX_CHECKS_RUNTIME_ERRORS,
 	MAX_CHECKS_TEXT_LENGTH,
 	MAX_CHECKS_TRANSLATION_WARNINGS,
+	MAX_CHECKS_UNEVALUATED,
+	type ChecksCoverage,
 	type ChecksReportMessage,
 	type ChecksRuntimeError,
 	type ChecksTranslationWarning,
+	type ChecksUnevaluated,
 } from './protocol/checks-report'
 import { containsProtocolControl } from './protocol/schema'
 
@@ -31,7 +34,12 @@ export type ChecksReportInput = Readonly<{
 export type ChecksReportBody = Readonly<{
 	translationWarnings: readonly ChecksTranslationWarning[]
 	runtimeErrors: readonly ChecksRuntimeError[]
+	/** Absent while no Runtime that can be inspected is mounted: the report then claims nothing about coverage. */
+	coverage?: ChecksCoverage
 }>
+
+/** The characters of JSON the unevaluated list may take of a report, so the warnings keep the rest. */
+const UNEVALUATED_BUDGET = 262_144
 
 /** Display-safe text of at most `limit` characters: control characters become spaces, a longer text is cut with an ellipsis. */
 export function displaySafe(value: string, limit = MAX_CHECKS_TEXT_LENGTH): string {
@@ -48,7 +56,9 @@ function diagnosticDetail(diagnostic: Diagnostic): string {
 }
 
 /**
- * The report's lists. The warnings come only from Properties the Runtime evaluated; a warning whose
+ * The report's lists. The coverage lists what the Runtime declared and did not evaluate, and is
+ * complete exactly when nothing is left; it is never obtained by forcing a Property to evaluate. The
+ * warnings come only from Properties the Runtime evaluated; a warning whose
  * identity the decoder would refuse (an over-long key, say) is left out, and a list over its bound is
  * cut, which the report says with one `runtime.report_truncated` entry instead of failing as a whole.
  */
@@ -84,15 +94,32 @@ export function buildChecksReportBody(input: ChecksReportInput): ChecksReportBod
 			&& (warning.code !== 'missing-parameter' || admissible(warning.parameter))
 	})
 
-	// The whole report stays within its size bound: the errors are bounded on their own, the warnings take the rest.
-	const budget = MAX_CHECKS_REPORT_LENGTH - jsonLength(errors) - 4096
+	// Identities are display-safe text the decoder admits; `complete` follows the list that is sent, and a cut is said by `runtime.report_truncated`.
+	const declaredUnevaluated = input.observation?.unevaluated
+	let keptUnevaluated: readonly ChecksUnevaluated[] = []
+	if (declaredUnevaluated) {
+		const cleaned = declaredUnevaluated
+			.filter(entry => entry.widgetId.length > 0 && entry.resultProperty.length > 0 && entry.catalogField.length > 0)
+			.map(entry => ({
+				widgetId: displaySafe(entry.widgetId),
+				resultProperty: displaySafe(entry.resultProperty),
+				catalogField: displaySafe(entry.catalogField),
+				reason: displaySafe(entry.reason) || 'Not evaluated.',
+			}))
+		keptUnevaluated = cleaned.slice(0, MAX_CHECKS_UNEVALUATED)
+		while (keptUnevaluated.length > 0 && jsonLength(keptUnevaluated) > UNEVALUATED_BUDGET) keptUnevaluated = keptUnevaluated.slice(0, Math.floor(keptUnevaluated.length * 0.9))
+	}
+	const unevaluatedLeftOut = declaredUnevaluated ? declaredUnevaluated.length - keptUnevaluated.length : 0
+
+	// The whole report stays within its size bound: the errors and the coverage are bounded on their own, the warnings take the rest.
+	const budget = MAX_CHECKS_REPORT_LENGTH - jsonLength(errors) - jsonLength(keptUnevaluated) - 4096
 	let keptWarnings = warnings.slice(0, MAX_CHECKS_TRANSLATION_WARNINGS)
 	while (keptWarnings.length > 0 && jsonLength(keptWarnings) > budget) keptWarnings = keptWarnings.slice(0, Math.floor(keptWarnings.length * 0.9))
 	const warningsLeftOut = warnings.length - keptWarnings.length
 	const keptErrors = [...errors]
 	let errorsLeftOut = 0
 	// The truncation entry takes one of the slots, so a list that must say it was cut leaves one free.
-	if (warningsLeftOut > 0 || errors.length > MAX_CHECKS_RUNTIME_ERRORS) {
+	if (warningsLeftOut > 0 || unevaluatedLeftOut > 0 || errors.length > MAX_CHECKS_RUNTIME_ERRORS) {
 		const room = MAX_CHECKS_RUNTIME_ERRORS - 1
 		if (errors.length > room) {
 			keptErrors.length = room
@@ -100,12 +127,19 @@ export function buildChecksReportBody(input: ChecksReportInput): ChecksReportBod
 		}
 		const notes = [
 			...(warningsLeftOut > 0 ? [`${warningsLeftOut} translation warnings were left out.`] : []),
+			...(unevaluatedLeftOut > 0 ? [`${unevaluatedLeftOut} unevaluated Properties were left out.`] : []),
 			...(errorsLeftOut > 0 ? [`${errorsLeftOut} runtime errors were left out.`] : []),
 		]
 		keptErrors.push({ reason: 'runtime.report_truncated', detail: notes.join(' ') })
 	}
 
-	return Object.freeze({ translationWarnings: Object.freeze(keptWarnings), runtimeErrors: Object.freeze(keptErrors) })
+	return Object.freeze({
+		translationWarnings: Object.freeze(keptWarnings),
+		runtimeErrors: Object.freeze(keptErrors),
+		...(declaredUnevaluated
+			? { coverage: Object.freeze({ complete: keptUnevaluated.length === 0, unevaluated: Object.freeze(keptUnevaluated) }) }
+			: {}),
+	})
 }
 
 type ChecksReportContextInput = Readonly<{
@@ -177,7 +211,12 @@ export class ChecksReportPublisher {
 				...(context.variantId ? { variantId: context.variantId } : {}),
 				runtimeContextVersion: context.runtimeContextVersion,
 			},
-			payload: { sequence: this.sequence, translationWarnings: body.translationWarnings, runtimeErrors: body.runtimeErrors },
+			payload: {
+				sequence: this.sequence,
+				translationWarnings: body.translationWarnings,
+				runtimeErrors: body.runtimeErrors,
+				...(body.coverage ? { coverage: body.coverage } : {}),
+			},
 		}
 		if (this.send(message) !== 'sent') return 'unsent'
 		this.sequence++
