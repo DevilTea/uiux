@@ -238,4 +238,22 @@ describe('Checks sources and check states (issue #95)', () => {
 		}
 		finally { await unchecked.context.close() }
 	}, 120_000)
+
+	it('attributes a View diagnostic under /variants/<name> to that Variant for the Variant filter (issue #349)', async () => {
+		const { context, page } = await openChecks({})
+		try {
+			const viewId = '7f3d7780-3cb9-4e57-8f0b-2e8d569905c1'
+			await page.route(url => url.pathname === `/api/resources/view/${viewId}`, async (route) => {
+				const response = await route.fetch()
+				const body = await response.json() as { diagnostics?: unknown[] }
+				body.diagnostics = [{ code: 'view.test_variant_problem', path: '/variants/a~1b/state/w1', message: 'A Variant problem.' }]
+				await route.fulfill({ response, json: body })
+			})
+			await run(page)
+			expect(await problems(page).evaluateAll(nodes => nodes.map(node => node.getAttribute('data-check-problem')))).toContain('view.test_variant_problem')
+			await choose(page, 'variant', 'a/b')
+			expect(await problems(page).evaluateAll(nodes => nodes.map(node => node.getAttribute('data-check-problem')))).toEqual(['view.test_variant_problem'])
+		}
+		finally { await context.close() }
+	}, 120_000)
 })

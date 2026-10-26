@@ -8,8 +8,11 @@ import {
 	filterFindings,
 	groupFindings,
 	sectionFindings,
+	SOURCE_SEVERITY,
+	severityOf,
 	unsettledSources,
 	translationReminders,
+	variantOfPath,
 	type Finding,
 	type FindingResource,
 	type ViewUsage,
@@ -251,5 +254,46 @@ describe('Catalog problems of used entries (Rules 01a115cd-be51-740b-8472-c08dc7
 		const owned = catalogProblems(diagnostics, usage, 'completed', new Map([['Button', 1]]))
 		expect(owned.elsewhere).toBe(1)
 		expect(new Set(owned.findings.map(item => item.path))).toEqual(new Set(['/adapters/1/manifest/catalog/widgets/Button']))
+	})
+})
+
+describe('severity derivation (issue #349, owner ruling 3 of Discussion #241)', () => {
+	it('lists read diagnostics and Catalog problems as errors, reminders and Product Kit findings as warnings', () => {
+		expect(SOURCE_SEVERITY).toEqual({ validation: 'error', catalog: 'error', translation: 'warning', 'product-kit': 'warning' })
+		expect(severityOf('validation')).toBe('error')
+	})
+
+	it('gives every produced finding its source severity', () => {
+		const reminders = translationReminders(new Map([['en-US', { 'a': '' } as never], ['fr-FR', { 'a': ' ' } as never]]), 'en-US')
+		expect(reminders.length).toBeGreaterThan(0)
+		for (const item of reminders) expect(item.severity).toBe(severityOf('translation'))
+		const usage: ViewUsage[] = [{ resource: checkout, widgets: [{ id: 'w1', type: 'Button' }] }]
+		const catalog = catalogProblems([{ code: 'adapter.x', path: '/adapters/0/manifest/catalog/widgets/Button/i18n', message: 'm' }], usage)
+		expect(catalog.findings.map(item => item.severity)).toEqual(['error'])
+	})
+})
+
+describe('Variant attribution of View diagnostics (issue #349)', () => {
+	it('reads the Variant from the /variants/<name> path prefix', () => {
+		expect(variantOfPath('/variants/error')).toBe('error')
+		expect(variantOfPath('/variants/error/state/w1/value')).toBe('error')
+	})
+
+	it('undoes JSON Pointer escaping of ~1 and ~0', () => {
+		expect(variantOfPath('/variants/a~1b/state')).toBe('a/b')
+		expect(variantOfPath('/variants/a~0b')).toBe('a~b')
+		expect(variantOfPath('/variants/~01/state')).toBe('~1')
+	})
+
+	it('attributes nothing for other paths', () => {
+		expect(variantOfPath('/ir/slots/0')).toBeUndefined()
+		expect(variantOfPath('/variants')).toBeUndefined()
+		expect(variantOfPath('/variantsx/a')).toBeUndefined()
+		expect(variantOfPath('/ir/variants/a')).toBeUndefined()
+	})
+
+	it('lets the Variant filter match an attributed finding', () => {
+		const list = [finding({ code: 'view.bad', resource: checkout, variantName: 'error' }), finding({ code: 'view.bad', resource: checkout })]
+		expect(filterFindings(list, { variant: 'error' })).toHaveLength(1)
 	})
 })

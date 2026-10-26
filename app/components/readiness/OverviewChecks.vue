@@ -21,8 +21,10 @@ import {
 	GROUP_BYS,
 	groupFindings,
 	sectionFindings,
+	severityOf,
 	translationReminders,
 	unsettledSources,
+	variantOfPath,
 	type CheckState,
 	type Finding,
 	type FindingFilters,
@@ -132,7 +134,8 @@ async function runChecks(): Promise<void> {
 		for (const diagnostic of diagnostics ?? []) {
 			const widgetId = widgetFor?.(diagnostic)
 			const widgetType = widgetId ? types?.get(widgetId) : undefined
-			collected.push({ code: diagnostic.code, message: diagnostic.message, path: diagnostic.path, resource, source: 'validation', severity: 'error', checkState: 'completed', ...(widgetId ? { widgetId } : {}), ...(widgetType ? { widgetType } : {}) })
+			const variantName = resource.kind === 'view' ? variantOfPath(diagnostic.path) : undefined
+			collected.push({ code: diagnostic.code, message: diagnostic.message, path: diagnostic.path, resource, source: 'validation', severity: severityOf('validation'), checkState: 'completed', ...(variantName ? { variantName } : {}), ...(widgetId ? { widgetId } : {}), ...(widgetType ? { widgetType } : {}) })
 		}
 	}
 	type Job = Readonly<{ kind: FindingResource['kind']; key: string; name: string }>
@@ -266,7 +269,7 @@ function kitFinding(finding: KitFinding): Finding {
 		resource,
 		// Product Kit findings are non-blocking (Rule 01a11bb1-a88c-7d78-8633-1c3b55588910).
 		source: 'product-kit',
-		severity: 'warning',
+		severity: severityOf('product-kit'),
 		checkState: summary?.state ?? 'completed',
 		...(finding.widgetId ? { widgetId: finding.widgetId } : {}),
 		...(finding.widgetType ? { widgetType: finding.widgetType } : {}),
