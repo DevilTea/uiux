@@ -1,5 +1,5 @@
-import { INTERACTION_ACTIONS, MAX_INTERACTION_KEY_LENGTH, MAX_INTERACTION_TEXT_LENGTH, type InteractionAction } from '../evidence/interaction-replay'
-import { isRecord, jsonPointer, type Diagnostic } from '../validation'
+import { validateInteractionAction, type InteractionAction } from '../evidence/interaction-replay'
+import { isRecord, jsonPointer, Validator, type Diagnostic } from '../validation'
 import type { FlowResource, FlowStep } from './schema'
 
 /**
@@ -22,7 +22,7 @@ export type FlowRecipeTrigger = Readonly<{
 	type: 'trigger'
 	stepId: string
 	trigger: Readonly<{ widgetId: string; event: string }>
-	/** Absent only on a derived trigger whose Event is not `press`; `validateFlowRecipe` refuses such a recipe. */
+	/** Absent only on a derived trigger whose Event is neither `press` nor `click`; `validateFlowRecipe` refuses such a recipe. */
 	perform?: FlowRecipePerform
 	expect: Readonly<{ resultStepId: string }>
 }>
@@ -49,7 +49,7 @@ function enterOf(stepId: string, step: FlowStep): FlowRecipeEnter {
  * The recipe the server derives when none is given, breadth-first from the entry step: every
  * reached step is entered once without a trigger when it has no outgoing transition, otherwise
  * once for each outgoing transition, in order of Widget ID then Event name, followed by its trigger.
- * A trigger whose Event is `press` performs a `click`; no other Event has a default action, so its trigger
+ * A trigger whose Event is `press` or `click` performs a `click`; no other Event has a default action, so its trigger
  * has no `perform` and `validateFlowRecipe` refuses the recipe until one is given. The Flow must be valid
  * (every step reachable, every target present).
  */
@@ -65,7 +65,7 @@ export function deriveFlowRecipe(flow: FlowResource): FlowRecipe {
 		if (transitions.length === 0) actions.push(enterOf(stepId, step))
 		for (const transition of transitions) {
 			actions.push(enterOf(stepId, step))
-			actions.push({ type: 'trigger', stepId, trigger: { widgetId: transition.trigger.widgetId, event: transition.trigger.event }, ...(transition.trigger.event === 'press' ? { perform: { action: 'click' as const } } : {}), expect: { resultStepId: transition.targetStepId } })
+			actions.push({ type: 'trigger', stepId, trigger: { widgetId: transition.trigger.widgetId, event: transition.trigger.event }, ...((transition.trigger.event === 'press' || transition.trigger.event === 'click') ? { perform: { action: 'click' as const } } : {}), expect: { resultStepId: transition.targetStepId } })
 			if (!seen.has(transition.targetStepId)) {
 				seen.add(transition.targetStepId)
 				queue.push(transition.targetStepId)
@@ -93,25 +93,16 @@ export function flowRecipeEntries(recipe: FlowRecipe): readonly FlowRecipeEntry[
 function validatePerform(trigger: Record<string, unknown>, path: string, diagnostics: Diagnostic[]): void {
 	const performPath = jsonPointer(path, 'perform')
 	if (!Object.hasOwn(trigger, 'perform')) {
-		diagnostics.push({ code: 'flow.recipe_perform_required', path: performPath, message: 'A trigger states the browser action that causes its Event, perform { action, text?, key? }; only a derived press trigger defaults to a click.' })
+		diagnostics.push({ code: 'flow.recipe_perform_required', path: performPath, message: 'A trigger states the browser action that causes its Event, perform { action, text?, key? }; only a derived press or click trigger defaults to a click.' })
 		return
 	}
 	const bad = (at: string, message: string) => { diagnostics.push({ code: 'flow.recipe_invalid_shape', path: at, message }) }
 	const perform = trigger.perform
 	if (!isRecord(perform)) return bad(performPath, 'perform is { action, text?, key? }.')
 	keysOnly(perform, ['action', 'text', 'key'], performPath, diagnostics)
-	const action = typeof perform.action === 'string' && (INTERACTION_ACTIONS as readonly string[]).includes(perform.action) ? perform.action : undefined
-	if (!action) bad(jsonPointer(performPath, 'action'), `An action is one of ${INTERACTION_ACTIONS.join(', ')}.`)
-	if (action === 'type') {
-		if (typeof perform.text !== 'string' || perform.text.length === 0 || perform.text.length > MAX_INTERACTION_TEXT_LENGTH)
-			bad(jsonPointer(performPath, 'text'), `A type action has text of 1 to ${MAX_INTERACTION_TEXT_LENGTH} characters.`)
-	}
-	else if (Object.hasOwn(perform, 'text')) bad(jsonPointer(performPath, 'text'), 'Only a type action has text.')
-	if (action === 'press') {
-		if (typeof perform.key !== 'string' || perform.key.length === 0 || perform.key.length > MAX_INTERACTION_KEY_LENGTH)
-			bad(jsonPointer(performPath, 'key'), `A press action has a key of 1 to ${MAX_INTERACTION_KEY_LENGTH} characters.`)
-	}
-	else if (Object.hasOwn(perform, 'key')) bad(jsonPointer(performPath, 'key'), 'Only a press action has a key.')
+	const v = new Validator()
+	validateInteractionAction(perform, performPath, 'flow.recipe_invalid_shape', v)
+	diagnostics.push(...v.diagnostics)
 }
 
 function keysOnly(value: Record<string, unknown>, allowed: readonly string[], path: string, diagnostics: Diagnostic[]): void {

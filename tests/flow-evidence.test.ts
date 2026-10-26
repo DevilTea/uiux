@@ -51,13 +51,13 @@ describe('Flow replay recipe (Clauses 01a172cc-d6f0-714d-b2fb-bd66e13c73a5 and 0
 		const flow: FlowResource = {
 			...twoStepFlow(),
 			steps: {
-				[STEP_A]: { target: { viewId: VIEW_A }, transitions: [{ trigger: { widgetId: 'z', event: 'press' }, targetStepId: STEP_C }, { trigger: { widgetId: 'a', event: 'press' }, targetStepId: STEP_B }] },
+				[STEP_A]: { target: { viewId: VIEW_A }, transitions: [{ trigger: { widgetId: 'z', event: 'click' }, targetStepId: STEP_C }, { trigger: { widgetId: 'a', event: 'press' }, targetStepId: STEP_B }] },
 				[STEP_B]: { target: { viewId: VIEW_B, variantName: 'done' }, transitions: [{ trigger: { widgetId: 'a', event: 'back' }, targetStepId: STEP_A }] },
 				[STEP_C]: { target: { viewId: VIEW_B }, transitions: [] },
 			},
 		}
 		const recipe = deriveFlowRecipe(flow)
-		// Only a press trigger defaults to a click (owner ruling 4 of #241 comment 19197851): the `back` trigger states no perform, so the derived recipe is refused.
+		// Only a press or click trigger defaults to a click (owner rulings of #241 comments 19197851 and 19200269): the `back` trigger states no perform, so the derived recipe is refused.
 		expect(validateFlowRecipe(recipe, flow).map(item => [item.code, item.path])).toEqual([['flow.recipe_perform_required', '/recipe/actions/5/perform']])
 		const performed = { actions: recipe.actions.map(action => action.type === 'trigger' && action.trigger.event === 'back' ? { ...action, perform: { action: 'hover' } } : action) }
 		expect(validateFlowRecipe(performed, flow)).toEqual([])
@@ -69,7 +69,7 @@ describe('Flow replay recipe (Clauses 01a172cc-d6f0-714d-b2fb-bd66e13c73a5 and 0
 		])
 		expect(flowRecipeEntries(recipe)).toEqual([
 			{ stepId: STEP_A, viewId: VIEW_A, trigger: { widgetId: 'a', event: 'press' }, perform: { action: 'click' }, resultStepId: STEP_B },
-			{ stepId: STEP_A, viewId: VIEW_A, trigger: { widgetId: 'z', event: 'press' }, perform: { action: 'click' }, resultStepId: STEP_C },
+			{ stepId: STEP_A, viewId: VIEW_A, trigger: { widgetId: 'z', event: 'click' }, perform: { action: 'click' }, resultStepId: STEP_C },
 			{ stepId: STEP_B, viewId: VIEW_B, variantName: 'done', trigger: { widgetId: 'a', event: 'back' }, resultStepId: STEP_A },
 			{ stepId: STEP_C, viewId: VIEW_B },
 		])
@@ -253,6 +253,27 @@ describe('validate_flow and capture_flow_evidence refusals', () => {
 		expect(await app.captureFlowEvidence({ flowId: FLOW_ID, renderContext, recipe: { actions: [{ type: 'enter', stepId: STEP_B, expect: { viewId: VIEW_A } }] } })).toMatchObject({ status: 'invalid', diagnostics: [{ code: 'flow.recipe_assertion_failed' }] })
 	})
 
+	it('accepts a recipe whose trigger carries perform through the MCP schema, leaving its judgement to the domain', async () => {
+		const { app, persistence } = await seededSession(twoStepFlow())
+		const before = await persistence.artifacts.listIdentities()
+		const renderContext = { locale: 'en-US', viewportId: 'desktop', themeId: 'light' }
+		const recipe = (perform: unknown, resultStepId: string) => ({ actions: [
+			{ type: 'enter', stepId: STEP_A, expect: { viewId: VIEW_A } },
+			{ type: 'trigger', stepId: STEP_A, trigger: { widgetId: 'root', event: 'press' }, perform, expect: { resultStepId } },
+		] })
+		await withMcp(app, async (client) => {
+			// Each refusal is the domain's `invalid` result with a Flow diagnostic, so perform passed the strict input schema (a schema error has no `status`).
+			const wrongStep = await client.callTool({ name: 'capture_flow_evidence', arguments: { flowId: FLOW_ID, renderContext, recipe: recipe({ action: 'type', text: 'hello' }, STEP_A) } })
+			expect(wrongStep.isError).toBe(true)
+			expect(wrongStep.structuredContent).toMatchObject({ status: 'invalid', diagnostics: [{ code: 'flow.recipe_assertion_failed' }] })
+			const badAction = await client.callTool({ name: 'capture_flow_evidence', arguments: { flowId: FLOW_ID, renderContext, recipe: recipe({ action: 'tap' }, STEP_B) } })
+			expect(badAction.structuredContent).toMatchObject({ status: 'invalid', diagnostics: [{ code: 'flow.recipe_invalid_shape', path: '/recipe/actions/1/perform/action' }] })
+			const missing = await client.callTool({ name: 'capture_flow_evidence', arguments: { flowId: FLOW_ID, renderContext, recipe: { actions: [{ type: 'enter', stepId: STEP_A, expect: { viewId: VIEW_A } }, { type: 'trigger', stepId: STEP_A, trigger: { widgetId: 'root', event: 'press' }, expect: { resultStepId: STEP_B } }] } } })
+			expect(missing.structuredContent).toMatchObject({ status: 'invalid', diagnostics: [{ code: 'flow.recipe_perform_required' }] })
+		})
+		expect(await persistence.artifacts.listIdentities()).toEqual(before)
+	})
+
 	it('blocks the Handoff readiness of a Flow root with a reference diagnostic (Clause 01a172cc-e51b-78a2-b96b-d7788a02a823)', async () => {
 		const flow = { ...twoStepFlow(), steps: { ...twoStepFlow().steps, [STEP_B]: { target: { viewId: VIEW_B, variantName: 'gone' }, transitions: [] } } }
 		const { app } = await seededSession(flow)
@@ -339,8 +360,8 @@ describe('replaying each trigger as a browser action (Rule 01a11544-66d9-7fcd-84
 		expect(added).toHaveLength(2)
 	})
 
-	it('refuses a derived recipe with a non-press trigger before any capture or replay, and records nothing', async () => {
-		const flow: FlowResource = { ...twoStepFlow(), steps: { ...twoStepFlow().steps, [STEP_A]: { target: { viewId: VIEW_A }, transitions: [{ trigger: { widgetId: 'root', event: 'click' }, targetStepId: STEP_B }] } } }
+	it('refuses a derived recipe with a trigger that is neither press nor click before any capture or replay, and records nothing', async () => {
+		const flow: FlowResource = { ...twoStepFlow(), steps: { ...twoStepFlow().steps, [STEP_A]: { target: { viewId: VIEW_A }, transitions: [{ trigger: { widgetId: 'root', event: 'change' }, targetStepId: STEP_B }] } } }
 		const { service, persistence, captured, replayed } = await serviceOver(flow, () => pass)
 		const before = await persistence.artifacts.listIdentities()
 		expect(await service.capture({ flowId: FLOW_ID, renderContext })).toMatchObject({ status: 'invalid', diagnostics: [{ code: 'flow.recipe_perform_required', path: '/recipe/actions/1/perform' }] })
@@ -350,7 +371,7 @@ describe('replaying each trigger as a browser action (Rule 01a11544-66d9-7fcd-84
 		// The same Flow runs once its recipe states the perform.
 		const recipe = { actions: [
 			{ type: 'enter', stepId: STEP_A, expect: { viewId: VIEW_A } },
-			{ type: 'trigger', stepId: STEP_A, trigger: { widgetId: 'root', event: 'click' }, perform: { action: 'click' }, expect: { resultStepId: STEP_B } },
+			{ type: 'trigger', stepId: STEP_A, trigger: { widgetId: 'root', event: 'change' }, perform: { action: 'click' }, expect: { resultStepId: STEP_B } },
 			{ type: 'enter', stepId: STEP_B, expect: { viewId: VIEW_B } },
 		] }
 		expect(await service.capture({ flowId: FLOW_ID, renderContext, recipe })).toMatchObject({ status: 'captured' })

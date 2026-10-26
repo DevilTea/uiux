@@ -25,6 +25,7 @@ let viewB = ''
 let clickFlow = ''
 let pressFlow = ''
 let blockedFlow = ''
+let changeFlow = ''
 
 type Trace = {
 	kind: string
@@ -91,6 +92,7 @@ beforeAll(async () => {
 	pressFlow = await authorFlow('Pay by press', 'press')
 	// A disabled Button cannot be clicked.
 	blockedFlow = await authorFlow('Pay while blocked', 'click', 'blocked')
+	changeFlow = await authorFlow('Pay by change', 'change')
 }, 90_000)
 
 afterAll(async () => {
@@ -98,13 +100,13 @@ afterAll(async () => {
 })
 
 describe('formal UX Flow Evidence over a real capture and replay', () => {
-	it('captures each entered View and Variant, replays the trigger as a real click, and stores a trace that references the captures', async () => {
+	it('derives a click for a click trigger, captures each entered View and Variant, replays it as a real click, and stores a trace that references the captures', async () => {
 		const recipe = { actions: [
 			{ type: 'enter', stepId: STEP_A, expect: { viewId: viewA } },
 			{ type: 'trigger', stepId: STEP_A, trigger: { widgetId: 'pay-button', event: 'click' }, perform: click, expect: { resultStepId: STEP_B } },
 			{ type: 'enter', stepId: STEP_B, expect: { viewId: viewB, variantName: 'done' } },
 		] }
-		const response = await trace(clickFlow, recipe)
+		const response = await trace(clickFlow)
 		expect(response.status, JSON.stringify(response.body)).toBe(200)
 		const outcome = response.body
 		expect(outcome.status).toBe('captured')
@@ -162,10 +164,10 @@ describe('formal UX Flow Evidence over a real capture and replay', () => {
 		expect(response.body.evidence.data.steps.map(step => step.valid)).toEqual([false, true])
 	}, 180_000)
 
-	it('refuses a derived recipe whose trigger Event is not press, before a browser runs, and records nothing', async () => {
+	it('refuses a derived recipe whose trigger Event is neither press nor click, before a browser runs, and records nothing', async () => {
 		const persistence = new FileNativePersistence({ root: server.workspaceRoot, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
 		const before = await persistence.artifacts.listIdentities()
-		const response = await trace(clickFlow)
+		const response = await trace(changeFlow)
 		expect(response.status).toBe(422)
 		expect(response.body).toMatchObject({ status: 'invalid', diagnostics: [{ code: 'flow.recipe_perform_required', path: '/recipe/actions/1/perform' }] })
 		expect(await persistence.artifacts.listIdentities()).toEqual(before)
