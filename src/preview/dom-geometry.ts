@@ -4,7 +4,7 @@ import { planOcclusion, type OcclusionEvidence, type ProvenOccluderShapeKind } f
 import type { ContourCommand, Point, VisibleRegion, WidgetRect } from './protocol/schema'
 import { subtractAxisAlignedRectangularOcclusion } from './rectangular-occlusion'
 import { basicShapePolygon, EMPTY_SHAPE, parseClipPath, roundedRectShape, svgPrimitiveShape, type ClipSide, type SvgPrimitive } from './clip-shapes'
-import { intersectShapes, outerRings, rectangleShape, subtractShapes, unionShapes, type PolygonShape } from './polygon-occlusion'
+import { boundsOf, intersectShapes, MAX_CUT_SHAPES, MAX_CUT_VERTICES, outerRings, rectangleShape, subtractShapes, unionShapes, vertexCount, type PolygonShape } from './polygon-occlusion'
 import type { RoundedRectRadii } from './rounded-contour'
 
 /**
@@ -58,8 +58,8 @@ import type { RoundedRectRadii } from './rounded-contour'
  *     precise region (Discussion #241 owner decision 1); exact cuts may still leave such holes.
  *   - Unbounded (fail closed): a filter other than the CSS shorthand functions (such as `url()`),
  *     a 3D transform or `-webkit-box-reflect` on the occluder's chain, replaced content whose
- *     overflow is visible, an unparsed shadow, outline, outset or text style, text with combining
- *     marks, a transformed, floated, shadowed or offset pseudo-element, a list marker of unknown
+ *     overflow is visible, an unparsed shadow, outline, outset or text style, text with more than twelve
+ *     combining marks stacked on one letter, a transformed, floated, shadowed or offset pseudo-element, a list marker of unknown
  *     width, or an outset that a transform without a measurable box makes unscalable.
  * - The `::backdrop` of a top-layer element paints over the viewport: translucent when its fill and
  *   opacity prove it (kept), unsupported when it is opaque, an image, filtered, blended or bordered.
@@ -79,6 +79,17 @@ type RoundedShape = Readonly<{ rect: WidgetRect; radii: RoundedRectRadii }>
 /** What an occluder removes: a rectangle, or polygons containing its true shape (a curve, a clip). */
 type CutShape = WidgetRect | PolygonShape
 
+/** The most cuts of any kind a curved subtraction takes on. */
+const MAX_TOTAL_CUTS = 400
+
+function boundsOverlap(a: Box | undefined, b: Box | undefined): boolean {
+	return !!a && !!b && Math.min(a.right, b.right) > Math.max(a.left, b.left) && Math.min(a.bottom, b.bottom) > Math.max(a.top, b.top)
+}
+
+function isRectangleShape(shape: PolygonShape): boolean {
+	return shape.polygons.length === 1 && shape.polygons[0]!.length === 1 && shape.polygons[0]![0]!.length === 4
+}
+
 function isPolygonCut(shape: CutShape): shape is PolygonShape {
 	return 'polygons' in shape
 }
@@ -90,8 +101,8 @@ type PaintKey = Readonly<{ element: Element; flow: boolean; z: number }>
  * overflow), and the page-space boxes of the rest. `unbounded` when no finite bound is provable.
  */
 type GeneratedContent = Readonly<{ flow: boolean; boxes: readonly Box[] }> | 'unbounded'
-/** The client box of an element's own text nodes, and whether the text has combining marks (ink without a bound). */
-type OwnText = Readonly<{ box: Box; marks: boolean }>
+/** The client box of an element's own text nodes, and the most combining marks it stacks on one letter. */
+type OwnText = Readonly<{ box: Box; stack: number }>
 
 /**
  * The computed-style values the measurer reads, snapshotted once per element per style epoch.
@@ -155,6 +166,9 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 	let generatedContents = new Map<Element, GeneratedContent>()
 	let ownTexts = new Map<Element, OwnText | undefined>()
 	let topLayer: readonly Element[] | undefined
+	let topLayerSet: ReadonlySet<Element> | undefined
+	let chainShapes = new Map<Element, Map<ClipSide, PolygonShape[] | 'unsupported'>>()
+	let coverShapes = new Map<Element, PolygonShape | undefined>()
 	let viewport: Box | undefined
 
 	function rectOf(element: Element): DOMRect {
@@ -454,7 +468,10 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 		let box = viewportBox()
 		const rounded: RoundedShape[] = []
 		let mode = positionMode(styleOf(element))
-		for (let ancestor = element.parentElement; ancestor; ancestor = ancestor.parentElement) {
+		const top = topLayerElements()
+		for (let ancestor = element.parentElement, below: Element = element; ancestor; below = ancestor, ancestor = ancestor.parentElement) {
+			// A top-layer element is rendered outside its ancestors: their clips do not reach it.
+			if (top.has(below)) break
 			if (ancestor === doc.body || ancestor === doc.documentElement) break
 			const style = styleOf(ancestor)
 			const containsFixed = containsFixedDescendants(style)
@@ -546,7 +563,9 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 		let base: PolygonShape | undefined = rectangleShape(visible.left, visible.top, visible.right, visible.bottom)
 		if (contained.length > 0) base = intersectShapes(base, contained)
 		if (!base) return []
-		const result = subtractShapes(base, plan.subtract.map(cut => isPolygonCut(cut.shape) ? cut.shape : rectangleShape(cut.shape.x, cut.shape.y, cut.shape.x + cut.shape.width, cut.shape.y + cut.shape.height)))
+		const cuts = cappedCuts(plan.subtract.map(cut => isPolygonCut(cut.shape) ? cut.shape : rectangleShape(cut.shape.x, cut.shape.y, cut.shape.x + cut.shape.width, cut.shape.y + cut.shape.height)))
+		if (!cuts) return []
+		const result = subtractShapes(base, cuts)
 		if (!result) return []
 		const rings = outerRings(result)
 		if (!rings) return []
@@ -558,21 +577,53 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 	}
 
 	/**
+	 * The cuts of one Widget within the work caps. Past `MAX_CUT_SHAPES` polygons or `MAX_CUT_VERTICES`
+	 * vertices in all, every polygon cut becomes its bounding box, which contains it and so only
+	 * removes more; past `MAX_TOTAL_CUTS` cuts of any kind there is no answer.
+	 */
+	function cappedCuts(cuts: PolygonShape[]): PolygonShape[] | undefined {
+		if (cuts.length > MAX_TOTAL_CUTS) return undefined
+		const polygons = cuts.filter(cut => cut.polygons.length > 0 && !isRectangleShape(cut))
+		if (polygons.length <= MAX_CUT_SHAPES && polygons.reduce((sum, cut) => sum + vertexCount(cut), 0) <= MAX_CUT_VERTICES) return cuts
+		return cuts.flatMap((cut) => {
+			if (!polygons.includes(cut)) return [cut]
+			const bounds = boundsOf(cut)
+			return bounds ? [rectangleShape(bounds.left, bounds.top, bounds.right, bounds.bottom)] : []
+		})
+	}
+
+	/**
 	 * Every clip path on the element's flat-tree chain as a polygon shape on the given side, or
 	 * `unsupported` when one cannot be derived: a mask, a path, URL or reference form this module does
 	 * not model, a box without a measurable scale, an SVG element.
 	 */
 	function chainClipShapes(element: Element, side: ClipSide): PolygonShape[] | 'unsupported' {
+		let bySide = chainShapes.get(element)
+		if (!bySide) chainShapes.set(element, bySide = new Map())
+		let shapes = bySide.get(side)
+		if (!shapes) bySide.set(side, shapes = computeChainClipShapes(element, side))
+		return shapes
+	}
+
+	function computeChainClipShapes(element: Element, side: ClipSide): PolygonShape[] | 'unsupported' {
 		const shapes: PolygonShape[] = []
+		const top = topLayerElements()
 		for (let node: Element | null = element; node; node = flatTreeParent(node)) {
 			const style = styleOf(node)
 			if (hasMask(style)) return 'unsupported'
-			if (style.clipPath === '' || style.clipPath === 'none') continue
-			const shape = clipPathShape(node, style, side)
-			if (!shape) return 'unsupported'
-			shapes.push(shape)
+			if (style.clipPath !== '' && style.clipPath !== 'none') {
+				const shape = clipPathShape(node, style, side)
+				if (!shape) return 'unsupported'
+				shapes.push(shape)
+			}
+			// A top-layer element is rendered outside its ancestors: their clips do not reach it.
+			if (top.has(node)) break
 		}
 		return shapes
+	}
+
+	function topLayerElements(): ReadonlySet<Element> {
+		return topLayerSet ??= new Set(topLayerRoots())
 	}
 
 	/**
@@ -844,7 +895,11 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 			const radii = insetRadii(outer, inset)
 			const shape: RoundedShape = { rect: rectOfBox(covered), radii }
 			if (cornersReach(shape, reach)) {
-				const approximated = exactScaleOf(candidate) === undefined ? undefined : roundedRectShape(shape.rect, shape.radii, 'cover', roundedTargetMaxError)
+				let approximated = coverShapes.get(candidate)
+				if (!coverShapes.has(candidate)) {
+					approximated = exactScaleOf(candidate) === undefined ? undefined : roundedRectShape(shape.rect, shape.radii, 'cover', roundedTargetMaxError)
+					coverShapes.set(candidate, approximated)
+				}
 				if (!approximated) return 'bounded'
 				covers.push(approximated)
 				kind = 'rounded-box'
@@ -866,8 +921,13 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 		if (covers.length === 0) return { evidence: { classification: 'opaque', targetContribution: 'proven-zero', shape: { kind: 'rectangle', shape: rectOfBox(painted) } }, rect: painted, clip: clips.box }
 		const shape = intersectShapes(rectangleShape(painted.left, painted.top, painted.right, painted.bottom), covers)
 		if (!shape) return 'bounded'
-		// Nothing of the occluder lies where it clips: it covers nothing.
-		if (shape.polygons.length === 0) return undefined
+		// Nothing of the occluder lies where it clips: it covers nothing. An empty answer for shapes whose
+		// boxes overlap is not believed: the paint bound stands in for it.
+		if (shape.polygons.length === 0) {
+			const painting = rectangleShape(painted.left, painted.top, painted.right, painted.bottom)
+			const plausible = covers.every(cover => cover.polygons.length > 0 && boundsOverlap(boundsOf(cover), boundsOf(painting)))
+			return plausible ? 'bounded' : undefined
+		}
 		return { evidence: { classification: 'opaque', targetContribution: 'proven-zero', shape: { kind, shape } }, rect: undefined, clip: clips.box }
 	}
 
@@ -1203,7 +1263,7 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 	function ownTextOf(element: Element): OwnText | undefined {
 		if (ownTexts.has(element)) return ownTexts.get(element)
 		let box: Box | undefined
-		let marks = false
+		let stack = 0
 		for (const node of Array.from(element.childNodes)) {
 			if (node.nodeType !== 3 || !node.textContent) continue
 			const range = doc.createRange()
@@ -1211,10 +1271,9 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 			const rect = range.getBoundingClientRect()
 			if (!(rect.width > 0) && !(rect.height > 0)) continue
 			box = box ? union(box, rect) : { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom }
-			// Stacked combining marks paint as far from the line as the text stacks them: no bound.
-			if (COMBINING_MARK.test(node.textContent)) marks = true
+			for (const run of node.textContent.matchAll(COMBINING_MARKS)) stack = Math.max(stack, run[0].length)
 		}
-		const text = box ? { box, marks } : undefined
+		const text = box ? { box, stack } : undefined
 		ownTexts.set(element, text)
 		return text
 	}
@@ -1223,20 +1282,21 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 	 * The element's own text as paint: the client box of its text nodes grown by how far their
 	 * decorations (its own and those propagated from an ancestor), strokes and text shadows can paint
 	 * beyond the inline boxes, and with `ink` by one em of glyph ink; undefined without rendered text.
-	 * Text with combining marks has no bound. A decoration reaches its offset plus its thickness (one
+	 * Combining marks add an em each to the reach, and more than `MAX_MARK_STACK` stacked on one letter have no bound. A decoration reaches its offset plus its thickness (one
 	 * em when automatic).
 	 */
 	function ownTextBound(element: Element, style: StyleFacts, ink: boolean): Box | undefined | 'unbounded' {
 		const text = ownTextOf(element)
 		if (!text) return undefined
-		if (text.marks) return 'unbounded'
+		if (text.stack > MAX_MARK_STACK) return 'unbounded'
 		const shadow = shadowOutsets(style.textShadow, false)
 		const em = lengthPx(style.fontSize)
 		const stroke = style.webkitTextStrokeWidth === '' ? 0 : lengthPx(style.webkitTextStrokeWidth)
 		if (!shadow || em === undefined || stroke === undefined) return 'unbounded'
 		const decoration = decorationReach(element, em)
 		if (decoration === undefined) return 'unbounded'
-		const reach = (ink ? em : 0) + Math.abs(stroke) + decoration
+		// Each mark stacked on a letter can sit about an em farther from the line than the one below it.
+		const reach = (ink ? em : 0) + text.stack * em + Math.abs(stroke) + decoration
 		const grown = growBox(text.box, element, { left: reach + shadow.left, top: reach + shadow.top, right: reach + shadow.right, bottom: reach + shadow.bottom })
 		return grown ?? 'unbounded'
 	}
@@ -1408,6 +1468,9 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 		generatedContents = new Map()
 		ownTexts = new Map()
 		topLayer = undefined
+		topLayerSet = undefined
+		chainShapes = new Map()
+		coverShapes = new Map()
 		candidates = undefined
 		viewport = undefined
 	}
@@ -1432,8 +1495,10 @@ export function createDomGeometryMeasurer(options: DomGeometryMeasurerOptions): 
 	})
 }
 
-/** Any combining mark: stacked marks paint arbitrarily far from the line they sit on. */
-const COMBINING_MARK = /\p{M}/u
+/** A run of combining marks after a letter. */
+const COMBINING_MARKS = /\p{M}+/gu
+/** The most marks stacked on one letter that have a bound (Thai, Devanagari, Arabic and decomposed Latin stack at most 3 or 4); more has none. */
+const MAX_MARK_STACK = 12
 const NO_GENERATED_CONTENT: GeneratedContent = Object.freeze({ flow: false, boxes: Object.freeze([]) })
 
 /** Whether the resolved style of a `::before` or `::after` belongs to a generated box. */

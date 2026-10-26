@@ -39,7 +39,82 @@ export function rectangleShape(left: number, top: number, right: number, bottom:
 	return ringShape(rectangleRing(left, top, right, bottom), 0)
 }
 
+/** The most vertices a ring may have to be tested for simplicity (the test is quadratic) or used as an exact shape. */
+export const MAX_RING_VERTICES = 256
+/** The most polygon cuts, and the most vertices in all of them, one Widget's subtraction takes on; past it a cut is its bounding box. */
+export const MAX_CUT_SHAPES = 40
+export const MAX_CUT_VERTICES = 2000
+
 type LibraryGeometry = Parameters<typeof polygonClipping.union>[0]
+type Bounds = Readonly<{ left: number; top: number; right: number; bottom: number }>
+
+export function vertexCount(shape: PolygonShape): number {
+	return shape.polygons.reduce((sum, polygon) => sum + polygon.reduce((inner, ring) => inner + ring.length, 0), 0)
+}
+
+/** The bounding box of a shape, undefined for an empty one. */
+export function boundsOf(shape: PolygonShape): Bounds | undefined {
+	let bounds: Bounds | undefined
+	for (const polygon of shape.polygons) {
+		for (const [x, y] of polygon[0] ?? []) {
+			bounds = bounds ? { left: Math.min(bounds.left, x), top: Math.min(bounds.top, y), right: Math.max(bounds.right, x), bottom: Math.max(bounds.bottom, y) } : { left: x, top: y, right: x, bottom: y }
+		}
+	}
+	return bounds
+}
+
+function ringArea(ring: PolygonRing): number {
+	let twice = 0
+	for (let index = 0; index < ring.length; index++) {
+		const a = ring[index]!
+		const b = ring[(index + 1) % ring.length]!
+		twice += a[0] * b[1] - b[0] * a[1]
+	}
+	return Math.abs(twice) / 2
+}
+
+function areaOf(shape: MultiPolygon): number {
+	return shape.reduce((sum, polygon) => sum + ringArea(polygon[0] ?? []) - polygon.slice(1).reduce((holes, hole) => holes + ringArea(hole), 0), 0)
+}
+
+function insideRing(ring: PolygonRing, [x, y]: readonly [number, number]): boolean {
+	let odd = false
+	for (let a = 0, b = ring.length - 1; a < ring.length; b = a++) {
+		const [xa, ya] = ring[a]!
+		const [xb, yb] = ring[b]!
+		if ((ya > y) !== (yb > y) && x < (xb - xa) * (y - ya) / (yb - ya) + xa) odd = !odd
+	}
+	return odd
+}
+
+function distanceToRing(ring: PolygonRing, [x, y]: readonly [number, number]): number {
+	let best = Number.POSITIVE_INFINITY
+	for (let index = 0; index < ring.length; index++) {
+		const [ax, ay] = ring[index]!
+		const [bx, by] = ring[(index + 1) % ring.length]!
+		const dx = bx - ax
+		const dy = by - ay
+		const t = dx === 0 && dy === 0 ? 0 : Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy)))
+		best = Math.min(best, Math.hypot(x - (ax + t * dx), y - (ay + t * dy)))
+	}
+	return best
+}
+
+/** The slack, in px, of the sanity checks on the library's output: coordinates and areas carry rounding. */
+function slack(...shapes: readonly PolygonShape[]): number {
+	let scale = 1
+	for (const shape of shapes) {
+		const bounds = boundsOf(shape)
+		if (bounds) scale = Math.max(scale, Math.abs(bounds.left), Math.abs(bounds.top), Math.abs(bounds.right), Math.abs(bounds.bottom))
+	}
+	return scale * 1e-9
+}
+
+function withinBounds(inner: Bounds | undefined, outer: Bounds | undefined, epsilon: number): boolean {
+	if (!inner) return true
+	if (!outer) return false
+	return inner.left >= outer.left - epsilon && inner.top >= outer.top - epsilon && inner.right <= outer.right + epsilon && inner.bottom <= outer.bottom + epsilon
+}
 
 function guarded(operation: () => MultiPolygon): MultiPolygon | undefined {
 	try {
@@ -60,6 +135,12 @@ export function intersectShapes(base: PolygonShape, shapes: readonly PolygonShap
 	if (shapes.length === 0) return base
 	const polygons = guarded(() => polygonClipping.intersection(geometry(base.polygons), ...shapes.map(shape => geometry(shape.polygons))) as MultiPolygon)
 	if (!polygons) return undefined
+	// The library's answer is checked against what any intersection must satisfy; a violation is no answer.
+	const epsilon = slack(base, ...shapes)
+	const result = { polygons, maxError: 0 }
+	const smallest = Math.min(areaOf(base.polygons), ...shapes.map(shape => areaOf(shape.polygons)))
+	if (areaOf(polygons) > smallest + epsilon * Math.max(1, smallest)) return undefined
+	if (!withinBounds(boundsOf(result), boundsOf(base), epsilon) || !shapes.every(shape => withinBounds(boundsOf(result), boundsOf(shape), epsilon))) return undefined
 	return Object.freeze({ polygons, maxError: Math.max(base.maxError, ...shapes.map(shape => shape.maxError)) })
 }
 
@@ -69,6 +150,11 @@ export function unionShapes(shapes: readonly PolygonShape[]): PolygonShape | und
 	const [first, ...rest] = shapes as [PolygonShape, ...PolygonShape[]]
 	const polygons = guarded(() => polygonClipping.union(geometry(first.polygons), ...rest.map(shape => geometry(shape.polygons))) as MultiPolygon)
 	if (!polygons) return undefined
+	const epsilon = slack(...shapes)
+	const total = shapes.reduce((sum, shape) => sum + areaOf(shape.polygons), 0)
+	const largest = Math.max(...shapes.map(shape => areaOf(shape.polygons)))
+	const area = areaOf(polygons)
+	if (area > total + epsilon * Math.max(1, total) || area < largest - epsilon * Math.max(1, largest)) return undefined
 	return Object.freeze({ polygons, maxError: Math.max(...shapes.map(shape => shape.maxError)) })
 }
 
@@ -81,7 +167,25 @@ export function subtractShapes(base: PolygonShape, cuts: readonly PolygonShape[]
 	if (cuts.length === 0) return base
 	const polygons = guarded(() => polygonClipping.difference(geometry(base.polygons), ...cuts.map(cut => geometry(cut.polygons))) as MultiPolygon)
 	if (!polygons) return undefined
+	// The library's answer is checked against what any difference must satisfy; a violation is no answer.
+	const epsilon = slack(base, ...cuts)
+	const baseArea = areaOf(base.polygons)
+	const area = areaOf(polygons)
+	if (area > baseArea + epsilon * Math.max(1, baseArea)) return undefined
+	if (!withinBounds(boundsOf({ polygons, maxError: 0 }), boundsOf(base), epsilon)) return undefined
+	// A cut with a vertex well inside the base takes some of it away: the result must be smaller.
+	if (area >= baseArea - epsilon * Math.max(1, baseArea) && cuts.some(cut => overlapsInterior(base, cut, epsilon * 1e3))) return undefined
 	return Object.freeze({ polygons, maxError: Math.max(base.maxError, ...cuts.map(cut => cut.maxError)) })
+}
+
+/** Whether some vertex of `cut` lies inside `base`'s outer boundary by more than `margin`, so the two overlap with area. */
+function overlapsInterior(base: PolygonShape, cut: PolygonShape, margin: number): boolean {
+	for (const polygon of cut.polygons) {
+		for (const vertex of polygon[0] ?? []) {
+			if (base.polygons.some(basePolygon => basePolygon[0] !== undefined && insideRing(basePolygon[0], vertex) && distanceToRing(basePolygon[0], vertex) > margin)) return true
+		}
+	}
+	return false
 }
 
 /**
@@ -127,7 +231,7 @@ function validRing(ring: PolygonRing): boolean {
  * shared vertex. Used before a user-supplied `polygon()` is taken as an exact shape.
  */
 export function isSimpleRing(ring: PolygonRing): boolean {
-	if (!validRing(ring)) return false
+	if (ring.length > MAX_RING_VERTICES || !validRing(ring)) return false
 	const count = ring.length
 	for (let first = 0; first < count; first++) {
 		const a = ring[first]!

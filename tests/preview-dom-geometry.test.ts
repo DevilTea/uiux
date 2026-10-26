@@ -523,12 +523,76 @@ describe('Runtime DOM measurer', () => {
 		expect(Object.values(result).every(geometry => valid(geometry))).toBe(true)
 	})
 
-	it('fails closed for text whose combining marks have no bound (#112)', async () => {
+	it('bounds combining marks by the marks stacked on a letter, so text elsewhere keeps its Widgets and text over one is cut (#112)', async () => {
+		const stacked = (count: number) => `a${'́'.repeat(count)}`
+		const body = (text: string) => `
+			<div data-widget-id="near" style="position:absolute;left:0;top:0;width:300px;height:100px;background:#eee"></div>
+			<div data-widget-id="far" style="position:absolute;left:0;top:400px;width:300px;height:100px;background:#eee"></div>
+			<div style="position:absolute;left:100px;top:40px;font:16px sans-serif;color:#000">${text}</div>`
+		// Decomposed Latin, Thai and Devanagari stack at most four marks: a finite bound of that many ems.
+		const result = await measure(body(`é̂̃ ${stacked(4)} กิ้ क्षि`), ['near', 'far'])
+		expect(bounds(result.far!)).toEqual([{ left: 0, top: 400, right: 300, bottom: 500, maxError: 0 }])
+		expect(result.near!.regions.length).toBeGreaterThan(0)
+		expect(area(result.near!)).toBeLessThan(300 * 100)
+		expect((await auditPixels(result)).near!.foreign).toBe(0)
+		// More marks than any script stacks have no bound: nothing near the text is reliable.
+		expect((await measure(body(stacked(13)), ['near'])).near!.regions).toEqual([])
+	})
+
+	it('does not apply the clip path or overflow clip of an ancestor to an element in the top layer (#112)', async () => {
 		const result = await measure(`
-			<div data-widget-id="marks" style="position:absolute;left:0;top:0;width:300px;height:100px;background:#eee"></div>
-			<div style="position:absolute;left:100px;top:0;font:16px sans-serif;color:#000">á́́́ b</div>`, ['marks'])
-		expect(result.marks!.rect.width).toBe(300)
-		expect(result.marks!.regions).toEqual([])
+			<div style="position:absolute;left:0;top:0;width:50px;height:50px;overflow:hidden;clip-path:circle(10px at 0 0)">
+				<dialog id="d" style="width:100px;height:60px;margin:0;left:450px;top:300px;padding:0;border:0"><div data-widget-id="inside" style="width:100px;height:60px;background:#eee"></div></dialog>
+			</div>
+			<div style="position:absolute;left:0;top:200px;width:50px;height:50px;overflow:hidden;clip-path:circle(10px at 0 0)"><div data-widget-id="plain" style="width:100px;height:60px;background:#eee"></div></div>
+			<script>document.getElementById('d').showModal()</script>`, ['inside', 'plain'])
+		expect(bounds(result.inside!)).toEqual([{ left: 450, top: 300, right: 550, bottom: 360, maxError: 0 }])
+		// The same Widget outside the top layer is still clipped.
+		expect(area(result.plain!)).toBeLessThan(10 * 10 * Math.PI)
+	})
+
+	it('caps the work of a Widget under many curved occluders and of huge clip paths, falling back to safe boxes (#112)', async () => {
+		await page.setViewportSize({ width: 900, height: 600 })
+		const timed = async (body: string, ids: readonly string[]) => {
+			await page.setContent(`<!doctype html><html><head><style>html,body{margin:0}*{box-sizing:border-box}</style></head><body>${body}</body></html>`)
+			await page.addScriptTag({ content: bundle })
+			return page.evaluate((names) => {
+				const P = (globalThis as never as { UiuxGeometryPerf: { createDomGeometryMeasurer(options: { document: Document }): { beginPass(): void; measure(id: string): unknown; endPass(): void } } }).UiuxGeometryPerf
+				const measurer = P.createDomGeometryMeasurer({ document })
+				measurer.beginPass()
+				const started = performance.now()
+				const out = Object.fromEntries(names.map(id => [id, measurer.measure(id)]))
+				const elapsed = performance.now() - started
+				measurer.endPass()
+				return { elapsed, out: JSON.parse(JSON.stringify(out)) as Record<string, WidgetGeometry> }
+			}, ids)
+		}
+		// 120 small discs straddling the Widget's top edge: more polygons than the cap, so boxes cut instead.
+		const discs = Array.from({ length: 120 }, (_, index) => `<div style="position:absolute;left:${index * 7}px;top:-4px;width:6px;height:8px;border-radius:50%;background:#000"></div>`).join('')
+		const many = await timed(`<div data-widget-id="w" style="position:absolute;left:0;top:0;width:840px;height:100px;background:#eee"></div>${discs}`, ['w'])
+		expect(many.elapsed).toBeLessThan(150)
+		expect(many.out.w!.regions.length).toBeGreaterThan(0)
+		expect(valid(many.out.w!)).toBe(true)
+		for (const region of many.out.w!.regions) expect(region.contour.commands.length).toBeLessThan(2000)
+		// A clip path with 1000 vertices has no exact shape here: its box is cut, in no time.
+		const points = Array.from({ length: 1000 }, (_, index) => `${50 + 50 * Math.cos(index * 2 * Math.PI / 1000)}% ${50 + 50 * Math.sin(index * 2 * Math.PI / 1000)}%`).join(',')
+		const huge = await timed(`<div data-widget-id="w" style="position:absolute;left:0;top:0;width:300px;height:100px;background:#eee"></div><div style="position:absolute;left:100px;top:0;width:50px;height:100px;background:#000;clip-path:polygon(${points})"></div>`, ['w'])
+		expect(huge.elapsed).toBeLessThan(150)
+		expect(bounds(huge.out.w!).sort((a, b) => a.left - b.left).map(piece => [piece.left, piece.right])).toEqual([[0, 100], [150, 300]])
+	})
+
+	it('keeps every pixel a curved occluder paints out of the regions under a transform scale (#112)', async () => {
+		await page.setViewportSize({ width: 800, height: 600 })
+		const result = await measure(`
+			<div data-widget-id="w" style="position:absolute;left:0;top:20px;width:400px;height:100px;background:#eee"></div>
+			<div style="position:absolute;left:0;top:0;width:200px;height:200px;transform:scale(1.5);transform-origin:0 0">
+				<div style="position:absolute;left:100px;top:0;width:100px;height:100px;background:#000;clip-path:circle(50%)"></div>
+			</div>`, ['w'])
+		const audit = await auditPixels(result, 1, true)
+		expect(result.w!.regions.length).toBeGreaterThan(0)
+		expect(audit.w!.foreign).toBe(0)
+		expect(audit.w!.lost).toBeLessThan(900)
+		expect(result.w!.regions[0]!.maxError).toBeGreaterThan(0)
 	})
 
 	it('selects paint without a finite bound wherever its clips allow, not only where its border box is (#112)', async () => {
