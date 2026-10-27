@@ -1,5 +1,5 @@
 import type { FormalEvidenceRecord } from '../../src/domain/evidence/schema'
-import { ADAPTER_CHANGED_REASON, ADAPTER_PROVENANCE_MISSING_REASON, ADAPTER_PROVENANCE_UNAVAILABLE_REASON, evaluateEvidenceStaleness, PRODUCT_KIT_CHANGED_REASON, PRODUCT_KIT_PROVENANCE_UNAVAILABLE_REASON, RENDER_INPUT_CHANGED_REASON, RENDER_INPUT_DIGEST_MISSING_REASON, type EvidenceStalenessContext } from '../../src/domain/evidence/staleness'
+import { ADAPTER_CHANGED_REASON, ADAPTER_PROVENANCE_MISSING_REASON, ADAPTER_PROVENANCE_UNAVAILABLE_REASON, evaluateEvidenceStaleness, evaluateFlowTraceStaleness, FLOW_CHANGED_REASON, FLOW_PROVENANCE_MISSING_REASON, FLOW_REMOVED_REASON, FLOW_TRACE_CAPTURE_MISSING_REASON, FLOW_TRACE_FLOW_MISSING_REASON, PRODUCT_KIT_CHANGED_REASON, PRODUCT_KIT_PROVENANCE_UNAVAILABLE_REASON, RENDER_INPUT_CHANGED_REASON, RENDER_INPUT_DIGEST_MISSING_REASON, type EvidenceStalenessContext, type FlowTraceStalenessContext } from '../../src/domain/evidence/staleness'
 import type { HandoffBlockingDiagnostic, HandoffReadiness } from '../../src/domain/handoff/schema'
 import type { ResolvedRenderContext } from '../../src/domain/render-context/schema'
 import { REVIEW_RESOLUTIONS, type ReviewResolution } from '../../src/domain/reviews/schema'
@@ -99,6 +99,12 @@ export type EvidenceFreshnessReason =
 	| 'adapterChanged'
 	| 'noAdapters'
 	| 'adaptersUnavailable'
+	| 'flowMissing'
+	| 'flowChanged'
+	| 'noFlowRevision'
+	| 'traceCaptureMissing'
+	| 'traceCaptureStale'
+	| 'traceCaptureUnknown'
 	| 'other'
 
 export type EvidenceFreshness = Readonly<{
@@ -140,6 +146,28 @@ export function evidenceFreshness(record: FormalEvidenceRecord, context: Evidenc
 	return { state: 'fresh' }
 }
 
+/**
+ * Freshness of a `flow_trace` record (Rule 01a11544-6760-7ec2-8430-0f7cc5807259), judged by
+ * `evaluateFlowTraceStaleness`. The Submit for review picker only shows it: a trace is never refused
+ * as stale (Rule 01a11544-558b-…, owner ruling 6 of Discussion #241).
+ */
+export function flowTraceFreshness(record: FormalEvidenceRecord, context: FlowTraceStalenessContext): EvidenceFreshness {
+	const assessed = evaluateFlowTraceStaleness(record, context)
+	if (!assessed.isStale) return { state: 'fresh' }
+	const reason = assessed.reason
+	if (reason === FLOW_TRACE_FLOW_MISSING_REASON || reason === FLOW_REMOVED_REASON) return { state: 'stale', reason: 'flowMissing' }
+	if (reason === FLOW_PROVENANCE_MISSING_REASON) return { state: 'stale', reason: 'noFlowRevision' }
+	if (reason === FLOW_CHANGED_REASON) return { state: 'stale', reason: 'flowChanged' }
+	if (reason === FLOW_TRACE_CAPTURE_MISSING_REASON) return { state: 'stale', reason: 'traceCaptureMissing' }
+	return assessed.unknown ? { state: 'unknown', reason: 'traceCaptureUnknown' } : { state: 'stale', reason: 'traceCaptureStale' }
+}
+
+/** True when a `flow_trace` has a step in `viewId`, that is, its Flow enters that View (`data.steps[].viewId`). */
+export function flowTraceEntersView(record: FormalEvidenceRecord, viewId: string): boolean {
+	const steps = (record.data as { steps?: readonly { viewId?: unknown }[] } | undefined)?.steps
+	return Array.isArray(steps) && steps.some(step => step?.viewId === viewId)
+}
+
 function unknownReason(reason: string | undefined): EvidenceFreshnessReason {
 	if (reason === ADAPTER_PROVENANCE_MISSING_REASON) return 'noAdapters'
 	if (reason === ADAPTER_PROVENANCE_UNAVAILABLE_REASON) return 'adaptersUnavailable'
@@ -167,6 +195,21 @@ function staleReason(reason: string | undefined): Pick<EvidenceFreshness, 'reaso
 	}
 	return { reason: 'other' }
 }
+
+/**
+ * A non-capture Evidence record the Submit for review picker offers (Rule 01a11544-55b0-…): a
+ * `checks_run` run, a `flow_trace` of a Flow or an `interaction_replay` of the View. `freshness` is
+ * shown for a trace only; no record is refused as stale (Rule 01a11544-558b-…).
+ */
+export type CitableEvidenceKind = 'checks_run' | 'flow_trace' | 'interaction_replay'
+export const CITABLE_EVIDENCE_KINDS: readonly CitableEvidenceKind[] = ['checks_run', 'flow_trace', 'interaction_replay']
+
+export type CitableEvidenceEntry = Readonly<{
+	kind: CitableEvidenceKind
+	digest: string
+	record: FormalEvidenceRecord
+	freshness?: EvidenceFreshness
+}>
 
 // ---------------------------------------------------------------------------------------------
 // Render contexts: explicit capture lists (Part 10: no hidden Cartesian expansion)

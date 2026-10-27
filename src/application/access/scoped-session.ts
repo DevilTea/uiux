@@ -141,7 +141,7 @@ export interface ScopedWorkspaceSession {
 	readPointResource(kind: PointResourceKind, key: string): Promise<PointResourceRead | undefined>
 	listPointResources(input: unknown): Promise<ResourceDiscoveryOutcome>
 	searchPointResources(input: unknown): Promise<ResourceDiscoveryOutcome>
-	listEvidence(viewId?: string): Promise<readonly FormalEvidenceItem[]>
+	listEvidence(viewId?: string, kinds?: readonly string[]): Promise<readonly FormalEvidenceItem[]>
 	/** The current Product Kit provenance that Evidence freshness is judged against; read with the Evidence, under its key. */
 	productKitProvenance(): Promise<CurrentProductKitProvenance>
 	/** The current Adapter provenance that Evidence freshness is judged against; read with the Evidence, under its key. */
@@ -500,7 +500,7 @@ export function createScopedWorkspaceSession(
 		async readPointResource(kind, key) { assert('readPointResource'); return app.readPointResource(kind, key) },
 		async listPointResources(input) { assert('listPointResources'); return app.listPointResources(input) },
 		async searchPointResources(input) { assert('searchPointResources'); return app.searchPointResources(input) },
-		async listEvidence(viewId) { assert('listEvidence'); return app.listEvidence(viewId) },
+		async listEvidence(viewId, kinds) { assert('listEvidence'); return app.listEvidence(viewId, kinds) },
 		async productKitProvenance() { assert('listEvidence'); return app.productKitProvenance() },
 		async adapterProvenance() { assert('listEvidence'); return app.adapterProvenance() },
 		async viewRenderInputs() { assert('listEvidence'); return app.viewRenderInputs() },

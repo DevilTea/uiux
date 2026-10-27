@@ -17,6 +17,7 @@ import type { Diagnostic, JsonObject, JsonValue } from '../../domain/validation'
 import type { TranslationEvaluation } from '../../preview/translation-evaluation'
 import type { FileNativePersistence } from '../../persistence'
 import { PersistenceError } from '../../persistence/errors'
+import { keptChecksRuns } from '../../persistence/artifact-gc'
 import { settledValue } from '../../persistence/file-native'
 import type { KitBuildStatus } from '../ports/kit-build'
 import { ASSET_LOAD_FAILED_DIAGNOSTIC, ASSET_LOAD_FAILED_STATUS, captureHarnessScreenshot, HARNESS_LAUNCH_ARGS, evaluateHarnessTranslations, openHarnessPreview, type HarnessPreview } from './capture-harness'
@@ -76,15 +77,26 @@ export interface FormalCaptureService {
 	capture(command: CaptureFormalEvidenceCommand): Promise<CaptureFormalEvidenceResult>
 	/** Replays an interaction recipe in the formal capture harness; the caller captures the context formally itself. */
 	replay(command: ReplayInteractionsCommand): Promise<InteractionReplayOutcome>
-	listEvidence(viewId?: string): Promise<readonly FormalEvidenceItem[]>
+	/**
+	 * The formal captures, or with `kinds` the Evidence records of exactly those kinds (the Submit for
+	 * review picker lists `checks_run`, `flow_trace` and `interaction_replay` records this way). Of the
+	 * `checks_run` records only the CHECKS_RUN_RETENTION with the newest `ranAt` are listed: older ones are
+	 * collectable, and each can hold up to 512 KB of findings.
+	 */
+	listEvidence(viewId?: string, kinds?: readonly string[]): Promise<readonly FormalEvidenceItem[]>
 	/** Every readable View's current render-input digest, against which Evidence freshness is judged. */
 	viewRenderInputs(): Promise<readonly ViewRenderInput[]>
 }
 
 /** The formal capture record in a parsed artifact, if it is one; used to filter inside the read lock. */
 export function formalCaptureRecordOf(value: unknown): FormalEvidenceRecord | undefined {
+	return evidenceRecordOfKinds(value, ['formal_capture'])
+}
+
+/** The Evidence record in a parsed artifact when it is one of `kinds`. */
+function evidenceRecordOfKinds(value: unknown, kinds: readonly string[]): FormalEvidenceRecord | undefined {
 	const validation = validateFormalEvidenceRecord(value)
-	return validation.ok && validation.value.kind === 'formal_capture' ? validation.value : undefined
+	return validation.ok && kinds.includes(validation.value.kind) ? validation.value : undefined
 }
 
 export function createFormalCaptureService(
@@ -563,9 +575,9 @@ export function createFormalCaptureService(
 		}
 	}
 
-	async function listEvidence(viewId?: string): Promise<readonly FormalEvidenceItem[]> {
+	async function listEvidence(viewId?: string, kinds: readonly string[] = ['formal_capture']): Promise<readonly FormalEvidenceItem[]> {
 		// One snapshot under one shared lock, not one lock acquisition per artifact (issue #318).
-		const candidates = await persistence.artifacts.readAllCandidateJson<unknown, FormalEvidenceRecord>({ select: formalCaptureRecordOf })
+		const candidates = await persistence.artifacts.readAllCandidateJson<unknown, FormalEvidenceRecord>({ select: value => evidenceRecordOfKinds(value, kinds) })
 		const items: FormalEvidenceItem[] = []
 
 		for (const { identity, value: record } of candidates) {
@@ -576,7 +588,8 @@ export function createFormalCaptureService(
 			items.push({ digest: identity, record })
 		}
 
-		return items.sort((a, b) => a.digest.localeCompare(b.digest))
+		const newestRuns = new Set(keptChecksRuns(items.filter(item => item.record.kind === 'checks_run').map(item => ({ identity: item.digest, ranAt: (item.record.executionContext as Record<string, unknown>).ranAt }))))
+		return items.filter(item => item.record.kind !== 'checks_run' || newestRuns.has(item.digest)).sort((a, b) => a.digest.localeCompare(b.digest))
 	}
 
 	async function viewRenderInputs(): Promise<readonly ViewRenderInput[]> {
