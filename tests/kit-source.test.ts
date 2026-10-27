@@ -407,24 +407,50 @@ describe('kit file reads stay inside kit/ and within their limits', { timeout: H
 		expect(grown).toEqual({ status: 'too_large', limit: Buffer.byteLength(BUTTON) })
 	})
 
-	it('lists at most 10,000 files and marks a cut-off listing truncated', async () => {
+	// One walk of 10,001 files costs about a second alone and several times that on a loaded host, so the
+	// two surfaces are separate tests (each with its own timeout budget and one walk) and the boundary is
+	// asserted below on a small cap.
+	async function fixtureWithMoreThanTheCap() {
 		const ctx = await fixture()
 		const many = join(ctx.kit, 'many')
 		await mkdir(many)
 		for (let start = 0; start <= MAX_KIT_FILE_ENTRIES; start += 500)
 			await Promise.all(Array.from({ length: Math.min(500, MAX_KIT_FILE_ENTRIES + 1 - start) }, (_, offset) => writeFile(join(many, `f${String(start + offset).padStart(5, '0')}.txt`), '')))
+		return ctx
+	}
+
+	it('lists at most 10,000 files and marks a cut-off listing truncated', async () => {
+		const ctx = await fixtureWithMoreThanTheCap()
 		const listed = (await listKitFilesForHttp(scoped(ctx.app, SOURCE_HUMAN))).body as { files: Array<{ path: string }>; truncated: boolean }
 		expect(listed.truncated).toBe(true)
 		expect(listed.files).toHaveLength(MAX_KIT_FILE_ENTRIES)
 		expect(listed.files.map(file => file.path)).toEqual(listed.files.map(file => file.path).sort())
+	})
+
+	it('marks a cut-off listing truncated in list_kit_files over MCP', async () => {
+		const ctx = await fixtureWithMoreThanTheCap()
 		await withMcp(ctx.app, AGENT, async (call) => {
 			expect((await call('list_kit_files')).structuredContent).toMatchObject({ status: 'listed', truncated: true })
 		})
-		// 9,994 generated files and the fixture's 5 fit.
-		for (const index of [0, 1, 2, 3, 4, 5, 6]) await rm(join(many, `f${String(index).padStart(5, '0')}.txt`))
-		const exact = await listKitFiles(await locateKitProject(ctx.workspace, 'kit'))
+	})
+
+	// The boundary runs on the same walk with a small cap (`listKitFiles`' `maxEntries`, which the 10,000 default feeds).
+	it('keeps a listing of exactly the cap whole and marks one file more truncated', async () => {
+		const ctx = await fixture()
+		const many = join(ctx.kit, 'many')
+		await mkdir(many)
+		await Promise.all(Array.from({ length: 20 }, (_, index) => writeFile(join(many, `f${String(index).padStart(2, '0')}.txt`), '')))
+		const kit = await locateKitProject(ctx.workspace, 'kit')
+		const whole = await listKitFiles(kit)
+		expect(whole.truncated).toBe(false)
+		const total = whole.files.length
+		expect(total).toBeGreaterThan(20)
+		const exact = await listKitFiles(kit, total)
 		expect(exact.truncated).toBe(false)
-		expect(exact.files).toHaveLength(MAX_KIT_FILE_ENTRIES - 1)
+		expect(exact.files).toHaveLength(total)
+		const cut = await listKitFiles(kit, total - 1)
+		expect(cut.truncated).toBe(true)
+		expect(cut.files).toHaveLength(total - 1)
 	})
 
 	it('refuses, never reads, a file whose directory is swapped for a link between the checks and the open', async () => {
