@@ -205,7 +205,7 @@ describe('validate_flow and capture_flow_evidence refusals', () => {
 		const first = await persistence.artifacts.put(new TextEncoder().encode('a formal capture recorded before the failure'))
 		const service = createFlowEvidenceService(persistence, {
 			readFlow: async () => ({ resource: twoStepFlow(), revision: 'r_flow', diagnostics: [] }),
-			replay: async () => { throw new Error('The replay is not reached after a failed capture.') },
+			openReplaySession: () => { throw new Error('The replay is not reached after a failed capture.') },
 			captureFormal: async ({ contexts }) => ({
 				status: 'incomplete',
 				executedAt: new Date().toISOString(),
@@ -293,6 +293,7 @@ describe('replaying each trigger as a browser action (Rule 01a11544-66d9-7fcd-84
 		const { persistence } = await seededSession(flow)
 		const captured: CaptureFormalEvidenceCommand[] = []
 		const replayed: ReplayInteractionsCommand[] = []
+		const sessions = { opened: 0, closed: 0 }
 		const service = createFlowEvidenceService(persistence, {
 			readFlow: async () => ({ resource: flow, revision: 'r_flow', diagnostics: [] }),
 			captureFormal: async (command) => {
@@ -303,12 +304,18 @@ describe('replaying each trigger as a browser action (Rule 01a11544-66d9-7fcd-84
 				}))
 				return { status: 'captured', executedAt: new Date().toISOString(), summary: { total: results.length, captured: results.length, failed: 0 }, results } as unknown as CaptureFormalEvidenceResult
 			},
-			replay: async (command) => {
-				replayed.push(command)
-				return answer(command)
+			openReplaySession: () => {
+				sessions.opened++
+				return {
+					replay: async (command) => {
+						replayed.push(command)
+						return answer(command)
+					},
+					close: async () => { sessions.closed++ },
+				}
 			},
 		})
-		return { persistence, service, captured, replayed }
+		return { persistence, service, captured, replayed, sessions }
 	}
 	const pass: InteractionReplayOutcome = { status: 'replayed', results: ['pass'] }
 
@@ -358,6 +365,23 @@ describe('replaying each trigger as a browser action (Rule 01a11544-66d9-7fcd-84
 		// Only the formal captures the run had already stored remain.
 		const added = (await persistence.artifacts.listIdentities()).filter(identity => !before.includes(identity))
 		expect(added).toHaveLength(2)
+	})
+
+	it('replays every trigger of a run in one session, which is closed once the run ends', async () => {
+		const flow: FlowResource = { ...twoStepFlow(), steps: { ...twoStepFlow().steps, [STEP_B]: { target: { viewId: VIEW_B }, transitions: [{ trigger: { widgetId: 'next', event: 'press' }, targetStepId: STEP_A }] } } }
+		const { service, replayed, sessions } = await serviceOver(flow, () => pass)
+		expect(await service.capture({ flowId: FLOW_ID, renderContext })).toMatchObject({ status: 'captured' })
+		expect(replayed).toHaveLength(2)
+		expect(sessions).toEqual({ opened: 1, closed: 1 })
+	})
+
+	it('closes the session when a replay cannot run, and when a replay throws', async () => {
+		const failed = await serviceOver(twoStepFlow(), () => ({ status: 'failed', diagnostics: [{ code: 'interaction.step_failed', path: '/steps/0', message: 'x' }] }))
+		expect(await failed.service.capture({ flowId: FLOW_ID, renderContext })).toMatchObject({ status: 'failed' })
+		expect(failed.sessions).toEqual({ opened: 1, closed: 1 })
+		const thrown = await serviceOver(twoStepFlow(), () => { throw new Error('boom') })
+		await expect(thrown.service.capture({ flowId: FLOW_ID, renderContext })).rejects.toThrow('boom')
+		expect(thrown.sessions).toEqual({ opened: 1, closed: 1 })
 	})
 
 	it('refuses a derived recipe with a trigger that is neither press nor click before any capture or replay, and records nothing', async () => {
