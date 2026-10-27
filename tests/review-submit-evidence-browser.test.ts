@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { chromium, type Browser, type Page } from 'playwright'
 
 import { CHECKS_RUN_SOURCES } from '../src/domain/evidence/checks-run'
-import { flowTraceRecord, interactionReplayRecord, putRecordInWorkspace } from './support/evidence-record'
+import { currentInteractionReplayRecord, flowTraceRecord, putRecordInWorkspace } from './support/evidence-record'
 import { startWorkbenchServer, type WorkbenchServer } from './support/workbench-server'
 
 /**
@@ -24,6 +24,7 @@ let newestRun: string
 let staleTrace: string
 let passingReplay: string
 let failingReplay: string
+let staleReplay: string
 let otherViewTrace: string
 
 async function api<T>(path: string, body?: unknown): Promise<T> {
@@ -49,8 +50,11 @@ beforeAll(async () => {
 	// The Flow changed since this trace ran, so it is stale; it can still be cited.
 	const capture = `sha256:${'c'.repeat(64)}`
 	staleTrace = await putRecordInWorkspace(server.workspaceRoot, flowTraceRecord({ flowId: FLOW_ID, flowRevision: 'r_earlier', stepId: STEP_ID, viewId: VIEW_ID }, capture))
-	passingReplay = await putRecordInWorkspace(server.workspaceRoot, interactionReplayRecord(VIEW_ID, 'pass', capture))
-	failingReplay = await putRecordInWorkspace(server.workspaceRoot, interactionReplayRecord(VIEW_ID, 'fail', `sha256:${'d'.repeat(64)}`))
+	// A replay copies its capture's context and provenance, so these are current unless the View's render input changed since (Clause 01a14e30-2e43-…).
+	passingReplay = await putRecordInWorkspace(server.workspaceRoot, await currentInteractionReplayRecord(server.workspaceRoot, VIEW_ID, { capture }))
+	failingReplay = await putRecordInWorkspace(server.workspaceRoot, await currentInteractionReplayRecord(server.workspaceRoot, VIEW_ID, { result: 'fail', capture: `sha256:${'d'.repeat(64)}` }))
+	// Every assertion passed, but the View's IR or Variants changed after the capture: stale.
+	staleReplay = await putRecordInWorkspace(server.workspaceRoot, await currentInteractionReplayRecord(server.workspaceRoot, VIEW_ID, { capture: `sha256:${'f'.repeat(64)}`, staleRenderInput: true }))
 	// A trace of a Flow that does not enter this View is not offered for it.
 	otherViewTrace = await putRecordInWorkspace(server.workspaceRoot, flowTraceRecord({ flowId: FLOW_ID, flowRevision: 'r_earlier', stepId: STEP_ID, viewId: '99999999-9999-4999-8999-999999999999' }, `sha256:${'e'.repeat(64)}`))
 }, 120_000)
@@ -102,13 +106,16 @@ describe('Submit for review cites any Evidence kind (issue #61)', () => {
 		const page = await openSubmit(threadId)
 		try {
 			await row(page, newestRun).waitFor({ timeout: 15_000 })
-			for (const digest of [olderRun, staleTrace, passingReplay, failingReplay]) expect(await row(page, digest).count()).toBe(1)
+			for (const digest of [olderRun, staleTrace, passingReplay, failingReplay, staleReplay]) expect(await row(page, digest).count()).toBe(1)
 			expect(await row(page, otherViewTrace).count()).toBe(0)
 			expect(await page.locator('[data-submit-evidence-kind]').evaluateAll(lists => lists.map(list => list.getAttribute('data-submit-evidence-kind')))).toEqual(['checks_run', 'flow_trace', 'interaction_replay'])
 			// Nothing is selected before a change domain is chosen.
 			expect(await checked(page, newestRun)).toBe('false')
 			// The trace says why it is not current; it is shown, not hidden.
 			expect(await row(page, staleTrace).innerText()).toContain('The Flow changed after this trace.')
+			// A replay is shown as current or stale the same way.
+			expect(await row(page, passingReplay).innerText()).toContain('Current')
+			expect(await row(page, staleReplay).innerText()).toContain('IR or Variants changed after capture')
 
 			await pickDomains(page, ['i18n (Locale messages)'])
 			// The ruling: i18n preselects the latest Run Checks record, point-in-time, never judged stale.
@@ -132,13 +139,18 @@ describe('Submit for review cites any Evidence kind (issue #61)', () => {
 			// A trace that is not current is not preselected, and a replay with a failed assertion is not either.
 			expect(await checked(page, staleTrace)).toBe('false')
 			expect(await checked(page, failingReplay)).toBe('false')
+			// A passing replay that is stale is not preselected either, and stays selectable, never refused.
+			expect(await checked(page, staleReplay)).toBe('false')
 			expect(await box(page, staleTrace).isEnabled()).toBe(true)
+			expect(await box(page, staleReplay).isEnabled()).toBe(true)
 			await box(page, staleTrace).click()
+			await box(page, staleReplay).click()
 			expect(await checked(page, staleTrace)).toBe('true')
+			expect(await checked(page, staleReplay)).toBe('true')
 			await page.locator('[data-submit-send]').click()
 			await page.locator('[data-submit-review]').waitFor({ state: 'detached', timeout: 15_000 })
 			const refs = await submittedRefs(threadId) as { kind: string; evidence: string }[]
-			expect(refs.map(ref => `${ref.kind} ${ref.evidence}`).sort()).toEqual([`flow_trace ${staleTrace}`, `interaction_replay ${passingReplay}`].sort())
+			expect(refs.map(ref => `${ref.kind} ${ref.evidence}`).sort()).toEqual([`flow_trace ${staleTrace}`, `interaction_replay ${passingReplay}`, `interaction_replay ${staleReplay}`].sort())
 		}
 		finally { await page.context().close() }
 	}, 120_000)

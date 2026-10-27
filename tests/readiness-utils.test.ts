@@ -92,6 +92,13 @@ describe('Evidence freshness (R9 acceptance 5)', () => {
 		expect(evidenceFreshness(record(), CURRENT)).toEqual({ state: 'fresh' })
 	})
 
+	it('judges an interaction_replay, which copies its capture context and provenance, as it judges a capture (Clause 01a14e30-2e43-…)', () => {
+		const replay = { ...record(), kind: 'interaction_replay' } as FormalEvidenceRecord
+		expect(evidenceFreshness(replay, CURRENT)).toEqual({ state: 'fresh' })
+		expect(evidenceFreshness(replay, { ...CURRENT, allViews: [{ key: VIEW, renderInputDigest: `sha256:${'e'.repeat(64)}` }] })).toEqual({ state: 'stale', reason: 'viewChanged' })
+		expect(evidenceFreshness(replay, { ...CURRENT, allViews: [] })).toEqual({ state: 'stale', reason: 'viewMissing' })
+	})
+
 	it('is stale when the View or Locale changed after capture', () => {
 		expect(evidenceFreshness(record(), { ...CURRENT, allViews: [{ key: VIEW, renderInputDigest: `sha256:${'e'.repeat(64)}` }] })).toEqual({ state: 'stale', reason: 'viewChanged' })
 		expect(evidenceFreshness(record(), { ...CURRENT, localeRevisions: { 'en-US': 'r_next' } })).toEqual({ state: 'stale', reason: 'localeChanged', subject: 'en-US' })

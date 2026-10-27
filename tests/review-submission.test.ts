@@ -56,8 +56,10 @@ describe('the Evidence a change domain preselects (owner ruling 6 of Discussion 
 		entry('checks_run', 'sha256:older'),
 		entry('flow_trace', 'sha256:fresh', { freshness: { state: 'fresh' } }),
 		entry('flow_trace', 'sha256:stale', { freshness: { state: 'stale', reason: 'flowChanged' } }),
-		entry('interaction_replay', 'sha256:passes', {}, { data: { assertions: [{ result: 'pass' }] } }),
-		entry('interaction_replay', 'sha256:fails', {}, { data: { assertions: [{ result: 'pass' }, { result: 'fail' }] } }),
+		entry('interaction_replay', 'sha256:passes', { freshness: { state: 'fresh' } }, { data: { assertions: [{ result: 'pass' }] } }),
+		entry('interaction_replay', 'sha256:fails', { freshness: { state: 'fresh' } }, { data: { assertions: [{ result: 'pass' }, { result: 'fail' }] } }),
+		entry('interaction_replay', 'sha256:passes-stale', { freshness: { state: 'stale', reason: 'viewChanged' } }, { data: { assertions: [{ result: 'pass' }] } }),
+		entry('interaction_replay', 'sha256:passes-unknown', { freshness: { state: 'unknown', reason: 'noProductKit' } }, { data: { assertions: [{ result: 'pass' }] } }),
 	]
 
 	it('maps i18n to checks_run, flow to flow_trace and interaction to interaction_replay, and nothing else', () => {
@@ -66,11 +68,16 @@ describe('the Evidence a change domain preselects (owner ruling 6 of Discussion 
 		expect(preselectedCitations('ir', entries)).toEqual([])
 	})
 
-	it('picks the latest Run Checks record, the current Flow traces and the passing replays, each declared with its kind', () => {
+	it('picks the latest Run Checks record, the current Flow traces and the passing replays that are current, each declared with its kind', () => {
 		expect(preselectedCitations('i18n', entries)).toEqual([{ kind: 'checks_run', evidence: 'sha256:newest' }])
 		expect(preselectedCitations('flow', entries)).toEqual([{ kind: 'flow_trace', evidence: 'sha256:fresh' }])
 		expect(preselectedCitations('interaction', entries)).toEqual([{ kind: 'interaction_replay', evidence: 'sha256:passes' }])
 		expect(preselectedCitations('i18n', [])).toEqual([])
+	})
+
+	it('does not preselect a replay that is stale or of unknown freshness, nor one without a freshness, but leaves it in the list', () => {
+		expect(preselectedCitations('interaction', entries.filter(item => item.digest !== 'sha256:passes'))).toEqual([])
+		expect(preselectedCitations('interaction', [entry('interaction_replay', 'sha256:no-freshness', {}, { data: { assertions: [{ result: 'pass' }] } })])).toEqual([])
 	})
 })
 

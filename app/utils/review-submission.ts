@@ -54,7 +54,7 @@ export const EVIDENCE_KIND_BY_CHANGE_DOMAIN: Readonly<Record<string, CitableEvid
 
 /**
  * The records of the kind `domain` preselects: the latest Run Checks record (`entries` lists them newest
- * first), every Flow trace that is current, every interaction replay whose assertions all passed. Only
+ * first), every Flow trace that is current, every interaction replay whose assertions all passed and that is current (Clause 01a17ac7-…). Only
  * a starting point: each can be unticked, and none is required.
  */
 export function preselectedCitations(domain: string, entries: readonly CitableEvidenceEntry[]): readonly EvidenceCitation[] {
@@ -67,7 +67,7 @@ export function preselectedCitations(domain: string, entries: readonly CitableEv
 			? ofKind.filter(entry => entry.freshness?.state === 'fresh')
 			: ofKind.filter((entry) => {
 					const assertions = (entry.record.data as { assertions?: readonly { result?: string }[] } | undefined)?.assertions ?? []
-					return assertions.length > 0 && assertions.every(assertion => assertion.result === 'pass')
+					return entry.freshness?.state === 'fresh' && assertions.length > 0 && assertions.every(assertion => assertion.result === 'pass')
 				})
 	return picked.map(entry => ({ kind: entry.kind, evidence: entry.digest }))
 }
