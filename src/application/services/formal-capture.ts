@@ -73,10 +73,18 @@ export type ReplayInteractionsCommand = Readonly<{
 	baseUrl?: string
 }>
 
+/** Replays that share one browser; the caller closes it (see `FormalCaptureService.openReplaySession`). */
+export interface ReplaySession {
+	replay(command: ReplayInteractionsCommand): Promise<InteractionReplayOutcome>
+	close(): Promise<void>
+}
+
 export interface FormalCaptureService {
 	capture(command: CaptureFormalEvidenceCommand): Promise<CaptureFormalEvidenceResult>
 	/** Replays an interaction recipe in the formal capture harness; the caller captures the context formally itself. */
 	replay(command: ReplayInteractionsCommand): Promise<InteractionReplayOutcome>
+	/** A session whose replays share one Chromium launch, each in a fresh browser context; it launches lazily and `close` must always be called. */
+	openReplaySession(): ReplaySession
 	/**
 	 * The formal captures, or with `kinds` the Evidence records of exactly those kinds (the Submit for
 	 * review picker lists `checks_run`, `flow_trace` and `interaction_replay` records this way). Of the
@@ -205,33 +213,61 @@ export function createFormalCaptureService(
 			|| `http://${normalizedHost}:${defaultPort}`
 	}
 
+	const replayFailure = (code: string, path: string, message: string): InteractionReplayOutcome => ({ status: 'failed', diagnostics: [{ code, path, message }] })
+
+	async function launchReplayBrowser(): Promise<Browser | InteractionReplayOutcome> {
+		try {
+			return await chromium.launch({ headless: true, args: [...HARNESS_LAUNCH_ARGS] })
+		}
+		catch (cause) {
+			return replayFailure('capture.browser_launch_failed', '/capture', `Playwright browser could not be launched: ${cause instanceof Error ? cause.message : String(cause)}`)
+		}
+	}
+
+	/** Replays in a fresh browser context and page of `browser`, which stays open; the Preview's own context is closed again. */
+	async function replayIn(browser: Browser, command: ReplayInteractionsCommand): Promise<InteractionReplayOutcome> {
+		let preview: HarnessPreview | undefined
+		try {
+			preview = await openHarnessPreview(browser, { baseUrl: resolveBaseUrl(command.baseUrl), context: command.context, cookie: options?.captureCookie?.() })
+			if (preview.status !== 'ready')
+				return replayFailure(preview.previewStatus === 'adapter_unavailable' ? 'adapter.materialization_unavailable' : 'preview.runtime_failed', '/preview', `Preview runtime status reported '${preview.previewStatus}'.`)
+			return await replayInteractions(preview.page, command)
+		}
+		catch (cause) {
+			return replayFailure('capture.execution_failed', '/capture', cause instanceof Error ? cause.message : 'Execution failed during the interaction replay')
+		}
+		finally {
+			await preview?.close()
+		}
+	}
+
 	/**
 	 * Rules 01a11544-66d9-… and 01a115cd-c507-…: opens `context` in the formal capture harness and replays
 	 * the recipe against its Preview (the shared replay engine), in a fresh browser that is closed again.
 	 * It stores nothing; the caller has formally captured the same context.
 	 */
 	async function replay(command: ReplayInteractionsCommand): Promise<InteractionReplayOutcome> {
-		const failure = (code: string, path: string, message: string): InteractionReplayOutcome => ({ status: 'failed', diagnostics: [{ code, path, message }] })
-		let browser: Browser
-		try {
-			browser = await chromium.launch({ headless: true, args: [...HARNESS_LAUNCH_ARGS] })
-		}
-		catch (cause) {
-			return failure('capture.browser_launch_failed', '/capture', `Playwright browser could not be launched: ${cause instanceof Error ? cause.message : String(cause)}`)
-		}
-		let preview: HarnessPreview | undefined
-		try {
-			preview = await openHarnessPreview(browser, { baseUrl: resolveBaseUrl(command.baseUrl), context: command.context, cookie: options?.captureCookie?.() })
-			if (preview.status !== 'ready')
-				return failure(preview.previewStatus === 'adapter_unavailable' ? 'adapter.materialization_unavailable' : 'preview.runtime_failed', '/preview', `Preview runtime status reported '${preview.previewStatus}'.`)
-			return await replayInteractions(preview.page, command)
-		}
-		catch (cause) {
-			return failure('capture.execution_failed', '/capture', cause instanceof Error ? cause.message : 'Execution failed during the interaction replay')
-		}
-		finally {
-			await preview?.close()
-			await browser.close().catch(() => undefined)
+		const session = openReplaySession()
+		try { return await session.replay(command) }
+		finally { await session.close() }
+	}
+
+	/**
+	 * One browser for several replays: launched on the first `replay` (none when none is made), reused with a
+	 * fresh browser context and page per replay so each Preview is a fresh Runtime, and closed by `close`.
+	 */
+	function openReplaySession(): ReplaySession {
+		let launched: Promise<Browser | InteractionReplayOutcome> | undefined
+		return {
+			async replay(command) {
+				launched ??= launchReplayBrowser()
+				const browser = await launched
+				return 'status' in browser ? browser : replayIn(browser, command)
+			},
+			async close() {
+				const browser = await launched
+				if (browser && !('status' in browser)) await browser.close().catch(() => undefined)
+			},
 		}
 	}
 
@@ -613,6 +649,7 @@ export function createFormalCaptureService(
 	return {
 		capture,
 		replay,
+		openReplaySession,
 		listEvidence,
 		viewRenderInputs,
 	}

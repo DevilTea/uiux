@@ -54,7 +54,11 @@ export function createFlowEvidenceService(
 	input: Readonly<{
 		readFlow(flowId: string): Promise<FlowDiagnosticRead | undefined>
 		captureFormal(command: CaptureFormalEvidenceCommand): Promise<CaptureFormalEvidenceResult>
-		replay(command: ReplayInteractionsCommand): Promise<InteractionReplayOutcome>
+		/** One browser for every trigger of the run; the run closes it on every path. */
+		openReplaySession(): Readonly<{
+			replay(command: ReplayInteractionsCommand): Promise<InteractionReplayOutcome>
+			close(): Promise<void>
+		}>
 	}>,
 ): FlowEvidenceService {
 	async function capture(command: CaptureFlowEvidenceCommand): Promise<CaptureFlowEvidenceResult> {
@@ -118,23 +122,27 @@ export function createFlowEvidenceService(
 		// Every trigger is performed in a fresh Preview of its step's View and Variant, and held only when its Event occurred exactly once.
 		// The step it leads to (`resultStepId`) was matched against the canonical Flow when the recipe was validated.
 		const held: boolean[] = []
-		for (const entry of entries) {
-			if (!entry.trigger) { held.push(true); continue }
-			const perform = entry.perform!
-			const replayed = await input.replay({
-				context: contexts[contextOf.get(keyOf(entry))!]!,
-				steps: [{
-					action: perform.action,
-					target: { viewId: entry.viewId, ...(entry.variantName !== undefined ? { variant: entry.variantName } : {}), widgetId: entry.trigger.widgetId },
-					...(perform.text !== undefined ? { text: perform.text } : {}),
-					...(perform.key !== undefined ? { key: perform.key } : {}),
-				}],
-				assertions: [{ expect: { widgetEvent: { widgetId: entry.trigger.widgetId, name: entry.trigger.event, count: 1 } } }],
-				...(command.baseUrl ? { baseUrl: command.baseUrl } : {}),
-			})
-			if (replayed.status !== 'replayed') return { status: 'failed', flowId, diagnostics: replayed.diagnostics }
-			held.push(replayed.results[0] === 'pass')
+		const session = input.openReplaySession()
+		try {
+			for (const entry of entries) {
+				if (!entry.trigger) { held.push(true); continue }
+				const perform = entry.perform!
+				const replayed = await session.replay({
+					context: contexts[contextOf.get(keyOf(entry))!]!,
+					steps: [{
+						action: perform.action,
+						target: { viewId: entry.viewId, ...(entry.variantName !== undefined ? { variant: entry.variantName } : {}), widgetId: entry.trigger.widgetId },
+						...(perform.text !== undefined ? { text: perform.text } : {}),
+						...(perform.key !== undefined ? { key: perform.key } : {}),
+					}],
+					assertions: [{ expect: { widgetEvent: { widgetId: entry.trigger.widgetId, name: entry.trigger.event, count: 1 } } }],
+					...(command.baseUrl ? { baseUrl: command.baseUrl } : {}),
+				})
+				if (replayed.status !== 'replayed') return { status: 'failed', flowId, diagnostics: replayed.diagnostics }
+				held.push(replayed.results[0] === 'pass')
+			}
 		}
+		finally { await session.close() }
 
 		const captureDigests = captured.results.map(result => result.evidenceDigest!)
 		const steps = entries.map((entry, index) => ({
