@@ -99,7 +99,7 @@ export async function currentInteractionReplayRecord(
 	const view = (await persistence.views.readInspected(viewId))!
 	const locale = (await persistence.locales.readInspected('en-US'))!
 	const workspace = (await persistence.workspace.readInspected())!
-	const viewport = workspace.resource.viewports.desktop!.dimensions
+	const viewport = workspace.resource!.viewports.desktop!.dimensions
 	const base = interactionReplayRecord(viewId, options.result ?? 'pass', options.capture)
 	return {
 		...base,
