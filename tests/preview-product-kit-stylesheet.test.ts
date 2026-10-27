@@ -13,6 +13,7 @@ import { readPreviewRuntimeFile } from '../src/server/preview-runtime-http'
 import type { PreviewRuntimeBridge, PreviewRuntimeMountOptions, PreviewRuntimeStatus } from '../src/preview/browser-runtime'
 import type { ViewResource } from '../src/domain/views/schema'
 import type { ResolvedRenderContext } from '../src/domain/render-context/schema'
+import { HEAVY_SERVER_SUITE_TIMEOUT_MS } from './support/timeouts'
 import { writeCurrentWorkspace } from './support/workspace-layout'
 
 /**
@@ -242,7 +243,10 @@ describe('Product Kit stylesheet bundling', () => {
 		expect((await readPreviewRuntimeFile(root, undefined, bundle.hash, 'runtime.css')).status).toBe(200)
 	})
 
-	it('keeps the eight most recently used bundles servable and evicts the least recently used one', async () => {
+	// Nine real esbuild builds (the cache keeps eight, so the ninth evicts): about 1.2 s alone, 4.3 s under 12 CPU
+	// burners on 8 cores, past the 5 s default. A cheaper cache is not reachable: the limit is a constant and the
+	// cache key is the content hash of a finished build.
+	it('keeps the eight most recently used bundles servable and evicts the least recently used one', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS }, async () => {
 		const root = await createKitWorkspace()
 		const base = join(root, 'kit', 'styles', 'base.css')
 		// Each generation of base.css has its own content and mtime, so the same generation rebuilds to the same hash.

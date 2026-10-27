@@ -79,7 +79,11 @@ describe('View Checks panel finding for a removed View (issue #107)', () => {
 		try {
 			await findingButton(page).waitFor({ timeout: 15_000 })
 			const before = page.url()
+			// The Comment tool is blocked until the Preview session is live (`commentToolBlock`); a `c` pressed
+			// earlier only toasts the reason, so the click would follow the finding at once and defer no notice.
+			await page.locator('[data-session-status][data-status="live"]').waitFor({ timeout: 30_000 })
 			await page.keyboard.press('c')
+			await page.locator('[role="toolbar"] [data-tool="comment"][aria-pressed="true"]').waitFor({ timeout: 10_000 })
 			await findingButton(page).click()
 			await page.locator('[data-facet="validation"] [role="status"]').waitFor()
 			await rm(join(server.workspaceRoot, 'views', `${VIEW_ID}.view.json`))
