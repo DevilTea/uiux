@@ -2275,6 +2275,7 @@
     "checksNote": "Every source completed. Errors: {errors}, warnings: {warnings}.",
     "checksIncomplete": "Some sources did not complete. Errors: {errors}, warnings: {warnings}.",
     "flowGone": "Flow no longer exists",
+    "citableLoadFailed": "Couldn't load the Run Checks records, Flow traces and interaction replays.",
     "replayNote": "{passed} of {total} assertions passed",
     "evidenceCurrent": "Current",
     "noEvidence": "This View has no Evidence yet. Capture it in the contexts you checked, or run checks, first.",

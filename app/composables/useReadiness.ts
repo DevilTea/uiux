@@ -8,6 +8,7 @@ import { describeFetchError, type FetchErrorDetails } from '../utils/fetch-error
 import {
 	contextFromRecord,
 	evidenceFreshness,
+	flowTraceEntersView,
 	flowTraceFreshness,
 	CITABLE_EVIDENCE_KINDS,
 	type CitableEvidenceEntry,
@@ -91,6 +92,8 @@ const viewRenderInputs = shallowRef<ReadonlyMap<string, EvidenceViewRenderInput>
 /** The non-capture Evidence records a submission may cite, read when the Submit for review dialog opens. */
 const citableItems = shallowRef<readonly EvidenceItem[]>([])
 const citableLoading = shallowRef(false)
+const citableError = shallowRef<FetchErrorDetails>()
+let citableSerial = 0
 const evidenceLoaded = shallowRef(false)
 const evidenceLoading = shallowRef(false)
 const evidenceError = shallowRef<FetchErrorDetails>()
@@ -232,16 +235,21 @@ export function useReadiness() {
 
 	/** Reads the `checks_run`, `flow_trace` and `interaction_replay` records the Submit for review picker lists. */
 	async function loadCitableEvidence(): Promise<void> {
+		// Only the latest request is read: an earlier one answering late is ignored.
+		const serial = ++citableSerial
 		citableLoading.value = true
 		try {
 			const items = await uiux.listEvidenceOfKinds<EvidenceItem>(CITABLE_EVIDENCE_KINDS)
+			if (serial !== citableSerial) return
 			citableItems.value = items.filter(item => CITABLE_EVIDENCE_KINDS.includes(item?.record?.kind as CitableEvidenceKind))
+			citableError.value = undefined
 		}
 		catch (cause) {
+			if (serial !== citableSerial) return
 			citableItems.value = []
-			evidenceError.value = describeFetchError(cause, t('evidence.loadFailed'))
+			citableError.value = describeFetchError(cause, t('submit.citableLoadFailed'))
 		}
-		finally { citableLoading.value = false }
+		finally { if (serial === citableSerial) citableLoading.value = false }
 	}
 
 	/**
@@ -258,6 +266,8 @@ export function useReadiness() {
 		for (const item of citableItems.value) {
 			const kind = item.record.kind as CitableEvidenceKind
 			if (kind === 'interaction_replay' && (item.record.executionContext as Record<string, unknown>)?.viewId !== viewId) continue
+			// A Flow trace is offered for a View its Flow enters.
+			if (kind === 'flow_trace' && !flowTraceEntersView(item.record, viewId)) continue
 			entries.push({ kind, digest: item.digest, record: item.record, ...(kind === 'flow_trace' ? { freshness: flowTraceFreshness(item.record, traceContext) } : {}) })
 		}
 		const rank = (entry: CitableEvidenceEntry) => CITABLE_EVIDENCE_KINDS.indexOf(entry.kind)
@@ -392,6 +402,7 @@ export function useReadiness() {
 		loadEvidence,
 		loadCitableEvidence,
 		citableLoading,
+		citableError,
 		citableEvidenceForView,
 		evidenceForView,
 		evidenceSummary,

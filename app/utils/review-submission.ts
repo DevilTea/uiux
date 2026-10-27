@@ -34,7 +34,16 @@ export function isSubmittable(draft: ReviewSubmissionDraft): boolean {
 }
 
 /**
- * Owner ruling 6 of Discussion #241: the Evidence kind a change domain preselects in the picker.
+ * "Select current captures" and "Clear" act on the usable formal captures only: they add or remove
+ * exactly those digests and leave every other tick (Run Checks, Flow trace, replay) as it is.
+ */
+export function withUsableSelection(selection: readonly string[], usable: readonly string[], on: boolean): string[] {
+	const usableSet = new Set(usable)
+	return on ? [...new Set([...selection, ...usable])] : selection.filter(digest => !usableSet.has(digest))
+}
+
+/**
+ * Owner rulings 6 and 2026-10-27 of Discussion #241: the Evidence kind a change domain preselects in the picker.
  * A domain absent here preselects nothing.
  */
 export const EVIDENCE_KIND_BY_CHANGE_DOMAIN: Readonly<Record<string, CitableEvidenceEntry['kind']>> = {

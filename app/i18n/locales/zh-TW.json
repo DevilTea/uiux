@@ -2275,6 +2275,7 @@
     "checksNote": "所有來源皆已完成。錯誤 {errors} 項、警告 {warnings} 項。",
     "checksIncomplete": "部分來源未完成。錯誤 {errors} 項、警告 {warnings} 項。",
     "flowGone": "Flow 已不存在",
+    "citableLoadFailed": "無法載入檢查執行紀錄、Flow 軌跡與互動重播。",
     "replayNote": "{total} 項斷言中有 {passed} 項通過",
     "evidenceCurrent": "最新",
     "noEvidence": "這個 View 還沒有 Evidence。請先擷取你檢查過的情境，或先執行檢查。",

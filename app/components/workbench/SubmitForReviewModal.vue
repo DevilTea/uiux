@@ -7,7 +7,7 @@ import { useWorkbench } from '../../composables/useWorkbench'
 import { useWorkbenchFormat } from '../../composables/useWorkbenchFormat'
 import type { FetchErrorDetails } from '../../utils/fetch-error'
 import type { CitableEvidenceEntry } from '../../utils/readiness'
-import { isSubmittable, preselectedCitations, type ReviewSubmissionDraft } from '../../utils/review-submission'
+import { isSubmittable, preselectedCitations, withUsableSelection, type ReviewSubmissionDraft } from '../../utils/review-submission'
 import { viewLocation } from '../../utils/workbench-routes'
 import WbErrorDescription from './WbErrorDescription.vue'
 
@@ -161,7 +161,7 @@ watch(open, (value) => {
 
 const allUsableSelected = computed(() => usable.value.length > 0 && usable.value.every(entry => evidence.value.includes(entry.digest)))
 function toggleAllUsable(): void {
-	evidence.value = allUsableSelected.value ? [] : usable.value.map(entry => entry.digest)
+	evidence.value = withUsableSelection(evidence.value, usable.value.map(entry => entry.digest), !allUsableSelected.value)
 }
 
 /** On a rejected submission, focus moves to the first field the server named, else the alert. */
@@ -284,6 +284,14 @@ async function send(): Promise<void> {
               :aria-label="t('common.loading')"
             />
           </div>
+          <p
+            v-if="readiness.citableError.value"
+            class="text-xs text-error"
+            role="alert"
+            data-submit-citable-error
+          >
+            {{ readiness.citableError.value.message }}
+          </p>
           <div
             v-else-if="!usable.length && !citable.length"
             class="rounded-md border border-dashed border-default p-3 text-sm text-muted"

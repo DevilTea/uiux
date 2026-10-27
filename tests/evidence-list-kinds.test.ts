@@ -7,6 +7,7 @@ import { createFormalCaptureService } from '../src/application/services/formal-c
 import { createWorkspaceApplicationSession } from '../src/application/services/workspace-session'
 import { canonicalJsonBytes } from '../src/domain/canonical-json'
 import { CHECKS_RUN_SOURCES } from '../src/domain/evidence/checks-run'
+import { CHECKS_RUN_RETENTION } from '../src/persistence/artifact-gc'
 import { FileNativePersistence } from '../src/persistence/file-native'
 import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { flowTraceRecord, interactionReplayRecord } from './support/evidence-record'
@@ -53,5 +54,23 @@ describe('listing Evidence of requested kinds', () => {
 		expect((await service.listEvidence(undefined, ['checks_run'])).map(item => item.digest)).toEqual([checks.evidenceDigest])
 		// A View filter narrows by the record's View: a run of checks names none, a replay names its View.
 		expect((await service.listEvidence(VIEW, kinds)).map(item => item.record.kind)).toEqual(['interaction_replay'])
+	})
+
+	it('lists only the newest CHECKS_RUN_RETENTION Run Checks records, as the cleanup keeps them', async () => {
+		const root = await realpath(await mkdtemp(join(tmpdir(), 'uiux-evidence-kinds-cap-')))
+		roots.push(root)
+		const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
+		await createCurrentWorkspace(persistence)
+		const app = createWorkspaceApplicationSession(persistence)
+		const digests: string[] = []
+		for (let index = 0; index < CHECKS_RUN_RETENTION + 2; index++) {
+			const ranAt = new Date(Date.UTC(2026, 9, 1, 0, index)).toISOString()
+			const recorded = await app.recordChecksRun({ ranAt, sources: CHECKS_RUN_SOURCES.map(source => ({ source, state: 'completed' as const })), findings: [] })
+			if (recorded.status !== 'recorded') throw new Error('The Run Checks record was not stored.')
+			digests.push(recorded.evidenceDigest)
+		}
+		const listed = await createFormalCaptureService(persistence).listEvidence(undefined, ['checks_run'])
+		// The two oldest runs are not listed; the others are.
+		expect(listed.map(item => item.digest).sort()).toEqual(digests.slice(2).sort())
 	})
 })

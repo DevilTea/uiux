@@ -162,6 +162,12 @@ export function flowTraceFreshness(record: FormalEvidenceRecord, context: FlowTr
 	return assessed.unknown ? { state: 'unknown', reason: 'traceCaptureUnknown' } : { state: 'stale', reason: 'traceCaptureStale' }
 }
 
+/** True when a `flow_trace` has a step in `viewId`, that is, its Flow enters that View (`data.steps[].viewId`). */
+export function flowTraceEntersView(record: FormalEvidenceRecord, viewId: string): boolean {
+	const steps = (record.data as { steps?: readonly { viewId?: unknown }[] } | undefined)?.steps
+	return Array.isArray(steps) && steps.some(step => step?.viewId === viewId)
+}
+
 function unknownReason(reason: string | undefined): EvidenceFreshnessReason {
 	if (reason === ADAPTER_PROVENANCE_MISSING_REASON) return 'noAdapters'
 	if (reason === ADAPTER_PROVENANCE_UNAVAILABLE_REASON) return 'adaptersUnavailable'

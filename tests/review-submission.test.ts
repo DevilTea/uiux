@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { FormalEvidenceRecord } from '../src/domain/evidence/schema'
-import { flowTraceFreshness, type CitableEvidenceEntry } from '../app/utils/readiness'
-import { EVIDENCE_KIND_BY_CHANGE_DOMAIN, isSubmittable, preselectedCitations, submissionBody } from '../app/utils/review-submission'
+import { flowTraceEntersView, flowTraceFreshness, type CitableEvidenceEntry } from '../app/utils/readiness'
+import { EVIDENCE_KIND_BY_CHANGE_DOMAIN, isSubmittable, preselectedCitations, submissionBody, withUsableSelection } from '../app/utils/review-submission'
 import { flowTraceRecord } from './support/evidence-record'
 
 const capture = (digest: string) => ({ kind: 'formal_capture', evidence: digest })
@@ -91,5 +91,21 @@ describe('Flow trace freshness in the picker (shown, never refused)', () => {
 	it('is fresh when the Flow has the recorded revision and no referenced capture is stale', () => {
 		const withoutCaptures = { ...trace('r_new'), evidenceRefs: [] } as FormalEvidenceRecord
 		expect(flowTraceFreshness(withoutCaptures, context([{ key: FLOW, revision: 'r_new' }]))).toEqual({ state: 'fresh' })
+	})
+
+	it('is offered for a View only when a step of its Flow enters that View', () => {
+		expect(flowTraceEntersView(trace('r_new'), VIEW)).toBe(true)
+		expect(flowTraceEntersView(trace('r_new'), '99999999-9999-4999-8999-999999999999')).toBe(false)
+		expect(flowTraceEntersView({ ...trace('r_new'), data: undefined } as unknown as FormalEvidenceRecord, VIEW)).toBe(false)
+	})
+})
+
+describe('Select current and Clear in the picker', () => {
+	it('add or remove the usable captures only, and keep the ticks of every other kind', () => {
+		const ticked = ['sha256:checks', 'sha256:trace', 'sha256:replay']
+		expect(withUsableSelection(ticked, ['sha256:a', 'sha256:b'], true)).toEqual([...ticked, 'sha256:a', 'sha256:b'])
+		expect(withUsableSelection([...ticked, 'sha256:a', 'sha256:b'], ['sha256:a', 'sha256:b'], false)).toEqual(ticked)
+		expect(withUsableSelection(['sha256:a'], ['sha256:a', 'sha256:b'], true)).toEqual(['sha256:a', 'sha256:b'])
+		expect(withUsableSelection([], ['sha256:a'], false)).toEqual([])
 	})
 })

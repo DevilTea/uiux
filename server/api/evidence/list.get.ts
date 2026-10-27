@@ -20,7 +20,9 @@ export default defineEventHandler(async (event) => {
 	// `?kinds=checks_run,flow_trace,interaction_replay`: those Evidence records alone, read as the picker of
 	// "Submit for review" lists them (a point-in-time record is shown with what it recorded, never judged
 	// here). Without it the list is the formal captures and what their freshness is judged against.
-	if (typeof query.kinds === 'string') {
+	if (query.kinds !== undefined) {
+		// A repeated `kinds` (an array) is refused, not read as its first value or ignored.
+		if (typeof query.kinds !== 'string') throw createError({ statusCode: 400, statusMessage: 'The Evidence kinds to list are one comma-separated kinds value.' })
 		const kinds = [...new Set(query.kinds.split(',').filter(Boolean))]
 		const unknown = kinds.filter(kind => !LISTABLE_KINDS.includes(kind))
 		if (kinds.length === 0 || unknown.length > 0)

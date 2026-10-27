@@ -84,6 +84,20 @@ describe('GET /api/evidence/list', () => {
 		expect(await denied.json()).toMatchObject({ code: 'auth.scope_denied', requiredKeys: ['workspace.read'] })
 	})
 
+	it('lists the Evidence kinds of `?kinds` for workspace.read, and refuses an unknown, empty or repeated value with 400', async () => {
+		const kinds = (query: string, headers: Record<string, string> = bearer(readerToken)) => fetch(`${origin}/api/evidence/list?${query}`, { headers })
+		expect((await kinds('kinds=checks_run', {})).status).toBe(401)
+		const denied = await kinds('kinds=checks_run', bearer(keylessToken))
+		expect(denied.status).toBe(403)
+		expect(await denied.json()).toMatchObject({ code: 'auth.scope_denied', requiredKeys: ['workspace.read'] })
+		const ok = await kinds('kinds=checks_run,flow_trace,interaction_replay')
+		expect(ok.status).toBe(200)
+		expect(await ok.json()).toEqual({ items: [] })
+		for (const query of ['kinds=formal_capture,nothing', 'kinds=', 'kinds=checks_run&kinds=flow_trace']) {
+			expect((await kinds(query)).status, query).toBe(400)
+		}
+	})
+
 	it('carries the current Product Kit provenance without a host path, digesting the kit once for concurrent requests', async () => {
 		const hashed: string[] = []
 		kitFileDigestCache.hashFile = (kit, path) => {

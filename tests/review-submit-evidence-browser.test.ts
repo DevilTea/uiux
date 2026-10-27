@@ -24,6 +24,7 @@ let newestRun: string
 let staleTrace: string
 let passingReplay: string
 let failingReplay: string
+let otherViewTrace: string
 
 async function api<T>(path: string, body?: unknown): Promise<T> {
 	const response = await fetch(`${server.origin}${path}`, {
@@ -50,6 +51,8 @@ beforeAll(async () => {
 	staleTrace = await putRecordInWorkspace(server.workspaceRoot, flowTraceRecord({ flowId: FLOW_ID, flowRevision: 'r_earlier', stepId: STEP_ID, viewId: VIEW_ID }, capture))
 	passingReplay = await putRecordInWorkspace(server.workspaceRoot, interactionReplayRecord(VIEW_ID, 'pass', capture))
 	failingReplay = await putRecordInWorkspace(server.workspaceRoot, interactionReplayRecord(VIEW_ID, 'fail', `sha256:${'d'.repeat(64)}`))
+	// A trace of a Flow that does not enter this View is not offered for it.
+	otherViewTrace = await putRecordInWorkspace(server.workspaceRoot, flowTraceRecord({ flowId: FLOW_ID, flowRevision: 'r_earlier', stepId: STEP_ID, viewId: '99999999-9999-4999-8999-999999999999' }, `sha256:${'e'.repeat(64)}`))
 }, 120_000)
 
 afterAll(async () => {
@@ -100,6 +103,7 @@ describe('Submit for review cites any Evidence kind (issue #61)', () => {
 		try {
 			await row(page, newestRun).waitFor({ timeout: 15_000 })
 			for (const digest of [olderRun, staleTrace, passingReplay, failingReplay]) expect(await row(page, digest).count()).toBe(1)
+			expect(await row(page, otherViewTrace).count()).toBe(0)
 			expect(await page.locator('[data-submit-evidence-kind]').evaluateAll(lists => lists.map(list => list.getAttribute('data-submit-evidence-kind')))).toEqual(['checks_run', 'flow_trace', 'interaction_replay'])
 			// Nothing is selected before a change domain is chosen.
 			expect(await checked(page, newestRun)).toBe('false')
