@@ -6,7 +6,7 @@ import { useReadiness, type EvidenceEntry } from '../../composables/useReadiness
 import { useWorkbench } from '../../composables/useWorkbench'
 import { useWorkbenchFormat } from '../../composables/useWorkbenchFormat'
 import type { FetchErrorDetails } from '../../utils/fetch-error'
-import type { CitableEvidenceEntry } from '../../utils/readiness'
+import type { CitableEvidenceEntry, EvidenceFreshness } from '../../utils/readiness'
 import { isSubmittable, preselectedCitations, withUsableSelection, type ReviewSubmissionDraft } from '../../utils/review-submission'
 import { viewLocation } from '../../utils/workbench-routes'
 import WbErrorDescription from './WbErrorDescription.vue'
@@ -18,7 +18,8 @@ import WbErrorDescription from './WbErrorDescription.vue'
  * cited (Rule 01a11544-55b0-…): formal captures come from the same per-View list and freshness rules
  * as the Readiness tab (brief f), and only fresh, complete ones can be referenced, because the server
  * rejects anything else; Run Checks records, Flow traces and interaction replays are never refused as
- * stale (Rule 01a11544-558b-…), so they are shown with when they ran or whether they are current.
+ * stale (Rule 01a11544-558b-…), so they are shown with when they ran or whether they are current
+ * (a replay as current or stale like a trace, Clause 01a14e30-2e43-…).
  * A change domain preselects the kind that proves it (owner ruling 6 of Discussion #241).
  */
 const props = defineProps<{
@@ -95,7 +96,13 @@ function citableLabel(entry: CitableEvidenceEntry): string {
 	return [execution.variantName ?? t('ctx.base'), execution.viewportId, execution.locale, execution.themeId].join(' · ')
 }
 
-/** What the record says of itself; a trace also says whether it is current, which never stops it being cited. */
+/** The freshness a trace or replay is shown with: current, or why not. Never a reason to refuse citing it. */
+function citableFreshnessNote(freshness: EvidenceFreshness | undefined): string {
+	if (!freshness || freshness.state === 'fresh') return t('submit.evidenceCurrent')
+	return freshness.reason ? t(`evidence.reason.${freshness.reason}`, { subject: freshness.subject ?? '' }) : t(`evidence.state.${freshness.state}`)
+}
+
+/** What the record says of itself; a trace or a replay also says whether it is current, which never stops it being cited. */
 function citableNote(entry: CitableEvidenceEntry): string {
 	const data = (entry.record.data ?? {}) as Record<string, unknown>
 	if (entry.kind === 'checks_run') {
@@ -103,19 +110,15 @@ function citableNote(entry: CitableEvidenceEntry): string {
 		const counts = { errors: findings.filter(finding => finding.severity === 'error').length, warnings: findings.filter(finding => finding.severity === 'warning').length }
 		return entry.record.coverage.complete ? t('submit.checksNote', counts) : t('submit.checksIncomplete', counts)
 	}
-	if (entry.kind === 'flow_trace') {
-		const freshness = entry.freshness
-		if (!freshness || freshness.state === 'fresh') return t('submit.evidenceCurrent')
-		return freshness.reason ? t(`evidence.reason.${freshness.reason}`, { subject: freshness.subject ?? '' }) : t(`evidence.state.${freshness.state}`)
-	}
+	if (entry.kind === 'flow_trace') return citableFreshnessNote(entry.freshness)
 	const assertions = Array.isArray(data.assertions) ? data.assertions as readonly { result?: string }[] : []
-	return t('submit.replayNote', { passed: assertions.filter(assertion => assertion.result === 'pass').length, total: assertions.length })
+	return `${t('submit.replayNote', { passed: assertions.filter(assertion => assertion.result === 'pass').length, total: assertions.length })} · ${citableFreshnessNote(entry.freshness)}`
 }
 
 function citableWarns(entry: CitableEvidenceEntry): boolean {
 	if (entry.kind === 'checks_run') return !entry.record.coverage.complete
 	if (entry.kind === 'flow_trace') return entry.freshness?.state !== 'fresh'
-	return ((entry.record.data as { assertions?: readonly { result?: string }[] } | undefined)?.assertions ?? []).some(assertion => assertion.result !== 'pass')
+	return entry.freshness?.state !== 'fresh' || ((entry.record.data as { assertions?: readonly { result?: string }[] } | undefined)?.assertions ?? []).some(assertion => assertion.result !== 'pass')
 }
 
 const citableGroups = computed(() => (['checks_run', 'flow_trace', 'interaction_replay'] as const)

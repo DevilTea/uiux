@@ -199,7 +199,7 @@ function staleReason(reason: string | undefined): Pick<EvidenceFreshness, 'reaso
 /**
  * A non-capture Evidence record the Submit for review picker offers (Rule 01a11544-55b0-…): a
  * `checks_run` run, a `flow_trace` of a Flow or an `interaction_replay` of the View. `freshness` is
- * shown for a trace only; no record is refused as stale (Rule 01a11544-558b-…).
+ * shown for a trace and a replay; no record is refused as stale (Rule 01a11544-558b-…).
  */
 export type CitableEvidenceKind = 'checks_run' | 'flow_trace' | 'interaction_replay'
 export const CITABLE_EVIDENCE_KINDS: readonly CitableEvidenceKind[] = ['checks_run', 'flow_trace', 'interaction_replay']

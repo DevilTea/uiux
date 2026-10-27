@@ -1,3 +1,4 @@
+import { renderInputDigest } from '../../src/domain/evidence/render-input-digest'
 import { canonicalJsonBytes, FileNativePersistence } from '../../src/persistence/file-native'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../../src/product/workspace-schema'
 import { readCurrentAdapterProvenance } from '../../src/application/services/adapter-provenance'
@@ -78,6 +79,37 @@ export function flowTraceRecord(flow: Readonly<{ flowId: string; flowRevision: s
 		data: {
 			recipe: { actions: [{ type: 'enter', stepId: flow.stepId, expect: { viewId: flow.viewId } }] },
 			steps: [{ stepId: flow.stepId, viewId: flow.viewId, valid: true, captureRef: capture }],
+		},
+	}
+}
+
+/**
+ * An `interaction_replay` record (see {@link interactionReplayRecord}) that copies the context and provenance
+ * of a formal capture of `viewId` taken now, in the Workspace's `desktop` viewport at its current dimensions:
+ * the View at its current revision and render-input digest, the current Locale revision, Adapter and Product
+ * Kit. Freshness judges it current. With `staleRenderInput` it records another render-input digest, as if the
+ * View's IR or Variants changed after the capture (Clause 01a14e30-2e43-…).
+ */
+export async function currentInteractionReplayRecord(
+	workspaceRoot: string,
+	viewId: string,
+	options: Readonly<{ result?: 'pass' | 'fail'; capture?: string; staleRenderInput?: boolean }> = {},
+): Promise<Record<string, unknown>> {
+	const persistence = new FileNativePersistence({ root: workspaceRoot, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
+	const view = (await persistence.views.readInspected(viewId))!
+	const locale = (await persistence.locales.readInspected('en-US'))!
+	const workspace = (await persistence.workspace.readInspected())!
+	const viewport = workspace.resource.viewports.desktop!.dimensions
+	const base = interactionReplayRecord(viewId, options.result ?? 'pass', options.capture)
+	return {
+		...base,
+		executionContext: { viewId, locale: 'en-US', viewportId: 'desktop', viewport: { width: viewport.width, height: viewport.height }, themeId: 'light' },
+		provenance: {
+			workspaceSchemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION,
+			resources: [{ identity: { type: 'view', id: viewId }, revision: view.revision }, { identity: { type: 'locale', id: 'en-US' }, revision: locale.revision }],
+			versions: { uiux: '0.1.0' },
+			renderInputDigest: options.staleRenderInput ? `sha256:${'0'.repeat(64)}` : renderInputDigest(view.resource),
+			...await currentCaptureProvenance(persistence),
 		},
 	}
 }

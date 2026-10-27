@@ -255,20 +255,28 @@ export function useReadiness() {
 	/**
 	 * The citable records for one View, by kind: every `checks_run` run (newest first by `ranAt`, a
 	 * point-in-time record with no currency), every `flow_trace` with its freshness (by name, never
-	 * refused as stale), and the `interaction_replay` records of this View.
+	 * refused as stale), and the `interaction_replay` records of this View, each with its freshness too.
 	 */
 	function citableEvidenceForView(viewId: string | undefined): readonly CitableEvidenceEntry[] {
 		if (!viewId) return []
 		const ranAt = (record: FormalEvidenceRecord) => String((record.executionContext as Record<string, unknown>)?.ranAt ?? '')
 		const captures = new Map(evidenceItems.value.map(item => [item.digest, item.record]))
 		const traceContext = { ...stalenessContext.value, flows: flows.value.map(flow => ({ key: flow.key, revision: flow.revision })), captures }
+		const inputs = viewRenderInputs.value
+		const revisions = new Map(views.value.map(view => [view.key, view.revision]))
 		const entries: CitableEvidenceEntry[] = []
 		for (const item of citableItems.value) {
 			const kind = item.record.kind as CitableEvidenceKind
 			if (kind === 'interaction_replay' && (item.record.executionContext as Record<string, unknown>)?.viewId !== viewId) continue
 			// A Flow trace is offered for a View its Flow enters.
 			if (kind === 'flow_trace' && !flowTraceEntersView(item.record, viewId)) continue
-			entries.push({ kind, digest: item.digest, record: item.record, ...(kind === 'flow_trace' ? { freshness: flowTraceFreshness(item.record, traceContext) } : {}) })
+			// A replay copies the context and provenance of its capture, so it is judged as a capture is (Clause 01a14e30-2e43-…).
+			const freshness = kind === 'flow_trace'
+				? flowTraceFreshness(item.record, traceContext)
+				: kind === 'interaction_replay'
+					? evidenceFreshness(item.record, unchangedSinceCapture(item.record, inputs, revisions, stalenessContext.value))
+					: undefined
+			entries.push({ kind, digest: item.digest, record: item.record, ...(freshness ? { freshness } : {}) })
 		}
 		const rank = (entry: CitableEvidenceEntry) => CITABLE_EVIDENCE_KINDS.indexOf(entry.kind)
 		return entries.sort((a, b) => rank(a) - rank(b)
