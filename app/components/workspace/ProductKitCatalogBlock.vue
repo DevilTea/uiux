@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from '#imports'
+import KitBadge from '~/components/kit/ui/Badge.vue'
 import { useWidgetCatalog } from '../../composables/useWidgetCatalog'
 import { configProperties, filterCatalogRows, type CatalogRow } from '../../utils/catalog-view'
 import { diagnosticText } from '../../utils/diagnostic-copy'
@@ -181,19 +182,12 @@ const prettySchema = (schema: unknown) => JSON.stringify(schema, null, 2)
                 >{{ row.entry.adapterId }}</span>
                 <span class="min-w-0 flex-1 basis-48 text-xs text-muted">{{ row.entry.description }}</span>
                 <span class="flex flex-wrap items-center gap-1">
-                  <UBadge
-                    color="neutral"
-                    variant="subtle"
-                    size="sm"
-                    data-catalog-usage
-                  >{{ usageLabel(row) }}</UBadge>
-                  <UBadge
+                  <KitBadge data-catalog-usage>{{ usageLabel(row) }}</KitBadge>
+                  <KitBadge
                     v-if="row.problems.length"
-                    color="error"
-                    variant="subtle"
-                    size="sm"
+                    tone="danger"
                     data-catalog-problem-count
-                  >{{ t('productKit.catalog.problemCount', { n: row.problems.length }, row.problems.length) }}</UBadge>
+                  >{{ t('productKit.catalog.problemCount', { n: row.problems.length }, row.problems.length) }}</KitBadge>
                 </span>
               </button>
             </h4>

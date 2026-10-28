@@ -6,6 +6,7 @@ import { describeFetchError, type FetchErrorDetails } from '../../utils/fetch-er
 import { componentDeclarations } from '../../utils/component-interface'
 import { componentAddCommand, componentSourceCall, DEFAULT_COMPONENT_TARGET } from '../../utils/component-commands'
 import { copyText } from '../../utils/copy-text'
+import KitBadge from '~/components/kit/ui/Badge.vue'
 import ProductKitCatalogBlock from './ProductKitCatalogBlock.vue'
 
 /**
@@ -214,13 +215,9 @@ const emitsDeclarations = computed(() => declarations.value.filter(item => item.
                 {{ name }}
               </th>
               <td class="px-3 py-2">
-                <UBadge
-                  color="neutral"
-                  variant="subtle"
-                  size="sm"
-                >
+                <KitBadge>
                   {{ t(components[name]!.layer === 'design-system' ? 'productKit.components.layers.designSystem' : 'productKit.components.layers.product') }}
-                </UBadge>
+                </KitBadge>
               </td>
               <td class="px-3 py-2">
                 <ul

@@ -43,7 +43,7 @@ const restrictedRawOutput = [
 
 export default tseslint.config(
 	{
-		ignores: ['.claude/**', '.impeccable/**', '.uiux-server-smoke-*/**', '.nuxt/**', '.output/**', 'coverage/**', 'node_modules/**', 'playwright-report/**', 'test-results/**'],
+		ignores: ['.claude/**', '.impeccable/**', '.uiux/kit/dist/**', '.uiux-server-smoke-*/**', '.nuxt/**', '.output/**', 'coverage/**', 'node_modules/**', 'playwright-report/**', 'test-results/**'],
 	},
 	js.configs.recommended,
 	...tseslint.configs.recommended,

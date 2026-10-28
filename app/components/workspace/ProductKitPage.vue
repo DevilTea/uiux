@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { useI18n, useRoute, useRouter } from '#imports'
+import KitBadge from '~/components/kit/ui/Badge.vue'
 import { useAccess } from '../../composables/useAccess'
 import { useWorkbench } from '../../composables/useWorkbench'
 import { useUiuxClient } from '../../composables/useUiuxClient'
@@ -442,14 +443,12 @@ onBeforeUnmount(() => {
                   @click="openSection($event, link.location)"
                 >
                   {{ link.label }}
-                  <UBadge
+                  <KitBadge
                     v-if="(link.id === 'overview' && kitAdapters.dirty) || (link.id === 'styles' && stylesThemes.dirty)"
-                    color="neutral"
                     variant="soft"
-                    size="sm"
                   >
                     {{ t('authoring.unsavedShort') }}
-                  </UBadge>
+                  </KitBadge>
                 </a>
               </li>
             </ul>

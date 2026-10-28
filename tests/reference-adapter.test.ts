@@ -22,10 +22,10 @@ import { createStandalonePreviewMount } from '../src/preview/browser-runtime'
 import type { ViewResource } from '../src/domain/views/schema'
 import type { ResolvedRenderContext } from '../src/domain/render-context/schema'
 
-/** The dogfood Workspace `<repo>/.uiux/` and its reference Adapter `.uiux/kit/adapters/reference.ts`, only read. */
+/** The dogfood Workspace `<repo>/.uiux/` and its reference Adapter, the kit build output `.uiux/kit/dist/uiux.js` (built by the global setup from `kit/adapters/reference.ts`), only read. */
 const DOGFOOD = {
 	root: join(process.cwd(), '.uiux'),
-	adapter: join(process.cwd(), '.uiux', 'kit', 'adapters', 'reference.ts'),
+	adapter: join(process.cwd(), '.uiux', 'kit', 'dist', 'uiux.js'),
 }
 
 async function importReferenceAdapter(): Promise<Record<string, unknown>> {

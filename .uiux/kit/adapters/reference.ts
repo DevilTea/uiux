@@ -19,6 +19,14 @@ import {
 // Product Kit stylesheet, which the Preview bundler builds from CSS imported anywhere in the Adapter
 // module graph (Discussion #241 R1, Rule 01a11bb1-acdc-799f-aed7-c85ddbaf0d28).
 import './reference.css'
+// The Kit components this Adapter wraps as Widgets (kit/src/ui/). Their styles come after reference.css
+// on purpose: a component's own rules follow the scope rules the wrappers add.
+import KitBadge from '../src/ui/Badge.vue'
+import KitButton from '../src/ui/Button.vue'
+import KitCommentPin from '../src/ui/CommentPin.vue'
+import KitField from '../src/ui/Field.vue'
+import KitIcon from '../src/ui/Icon.vue'
+import KitKbd from '../src/ui/Kbd.vue'
 
 // ---------------------------------------------------------------------------
 // Render-context helpers (theme, viewport tier, locale) shared by every Widget
@@ -200,88 +208,14 @@ function oneOf<T extends string>(value: unknown, allowed: readonly T[], fallback
 	return typeof value === 'string' && (allowed as readonly string[]).includes(value) ? value as T : fallback
 }
 
-// ---------------------------------------------------------------------------
-// Icons: a curated Lucide subset (ISC licence) inlined so the adapter stays self-contained.
-// An unknown icon name renders as literal text, which keeps older authored glyphs working.
-// ---------------------------------------------------------------------------
-const ICONS: Readonly<Record<string, string>> = {
-	"layout-dashboard": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><rect width=\"7\" height=\"9\" x=\"3\" y=\"3\" rx=\"1\"/><rect width=\"7\" height=\"5\" x=\"14\" y=\"3\" rx=\"1\"/><rect width=\"7\" height=\"9\" x=\"14\" y=\"12\" rx=\"1\"/><rect width=\"7\" height=\"5\" x=\"3\" y=\"16\" rx=\"1\"/></g>",
-	"app-window": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><rect width=\"20\" height=\"16\" x=\"2\" y=\"4\" rx=\"2\"/><path d=\"M10 4v4M2 8h20M6 4v4\"/></g>",
-	"workflow": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><rect width=\"8\" height=\"8\" x=\"3\" y=\"3\" rx=\"2\"/><path d=\"M7 11v4a2 2 0 0 0 2 2h4\"/><rect width=\"8\" height=\"8\" x=\"13\" y=\"13\" rx=\"2\"/></g>",
-	"inbox": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><path d=\"M22 12h-6l-2 3h-4l-2-3H2\"/><path d=\"M5.45 5.11L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11\"/></g>",
-	"settings-2": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><path d=\"M14 17H5M19 7h-9\"/><circle cx=\"17\" cy=\"17\" r=\"3\"/><circle cx=\"7\" cy=\"7\" r=\"3\"/></g>",
-	"globe": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M12 2a14.5 14.5 0 0 0 0 20a14.5 14.5 0 0 0 0-20M2 12h20\"/></g>",
-	"image": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><rect width=\"18\" height=\"18\" x=\"3\" y=\"3\" rx=\"2\" ry=\"2\"/><circle cx=\"9\" cy=\"9\" r=\"2\"/><path d=\"m21 15l-3.086-3.086a2 2 0 0 0-2.828 0L6 21\"/></g>",
-	"puzzle": "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M15.39 4.39a1 1 0 0 0 1.68-.474a2.5 2.5 0 1 1 3.014 3.015a1 1 0 0 0-.474 1.68l1.683 1.682a2.414 2.414 0 0 1 0 3.414L19.61 15.39a1 1 0 0 1-1.68-.474a2.5 2.5 0 1 0-3.014 3.015a1 1 0 0 1 .474 1.68l-1.683 1.682a2.414 2.414 0 0 1-3.414 0L8.61 19.61a1 1 0 0 0-1.68.474a2.5 2.5 0 1 1-3.014-3.015a1 1 0 0 0 .474-1.68l-1.683-1.682a2.414 2.414 0 0 1 0-3.414L4.39 8.61a1 1 0 0 1 1.68.474a2.5 2.5 0 1 0 3.014-3.015a1 1 0 0 1-.474-1.68l1.683-1.682a2.414 2.414 0 0 1 3.414 0z\"/>",
-	"mouse-pointer-2": "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M4.037 4.688a.495.495 0 0 1 .651-.651l16 6.5a.5.5 0 0 1-.063.947l-6.124 1.58a2 2 0 0 0-1.438 1.435l-1.579 6.126a.5.5 0 0 1-.947.063z\"/>",
-	"message-circle-plus": "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092a10 10 0 1 0-4.777-4.719M8 12h8m-4-4v8\"/>",
-	"hand": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><path d=\"M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2m0 4V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v2m0 4.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8\"/><path d=\"M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15\"/></g>",
-	"layers": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><path d=\"M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z\"/><path d=\"M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12\"/><path d=\"M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17\"/></g>",
-	"languages": "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"m5 8l6 6m-7 0l6-6l2-3M2 5h12M7 2h1m14 20l-5-10l-5 10m2-4h6\"/>",
-	"monitor-smartphone": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><path d=\"M18 8V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h8m-2 4v-3.96v3.15M7 19h5\"/><rect width=\"6\" height=\"10\" x=\"16\" y=\"12\" rx=\"2\"/></g>",
-	"sun-moon": "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 2v2m2.837 12.385a6 6 0 1 1-7.223-7.222c.624-.147.97.66.715 1.248a4 4 0 0 0 5.26 5.259c.589-.255 1.396.09 1.248.715M16 12a4 4 0 0 0-4-4m7-3l-1.256 1.256M20 12h2\"/>",
-	"circle-dot": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><circle cx=\"12\" cy=\"12\" r=\"1\"/><circle cx=\"12\" cy=\"12\" r=\"10\"/></g>",
-	"eye": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><path d=\"M2.062 12.348a1 1 0 0 1 0-.696a10.75 10.75 0 0 1 19.876 0a1 1 0 0 1 0 .696a10.75 10.75 0 0 1-19.876 0\"/><circle cx=\"12\" cy=\"12\" r=\"3\"/></g>",
-	"circle-check": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"m16 9l-5.5 5.5L8 12\"/></g>",
-	"rotate-ccw": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><path d=\"M3 12a9 9 0 1 0 9-9a9.75 9.75 0 0 0-6.74 2.74L3 8\"/><path d=\"M3 3v5h5\"/></g>",
-	"check": "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M20 6L9 17l-5-5\"/>",
-	"triangle-alert": "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"m21.73 18l-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3M12 9v4m0 4h.01\"/>",
-	"circle-alert": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M12 8v4m0 4h.01\"/></g>",
-	"info": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M12 16v-4m0-4h.01\"/></g>",
-	"camera": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><path d=\"M13.997 4a2 2 0 0 1 1.76 1.05l.486.9A2 2 0 0 0 18.003 7H20a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h1.997a2 2 0 0 0 1.759-1.048l.489-.904A2 2 0 0 1 10.004 4z\"/><circle cx=\"12\" cy=\"13\" r=\"3\"/></g>",
-	"package": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><path d=\"M11 21.73a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73zm1 .27V12\"/><path d=\"M3.29 7L12 12l8.71-5M7.5 4.27l9 5.15\"/></g>",
-	"scan": "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M3 7V5a2 2 0 0 1 2-2h2m10 0h2a2 2 0 0 1 2 2v2m0 10v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2\"/>",
-	"zoom-in": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><circle cx=\"11\" cy=\"11\" r=\"8\"/><path d=\"m21 21l-4.35-4.35M11 8v6m-3-3h6\"/></g>",
-	"zoom-out": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><circle cx=\"11\" cy=\"11\" r=\"8\"/><path d=\"m21 21l-4.35-4.35M8 11h6\"/></g>",
-	"bot": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><path d=\"M12 8V4H8\"/><rect width=\"16\" height=\"12\" x=\"4\" y=\"8\" rx=\"2\"/><path d=\"M2 14h2m16 0h2m-7-1v2m-6-2v2\"/></g>",
-	"cog": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><path d=\"M11 10.27L7 3.34m4 10.39l-4 6.93M12 22v-2m0-18v2m2 8h8m-5 8.66l-1-1.73m1-15.59l-1 1.73M2 12h2m16.66 5l-1.73-1m1.73-9l-1.73 1M3.34 17l1.73-1M3.34 7l1.73 1\"/><circle cx=\"12\" cy=\"12\" r=\"2\"/><circle cx=\"12\" cy=\"12\" r=\"8\"/></g>",
-	"search": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><path d=\"m21 21l-4.34-4.34\"/><circle cx=\"11\" cy=\"11\" r=\"8\"/></g>",
-	"sliders-horizontal": "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M10 5H3m9 14H3M14 3v4m2 10v4m5-9h-9m9 7h-5m5-14h-7m-6 5v4m0-2H3\"/>",
-	"refresh-cw": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><path d=\"M3 12a9 9 0 0 1 9-9a9.75 9.75 0 0 1 6.74 2.74L21 8\"/><path d=\"M21 3v5h-5m5 4a9 9 0 0 1-9 9a9.75 9.75 0 0 1-6.74-2.74L3 16\"/><path d=\"M8 16H3v5\"/></g>",
-	"chevron-down": "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"m6 9l6 6l6-6\"/>",
-	"chevron-right": "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"m9 18l6-6l-6-6\"/>",
-	"menu": "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M4 5h16M4 12h16M4 19h16\"/>",
-	"x": "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M18 6L6 18M6 6l12 12\"/>",
-	"ellipsis": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><circle cx=\"12\" cy=\"12\" r=\"1\"/><circle cx=\"19\" cy=\"12\" r=\"1\"/><circle cx=\"5\" cy=\"12\" r=\"1\"/></g>",
-	"arrow-up-right": "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M7 7h10v10M7 17L17 7\"/>",
-	"send": "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11zm7.318-19.539l-10.94 10.939\"/>",
-	"list-filter": "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M2 5h20M6 12h12m-9 7h6\"/>",
-	"user": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><path d=\"M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2\"/><circle cx=\"12\" cy=\"7\" r=\"4\"/></g>",
-	"bell-dot": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><path d=\"M10.268 21a2 2 0 0 0 3.464 0M11.68 2.009A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673c-.824-.85-1.678-1.731-2.21-3.348\"/><circle cx=\"18\" cy=\"5\" r=\"3\"/></g>",
-	"history": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><path d=\"M3 12a9 9 0 1 0 9-9a9.75 9.75 0 0 0-6.74 2.74L3 8\"/><path d=\"M3 3v5h5m4-1v5l4 2\"/></g>",
-	"unlink": "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"m18.84 12.25l1.72-1.71h-.02a5.004 5.004 0 0 0-.12-7.07a5.006 5.006 0 0 0-6.95 0l-1.72 1.71m-6.58 6.57l-1.71 1.71a5.004 5.004 0 0 0 .12 7.07a5.006 5.006 0 0 0 6.95 0l1.71-1.71M8 2v3M2 8h3m11 11v3m3-6h3\"/>",
-	"panel-left": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><rect width=\"18\" height=\"18\" x=\"3\" y=\"3\" rx=\"2\"/><path d=\"M9 3v18\"/></g>",
-	"panel-right": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><rect width=\"18\" height=\"18\" x=\"3\" y=\"3\" rx=\"2\"/><path d=\"M15 3v18\"/></g>",
-	"key-round": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><path d=\"M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z\"/><circle cx=\"16.5\" cy=\"7.5\" r=\".5\" fill=\"currentColor\"/></g>",
-	"log-in": "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"m10 17l5-5l-5-5m5 5H3m12-9h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4\"/>",
-	"copy": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><rect width=\"14\" height=\"14\" x=\"8\" y=\"8\" rx=\"2\" ry=\"2\"/><path d=\"M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2\"/></g>",
-	"plus": "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M5 12h14m-7-7v14\"/>",
-	"arrow-left": "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"m12 19l-7-7l7-7m7 7H5\"/>",
-	"message-circle": "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092a10 10 0 1 0-4.777-4.719\"/>",
-	"external-link": "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M15 3h6v6m-11 5L21 3m-3 10v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6\"/>",
-	"eye-off": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><path d=\"M10.733 5.076a10.744 10.744 0 0 1 11.205 6.575a1 1 0 0 1 0 .696a10.8 10.8 0 0 1-1.444 2.49m-6.41-.679a3 3 0 0 1-4.242-4.242\"/><path d=\"M17.479 17.499a10.75 10.75 0 0 1-15.417-5.151a1 1 0 0 1 0-.696a10.75 10.75 0 0 1 4.446-5.143M2 2l20 20\"/></g>",
-	"filter": "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M22 3H2l8 9.46V19l4 2v-8.54z\"/>",
-	"signpost": "<path fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M12 13v8m0-18v3m-9.646 4.354a1.207 1.207 0 0 1 0-1.708l2.06-2.06A2 2 0 0 1 5.828 6h12.344a2 2 0 0 1 1.414.586l2.06 2.06a1.207 1.207 0 0 1 0 1.708l-2.06 2.06a2 2 0 0 1-1.414.586H5.828a2 2 0 0 1-1.414-.586z\"/>",
-	"crosshair": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><circle cx=\"12\" cy=\"12\" r=\"10\"/><path d=\"M22 12h-4M6 12H2m10-6V2m0 20v-4\"/></g>",
-}
 
 function iconNode(name: string | undefined | null, size = 16, extraClass = ''): VNode | null {
 	if (!name) return null
-	const body = ICONS[name]
-	if (!body) return h('span', { class: ['uiux-ref-glyph', extraClass], 'aria-hidden': 'true' }, name)
-	return h('svg', {
-		class: ['uiux-ref-icon', extraClass],
-		width: size,
-		height: size,
-		viewBox: '0 0 24 24',
-		'aria-hidden': 'true',
-		focusable: 'false',
-		innerHTML: body,
-	})
+	return h(KitIcon, { name, size, class: extraClass || undefined })
 }
 
 function kbdNode(keys: string): VNode {
-	return h('kbd', { class: 'uiux-ref-kbd' }, keys)
+	return h(KitKbd, { keys })
 }
 
 type CssStyle = Record<string, string>
@@ -359,7 +293,7 @@ export interface StackInterfaces {
 
 const ALIGN: Record<string, string> = { start: 'flex-start', end: 'flex-end', center: 'center', baseline: 'baseline', stretch: 'stretch' }
 const JUSTIFY: Record<string, string> = { center: 'center', end: 'flex-end', between: 'space-between', around: 'space-around', start: 'flex-start' }
-const HAIRLINE = '1px solid var(--ref-border)'
+const HAIRLINE = '1px solid var(--kit-border)'
 
 export const stackPlugin = createWidgetPlugin('Stack')
 	.description('Responsive layout container for horizontal and vertical stacking with gap, alignment, hairline edges, scroll regions, viewport-tier overrides, and an author-writable `visible` state for Variants.')
@@ -924,34 +858,27 @@ export const ButtonRenderer = defineComponent({
 
 		return (): VNode => {
 			const presentation = props.presentation.value
-			const label = props.label.value ?? ''
-			const children: (VNode | null)[] = []
-			children.push(iconNode(props.icon.value, 16))
-			if (!presentation?.iconOnly) children.push(h('span', label))
-			if (presentation?.kbd && !presentation.iconOnly) children.push(kbdNode(presentation.kbd))
-			if (presentation?.trailingIcon && !presentation.iconOnly) children.push(iconNode(presentation.trailingIcon, 14))
-
-			return h('button', {
+			return h(KitButton, {
 				[WIDGET_ID_ATTRIBUTE]: widgetId,
-				type: 'button',
-				disabled: state.disabled.value,
-				'aria-label': presentation?.iconOnly ? label : undefined,
-				title: presentation?.iconOnly ? label : undefined,
+				label: props.label.value ?? '',
+				variant: props.variant.value as ButtonVariant,
+				size: (presentation?.size ?? 'md') as 'sm' | 'md' | 'lg',
+				icon: props.icon.value || undefined,
+				trailingIcon: presentation?.trailingIcon || undefined,
+				kbd: presentation?.kbd || undefined,
+				iconOnly: Boolean(presentation?.iconOnly),
+				fullWidth: Boolean(presentation?.fullWidth),
+				touch: Boolean(presentation?.touch),
+				disabled: Boolean(state.disabled.value),
 				class: [
 					'uiux-ref-scope',
-					'uiux-ref-btn',
 					props.theme.value,
-					`variant-${props.variant.value}`,
-					`size-${presentation?.size ?? 'md'}`,
-					presentation?.touch ? 'is-touch' : '',
-					presentation?.iconOnly ? 'is-icon-only' : '',
-					presentation?.fullWidth ? 'is-full-width' : '',
 					presentation?.hidden || !state.visible.value ? 'uiux-ref-hidden' : '',
 				],
 				onClick: () => {
 					if (!state.disabled.value) emit.click()
 				},
-			}, children)
+			})
 		}
 	},
 })
@@ -964,6 +891,7 @@ export interface BadgePresentation {
 }
 
 type BadgeTone = 'neutral' | 'primary' | 'annotation' | 'success' | 'warning' | 'danger' | 'info'
+type BadgeVariant = 'subtle' | 'soft' | 'solid' | 'outline' | 'mono' | 'count'
 
 export interface BadgeInterfaces {
 	config: {
@@ -1097,17 +1025,18 @@ export const BadgeRenderer = defineComponent({
 		const { widgetId, useProperties } = useWidget(badgePlugin)
 		const props = useProperties()
 
-		return (): VNode => h('span', {
+		return (): VNode => h(KitBadge, {
 			[WIDGET_ID_ATTRIBUTE]: widgetId,
+			label: props.label.value ?? '',
+			tone: props.tone.value as BadgeTone,
+			variant: props.variant.value as BadgeVariant,
+			icon: props.icon.value || undefined,
 			class: [
 				'uiux-ref-scope',
-				'uiux-ref-badge',
 				props.theme.value,
-				`tone-${props.tone.value}`,
-				`variant-${props.variant.value}`,
 				props.hidden.value ? 'uiux-ref-hidden' : '',
 			],
-		}, [iconNode(props.icon.value, 14), props.label.value ?? ''])
+		})
 	},
 })
 
@@ -1274,48 +1203,27 @@ export const TextInputRenderer = defineComponent({
 		const props = useProperties()
 
 		return (): VNode => {
-			const elements: (VNode | null)[] = []
-			const label = props.label.value ?? ''
 			const presentation = props.presentation.value
-			const invalid = state.invalid.value
-			const inputId = `${widgetId}-field`
-			if (label) elements.push(h('label', { class: 'uiux-ref-input-label', for: inputId }, label))
-			const fieldProps = {
-				id: inputId,
-				class: [
-					'uiux-ref-input',
-					presentation?.icon ? 'has-icon' : '',
-					presentation?.kbd ? 'has-kbd' : '',
-					presentation?.mono ? 'is-mono' : '',
-					presentation?.touch && !presentation.rows ? 'is-touch' : '',
-					invalid ? 'is-invalid' : '',
-				],
-				value: state.value.value,
-				placeholder: props.placeholder.value,
-				'aria-label': label ? undefined : (props.placeholder.value || undefined),
-				'aria-invalid': invalid ? 'true' : undefined,
-				readOnly: props.readOnly.value,
-				onInput: (event: Event) => {
-					if (!props.readOnly.value) state.value.value = (event.target as HTMLInputElement).value
-				},
-			}
-			const field = presentation?.rows
-				? h('textarea', { ...fieldProps, rows: presentation.rows })
-				: h('input', { ...fieldProps, type: 'text' })
-			elements.push(h('div', { class: 'uiux-ref-input-shell' }, [
-				iconNode(presentation?.icon, 16),
-				field,
-				presentation?.kbd ? kbdNode(presentation.kbd) : null,
-			]))
-			if (invalid && props.error.value)
-				elements.push(h('p', { class: 'uiux-ref-input-error', role: 'alert' }, [iconNode('circle-alert', 14), h('span', props.error.value)]))
-			else if (props.help.value)
-				elements.push(h('p', { class: 'uiux-ref-input-help' }, props.help.value))
-
-			return h('div', {
+			return h(KitField, {
 				[WIDGET_ID_ATTRIBUTE]: widgetId,
-				class: ['uiux-ref-scope', 'uiux-ref-input-group', props.theme.value, presentation?.hidden ? 'uiux-ref-hidden' : ''],
-			}, elements)
+				id: `${widgetId}-field`,
+				modelValue: state.value.value ?? '',
+				label: props.label.value ?? '',
+				placeholder: props.placeholder.value ?? '',
+				help: props.help.value ?? '',
+				error: props.error.value ?? '',
+				invalid: Boolean(state.invalid.value),
+				readonly: Boolean(props.readOnly.value),
+				icon: presentation?.icon || undefined,
+				kbd: presentation?.kbd || undefined,
+				mono: Boolean(presentation?.mono),
+				rows: presentation?.rows || undefined,
+				touch: Boolean(presentation?.touch),
+				'onUpdate:modelValue': (value: string) => {
+					if (!props.readOnly.value) state.value.value = value
+				},
+				class: ['uiux-ref-scope', props.theme.value, presentation?.hidden ? 'uiux-ref-hidden' : ''],
+			})
 		}
 	},
 })
@@ -1461,7 +1369,7 @@ export const NavItemRenderer = defineComponent({
 			if (props.meta.value && !presentation?.hideMeta && !presentation?.iconOnly)
 				rightChildren.push(h('span', { class: 'uiux-ref-nav-item-meta' }, props.meta.value))
 			if (props.badge.value)
-				rightChildren.push(h('span', { class: ['uiux-ref-badge', 'variant-count', `tone-${props.badgeTone.value === 'annotation' ? 'annotation' : 'neutral'}`] }, props.badge.value))
+				rightChildren.push(h(KitBadge, { variant: 'count', tone: props.badgeTone.value === 'annotation' ? 'annotation' : 'neutral', label: props.badge.value }))
 
 			const select = () => {
 				state.selected.value = true
@@ -1714,10 +1622,11 @@ export const KbdRenderer = defineComponent({
 	setup() {
 		const { widgetId, useProperties } = useWidget(kbdPlugin)
 		const props = useProperties()
-		return (): VNode => h('kbd', {
+		return (): VNode => h(KitKbd, {
 			[WIDGET_ID_ATTRIBUTE]: widgetId,
-			class: ['uiux-ref-scope', 'uiux-ref-kbd', props.theme.value, props.hidden.value ? 'uiux-ref-hidden' : ''],
-		}, props.keys.value ?? '')
+			keys: props.keys.value ?? '',
+			class: ['uiux-ref-scope', props.theme.value, props.hidden.value ? 'uiux-ref-hidden' : ''],
+		})
 	},
 })
 
@@ -1818,27 +1727,24 @@ export const PinRenderer = defineComponent({
 			const status = state.status.value
 			const mark = props.mark.value
 			const placement = props.placement.value
-			const face = status === 'resolved' ? iconNode('check', 14) : actorFace(mark?.actor ?? 'human', mark?.initials ?? '', 14)
-			return h('button', {
+			return h(KitCommentPin, {
 				[WIDGET_ID_ATTRIBUTE]: widgetId,
-				type: 'button',
-				'aria-label': props.label.value || undefined,
-				'aria-expanded': state.selected.value ? 'true' : 'false',
+				label: props.label.value ?? '',
 				title: props.label.value || undefined,
+				variant: status === 'resolved' || status === 'pending' ? status : 'default',
+				badge: status === 'ready' ? 'ready' : undefined,
+				initials: mark?.initials ?? '',
+				actor: mark?.actor ?? 'human',
+				open: Boolean(state.selected.value),
 				class: [
 					'uiux-ref-scope',
 					'uiux-ref-pin',
 					props.theme.value,
-					`status-${status}`,
-					state.selected.value ? 'is-selected' : '',
 					placement?.hidden || !state.visible.value ? 'uiux-ref-hidden' : '',
 				],
 				style: placement?.style,
-				onClick: () => emit.click(),
-			}, [
-				face,
-				status === 'ready' ? h('span', { class: 'uiux-ref-pin-badge', 'aria-hidden': 'true' }, [iconNode('eye', 10)]) : null,
-			])
+				onActivate: () => emit.click(),
+			})
 		}
 	},
 })
@@ -1995,9 +1901,9 @@ export const BubbleRenderer = defineComponent({
 			const status = state.status.value ?? 'open'
 			const meta: (VNode | null)[] = []
 			if (props.statusLabel.value)
-				meta.push(h('span', { class: ['uiux-ref-badge', 'variant-subtle', `tone-${BUBBLE_STATUS_TONE[status] ?? 'neutral'}`] }, [iconNode(BUBBLE_STATUS_ICON[status], 14), props.statusLabel.value]))
+				meta.push(h(KitBadge, { variant: 'subtle', tone: (BUBBLE_STATUS_TONE[status] ?? 'neutral') as BadgeTone, icon: BUBBLE_STATUS_ICON[status], label: props.statusLabel.value }))
 			if (props.context.value) meta.push(h('span', { class: 'uiux-ref-thread-meta' }, props.context.value))
-			if (props.target.value) meta.push(h('span', { class: ['uiux-ref-badge', 'variant-mono'] }, props.target.value))
+			if (props.target.value) meta.push(h(KitBadge, { variant: 'mono', label: props.target.value }))
 			return h('section', {
 				[WIDGET_ID_ATTRIBUTE]: widgetId,
 				role: placement === 'inline' ? 'region' : 'dialog',
@@ -2018,13 +1924,14 @@ export const BubbleRenderer = defineComponent({
 						h('h2', { class: 'uiux-ref-bubble-title' }, props.title.value ?? ''),
 						placement === 'inline'
 							? null
-							: h('button', {
-									type: 'button',
-									class: ['uiux-ref-btn', 'variant-ghost', 'size-sm', 'is-icon-only'],
-									'aria-label': props.closeLabel.value,
-									title: props.closeLabel.value,
+							: h(KitButton, {
+									variant: 'ghost',
+									size: 'sm',
+									iconOnly: true,
+									icon: 'x',
+									label: props.closeLabel.value ?? '',
 									onClick: () => emit.close(),
-								}, [iconNode('x', 16)]),
+								}),
 					]),
 					meta.length ? h('div', { class: 'uiux-ref-bubble-meta' }, meta) : null,
 				]),
@@ -2351,7 +2258,7 @@ export const SegmentRenderer = defineComponent({
 			const appearance = look?.appearance ?? 'segment'
 			const children: (VNode | null)[] = [iconNode(look?.icon, 16)]
 			if (!look?.iconOnly) children.push(h('span', label))
-			if (look?.count) children.push(h('span', { class: ['uiux-ref-badge', 'variant-count', `tone-${look.countTone}`] }, look.count))
+			if (look?.count) children.push(h(KitBadge, { variant: 'count', tone: look.countTone as BadgeTone, label: look.count }))
 			if (look?.kbd && !look.iconOnly) children.push(kbdNode(look.kbd))
 			return h('button', {
 				[WIDGET_ID_ATTRIBUTE]: widgetId,
@@ -2483,7 +2390,7 @@ export const TabBarItemRenderer = defineComponent({
 			}, [
 				h('span', { class: 'uiux-ref-tabbar-icon' }, [
 					iconNode(look?.icon, 20),
-					look?.badge ? h('span', { class: ['uiux-ref-badge', 'variant-count', `tone-${look.badgeTone}`] }, look.badge) : null,
+					look?.badge ? h(KitBadge, { variant: 'count', tone: look.badgeTone as BadgeTone, label: look.badge }) : null,
 				]),
 				h('span', props.label.value ?? ''),
 			])
@@ -2858,7 +2765,7 @@ export const TimelineItemRenderer = defineComponent({
 				h('div', { class: 'uiux-ref-timeline-main' }, [
 					h('div', { class: 'uiux-ref-timeline-head' }, [
 						h('span', { class: 'uiux-ref-timeline-name' }, look?.name ?? ''),
-						props.role.value ? h('span', { class: ['uiux-ref-badge', 'variant-soft', 'tone-neutral'] }, props.role.value) : null,
+						props.role.value ? h(KitBadge, { variant: 'soft', tone: 'neutral', label: props.role.value }) : null,
 						h('span', { class: 'uiux-ref-timeline-time' }, props.time.value ?? ''),
 					]),
 					h('p', { class: 'uiux-ref-timeline-body' }, props.body.value ?? ''),
@@ -3010,8 +2917,8 @@ export const ThreadRowRenderer = defineComponent({
 			const look = props.look.value
 			const status = state.status.value ?? 'open'
 			const chips: VNode[] = []
-			if (look?.anchor) chips.push(h('span', { class: ['uiux-ref-badge', 'variant-mono'] }, look.anchor))
-			for (const chip of look?.chips ?? []) chips.push(h('span', { class: ['uiux-ref-badge', 'variant-mono'] }, chip))
+			if (look?.anchor) chips.push(h(KitBadge, { variant: 'mono', label: look.anchor }))
+			for (const chip of look?.chips ?? []) chips.push(h(KitBadge, { variant: 'mono', label: chip }))
 			return h('button', {
 				[WIDGET_ID_ATTRIBUTE]: widgetId,
 				type: 'button',

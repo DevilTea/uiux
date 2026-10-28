@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process'
 import { existsSync, lstatSync, mkdtempSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, relative } from 'node:path'
@@ -40,6 +41,10 @@ function fingerprint(path: string): string {
  * (`scripts/smoke-*.mjs`), which run outside it.
  */
 export default function setup(): () => void {
+	// The dogfood Workspace declares a kit build (`.uiux/kit/package.json`): its Adapter is the build output
+	// `kit/dist/uiux.js`, which is gitignored, so every run builds it first, before the guard below takes
+	// its fingerprint of `.uiux/` (a build writes only `kit/dist/`).
+	execFileSync(process.execPath, [join(REPOSITORY_ROOT, '.uiux', 'kit', 'build.mjs')], { stdio: 'pipe' })
 	const home = mkdtempSync(join(tmpdir(), 'uiux-test-home-'))
 	process.env.UIUX_HOME = home
 	const before = GUARDED.map(fingerprint)

@@ -8,7 +8,7 @@ import { mapPointAffine, type AffineOuterMapping } from '../../../../src/preview
 import type { Point } from '../../../../src/preview/protocol/schema'
 import { layoutPins, mutedItemKeys } from '../../../utils/pin-layout'
 import { nudgePinHint } from '../../../utils/pin-move'
-import CommentPin from './CommentPin.vue'
+import CommentPin from '~/components/kit/ui/CommentPin.vue'
 import CommentPinMenu from './CommentPinMenu.vue'
 import CommentThreadPin from './CommentThreadPin.vue'
 

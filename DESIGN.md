@@ -51,12 +51,14 @@ colors:
   leaf-800: "oklch(44% 0.095 152)"
   leaf-900: "oklch(37.5% 0.078 152)"
   leaf-950: "oklch(26.5% 0.055 152)"
-  fault-red-700: "oklch(50.5% 0.213 27.518)"
   fault-red-400: "oklch(70.4% 0.191 22.216)"
-  caution-yellow-800: "oklch(47.6% 0.114 61.907)"
+  fault-red-700: "oklch(50.5% 0.213 27.518)"
   caution-yellow-400: "oklch(85.2% 0.199 91.936)"
-  notice-blue-700: "oklch(48.8% 0.243 264.376)"
+  caution-yellow-800: "oklch(47.6% 0.114 61.907)"
   notice-blue-400: "oklch(70.7% 0.165 254.624)"
+  notice-blue-700: "oklch(48.8% 0.243 264.376)"
+  brand-600: "oklch(51% 0.09 182)"
+  brand-700: "oklch(45% 0.085 182)"
 typography:
   display:
     fontFamily: "Inter Variable, Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, PingFang TC, Noto Sans TC, Microsoft JhengHei, sans-serif"
@@ -264,30 +266,64 @@ The palette is restrained: graphite neutrals carry everything, Iris violet marks
   - Text: default `graphite-800` / `graphite-200`; highlighted `graphite-950` / white; muted `graphite-600` / `graphite-400`; dimmed `graphite-500` / `graphite-450`.
 - **Canvas ground**: `graphite-100` in light, `graphite-950` in dark. It is always one step recessed from the panels, so the View frame reads as an object placed on a desk.
 
-### Semantic map (Nuxt UI variables)
+<!-- generated:tokens -->
+### Semantic tokens (generated)
 
-| Role | Nuxt UI variable / utility | Light | Dark |
-|---|---|---|---|
-| Accent | `--ui-primary` / `text-primary`, `bg-primary` | iris-600 #7545d3 | iris-400 #a78bfa |
-| Annotation | `--ui-annotation` / `text-annotation` | marker-700 #ae276b | marker-400 #f17eae |
-| Pin fill | `--wb-pin` / `bg-pin` | marker-600 #cb317f | marker-400 #f17eae |
-| Success | `--ui-success` | leaf-700 #247341 | leaf-400 #63ca84 |
-| Warning | `--ui-warning` | yellow-800 #894b00 | yellow-400 #fdc700 |
-| Error | `--ui-error` | red-700 #c10007 | red-400 #ff6467 |
-| Info | `--ui-info` | blue-700 #1447e6 | blue-400 #51a2ff |
-| Text | `--ui-text` / `text-default` | graphite-800 #27272c | graphite-200 #e5e5e9 |
-| Text highlighted | `--ui-text-highlighted` | graphite-950 #0d0d10 | #ffffff |
-| Text muted | `--ui-text-muted` | graphite-600 #54545c | graphite-400 #a1a1a8 |
-| Text dimmed | `--ui-text-dimmed` | graphite-500 #72727a | graphite-450 #8e8e96 |
-| Text inverted | `--ui-text-inverted` | #ffffff | graphite-900 #18181c |
-| Panel | `--ui-bg` / `bg-default` | #ffffff | graphite-900 #18181c |
-| Muted fill | `--ui-bg-muted` | graphite-50 #fafafb | graphite-850 #202024 |
-| Elevated fill | `--ui-bg-elevated` | graphite-100 #f4f4f6 | graphite-800 #27272c |
-| Accented fill | `--ui-bg-accented` | graphite-200 #e5e5e9 | graphite-750 #323238 |
-| Hairline | `--ui-border` | graphite-200 #e5e5e9 | graphite-750 #323238 |
-| Hairline muted | `--ui-border-muted` | graphite-150 #ededf0 | graphite-800 #27272c |
-| Control boundary | `--ui-border-accented` | graphite-450 #8e8e96 | graphite-500 #72727a |
-| Canvas | `--wb-canvas` / `bg-canvas` | graphite-100 #f4f4f6 | graphite-950 #0d0d10 |
+Generated from `.uiux/kit/src/tokens/tokens.css` by `pnpm design:tokens`; change the CSS and regenerate, never edit this block. `--kit-*` are the tokens Kit components read. A palette reference shows its step and sRGB hex; `color-mix` tints and shadows are shown as written.
+
+| Token | Light | Dark |
+|---|---|---|
+| `--kit-bg-app` | `graphite-0` #ffffff | `graphite-900` #18181c |
+| `--kit-bg-surface` | `graphite-0` #ffffff | `graphite-900` #18181c |
+| `--kit-bg-muted` | `graphite-50` #fafafb | `graphite-850` #202024 |
+| `--kit-bg-surface-elevated` | `graphite-100` #f4f4f6 | `graphite-800` #27272c |
+| `--kit-bg-accented` | `graphite-200` #e5e5e9 | `graphite-750` #323238 |
+| `--kit-bg-canvas` | `graphite-100` #f4f4f6 | `graphite-950` #0d0d10 |
+| `--kit-canvas-dot` | `oklch(16% 0.006 286 / 0.12)` | `oklch(100% 0 0 / 0.08)` |
+| `--kit-border` | `graphite-200` #e5e5e9 | `graphite-750` #323238 |
+| `--kit-border-subtle` | `graphite-150` #ededf0 | `graphite-800` #27272c |
+| `--kit-border-control` | `graphite-450` #8e8e96 | `graphite-500` #72727a |
+| `--kit-text` | `graphite-800` #27272c | `graphite-200` #e5e5e9 |
+| `--kit-text-highlighted` | `graphite-950` #0d0d10 | `graphite-0` #ffffff |
+| `--kit-text-muted` | `graphite-600` #54545c | `graphite-400` #a1a1a8 |
+| `--kit-text-subtle` | `graphite-500` #72727a | `graphite-450` #8e8e96 |
+| `--kit-primary` | `iris-600` #7545d3 | `iris-400` #a78bfa |
+| `--kit-primary-hover` | `iris-700` #6339b5 | `iris-300` #c5b7fd |
+| `--kit-primary-subtle` | `color-mix(in oklch, iris-600 10%, transparent)` | `color-mix(in oklch, iris-400 14%, transparent)` |
+| `--kit-primary-border` | `color-mix(in oklch, iris-600 35%, transparent)` | `color-mix(in oklch, iris-400 35%, transparent)` |
+| `--kit-on-primary` | `graphite-0` #ffffff | `graphite-900` #18181c |
+| `--kit-text-inverted` | `graphite-0` #ffffff | `graphite-900` #18181c |
+| `--kit-annotation` | `marker-700` #ae276b | `marker-400` #f17eae |
+| `--kit-annotation-subtle` | `color-mix(in oklch, marker-700 10%, transparent)` | `color-mix(in oklch, marker-400 14%, transparent)` |
+| `--kit-annotation-border` | `color-mix(in oklch, marker-700 35%, transparent)` | `color-mix(in oklch, marker-400 35%, transparent)` |
+| `--kit-pin` | `marker-600` #cb317f | `marker-400` #f17eae |
+| `--kit-on-pin` | `graphite-0` #ffffff | `graphite-950` #0d0d10 |
+| `--kit-pin-resolved` | `graphite-500` #72727a | `graphite-500` #72727a |
+| `--kit-success` | `leaf-700` #247341 | `leaf-400` #63ca84 |
+| `--kit-success-subtle` | `color-mix(in oklch, leaf-700 10%, transparent)` | `color-mix(in oklch, leaf-400 14%, transparent)` |
+| `--kit-success-border` | `color-mix(in oklch, leaf-700 35%, transparent)` | `color-mix(in oklch, leaf-400 35%, transparent)` |
+| `--kit-warning` | `caution-yellow-800` #894b00 | `caution-yellow-400` #fdc700 |
+| `--kit-warning-subtle` | `color-mix(in oklch, caution-yellow-800 10%, transparent)` | `color-mix(in oklch, caution-yellow-400 14%, transparent)` |
+| `--kit-warning-border` | `color-mix(in oklch, caution-yellow-800 35%, transparent)` | `color-mix(in oklch, caution-yellow-400 35%, transparent)` |
+| `--kit-danger` | `fault-red-700` #c10007 | `fault-red-400` #ff6467 |
+| `--kit-danger-subtle` | `color-mix(in oklch, fault-red-700 10%, transparent)` | `color-mix(in oklch, fault-red-400 14%, transparent)` |
+| `--kit-danger-border` | `color-mix(in oklch, fault-red-700 35%, transparent)` | `color-mix(in oklch, fault-red-400 35%, transparent)` |
+| `--kit-info` | `notice-blue-700` #1447e6 | `notice-blue-400` #51a2ff |
+| `--kit-info-subtle` | `color-mix(in oklch, notice-blue-700 10%, transparent)` | `color-mix(in oklch, notice-blue-400 14%, transparent)` |
+| `--kit-info-border` | `color-mix(in oklch, notice-blue-700 35%, transparent)` | `color-mix(in oklch, notice-blue-400 35%, transparent)` |
+| `--kit-brand` | `brand-600` #06776a | `brand-600` #06776a |
+| `--kit-brand-hover` | `brand-700` #006459 | `brand-700` #006459 |
+| `--kit-ring` | `iris-600` #7545d3 | `iris-400` #a78bfa |
+| `--kit-input-bg` | `graphite-0` #ffffff | `graphite-900` #18181c |
+| `--kit-hover-bg` | `graphite-50` #fafafb | `graphite-850` #202024 |
+| `--kit-shadow` | `none` | `none` |
+| `--kit-shadow-frame` | `0 0 0 1px oklch(16% 0.006 286 / 0.08), 0 2px 6px oklch(16% 0.006 286 / 0.06), 0 12px 32px -8px oklch(16% 0.006 286 / 0.12)` | `0 0 0 1px graphite-750, 0 16px 40px -8px oklch(0% 0 0 / 0.55)` |
+| `--kit-shadow-overlay` | `0 1px 2px oklch(16% 0.006 286 / 0.06), 0 8px 24px -4px oklch(16% 0.006 286 / 0.14)` | `0 0 0 1px graphite-750, 0 12px 32px -4px oklch(0% 0 0 / 0.6)` |
+| `--kit-shadow-modal` | `0 24px 64px -12px oklch(16% 0.006 286 / 0.25)` | `0 0 0 1px graphite-750, 0 24px 64px -12px oklch(0% 0 0 / 0.7)` |
+
+<!-- /generated:tokens -->
+
+The app maps Nuxt UI onto these tokens in `app/assets/css/main.css`: `--ui-primary` is `--kit-primary`, `--ui-annotation` is `--kit-annotation`, `--ui-success`, `--ui-warning`, `--ui-info` and `--ui-error` are `--kit-success`, `--kit-warning`, `--kit-info` and `--kit-danger`, the `--ui-text*`, `--ui-bg*` and `--ui-border*` roles are the `--kit-text*`, `--kit-bg-*` and `--kit-border*` ones, and `--wb-pin`, `--wb-pin-text`, `--wb-pin-resolved`, `--wb-canvas` and the three shadows follow `--kit-pin`, `--kit-on-pin`, `--kit-pin-resolved`, `--kit-bg-canvas` and `--kit-shadow-*`. The reference Adapter's styles use `--kit-*` directly. `brand-*` is the sample product brand of the reference Adapter's `brand` Button variant, not Workbench chrome.
 
 ### Verified contrast (WCAG 2.2 AA)
 

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, shallowRef, watch } from 'vue'
 import { useI18n } from '#imports'
+import KitBadge from '~/components/kit/ui/Badge.vue'
 import { anchorViewId, isWorkspaceAnchor, type ReviewActor, type ReviewAnchor, type ReviewResolution, type ReviewThread } from '../../../src/domain/reviews/schema'
 import { buildReviewTimeline } from '../../utils/review-timeline'
 import { isDismissal } from '../../utils/review-inbox'
@@ -145,11 +146,9 @@ const readiness = computed(() => {
             <p class="flex flex-wrap items-center gap-x-1.5 gap-y-1">
               <b class="font-medium text-highlighted">{{ t('comments.submitted') }}</b>
               <span>· {{ actorName(item.actor) }}</span>
-              <UBadge
+              <KitBadge
                 v-if="isAgent(item.actor)"
-                color="neutral"
                 variant="soft"
-                size="sm"
                 :label="t('comments.agent')"
               />
               <span>·</span>
@@ -158,40 +157,31 @@ const readiness = computed(() => {
                 :datetime="item.at"
                 :title="fmt.dateTime(item.at)"
               >{{ relativeTime(item.at, locale) }}</time>
-              <UBadge
+              <KitBadge
                 v-if="item.current"
-                color="info"
-                variant="subtle"
-                size="sm"
+                tone="info"
                 :label="t('comments.current')"
                 data-submission-current
               />
-              <UBadge
+              <KitBadge
                 v-if="item.accepted"
-                color="success"
-                variant="subtle"
-                size="sm"
-                icon="i-lucide-check"
+                tone="success"
+                icon="check"
                 :label="t('inbox.timeline.accepted')"
               />
-              <UBadge
+              <KitBadge
                 v-if="item.notAccepted"
-                color="warning"
-                variant="subtle"
-                size="sm"
+                tone="warning"
                 :label="t('comments.notAccepted')"
                 data-submission-not-accepted
               />
             </p>
             <div class="mt-1.5 flex flex-wrap items-center gap-1.5">
               <span class="text-xs">{{ t('inbox.timeline.changes') }}</span>
-              <UBadge
+              <KitBadge
                 v-for="domain in item.domains"
                 :key="domain"
-                color="neutral"
-                variant="soft"
-                size="sm"
-                class="font-mono"
+                variant="mono"
                 :label="domain"
               />
             </div>

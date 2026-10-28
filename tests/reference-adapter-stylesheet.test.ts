@@ -16,13 +16,14 @@ import { writeCurrentWorkspace } from './support/workspace-layout'
 
 /**
  * The reference Adapter's CSS reaches the Preview only through the one Product Kit stylesheet
- * (Discussion #241 R1): `reference.ts` imports `reference.css`, which the Preview bundler builds into
- * that stylesheet with the rest of the Adapter module graph (Rule 01a11bb1-acdc-799f-aed7-c85ddbaf0d28),
- * and no renderer inserts a `<style>` element of its own. The kit is a private copy of the dogfood
- * `.uiux/kit/adapters/`, so the dogfood Workspace is only read.
+ * (Discussion #241 R1): the kit build bundles `reference.css` and the styles of the Kit components into
+ * `dist/uiux.css`, which `dist/uiux.js` imports, so the Preview bundler builds it into that stylesheet
+ * with the rest of the Adapter module graph (Rule 01a11bb1-acdc-799f-aed7-c85ddbaf0d28), and no renderer
+ * inserts a `<style>` element of its own. The kit is a private copy of the dogfood kit build output
+ * `.uiux/kit/dist/` (built by the global setup), so the dogfood Workspace is only read.
  */
 
-const DOGFOOD_ADAPTERS = join(process.cwd(), '.uiux', 'kit', 'adapters')
+const DOGFOOD_DIST = join(process.cwd(), '.uiux', 'kit', 'dist')
 const VIEW_ID = '12345678-1234-4234-8234-123456789abc'
 
 const temporaryRoots: string[] = []
@@ -34,7 +35,7 @@ afterEach(async () => {
 	await Promise.all(temporaryRoots.splice(0).map(root => rm(root, { recursive: true, force: true })))
 })
 
-/** A current-schema Workspace whose kit holds a copy of the reference Adapter and its CSS, with no Product Kit `styles`. */
+/** A current-schema Workspace whose kit holds a copy of the dogfood kit build output, with no Product Kit `styles`. */
 async function referenceWorkspace(): Promise<string> {
 	const root = await mkdtemp(join(tmpdir(), 'uiux-reference-stylesheet-'))
 	temporaryRoots.push(root)
@@ -43,13 +44,13 @@ async function referenceWorkspace(): Promise<string> {
 		await symlink(join(process.cwd(), 'node_modules', name), join(root, 'node_modules', name))
 	await writeCurrentWorkspace(root, {
 		i18n: { defaultLocale: 'en-US' },
-		adapters: [{ moduleSpecifier: './adapters/reference.ts' }],
+		adapters: [{ moduleSpecifier: './dist/uiux.js' }],
 		viewports: {},
 		themes: {},
 	})
-	await mkdir(join(root, 'kit', 'adapters'), { recursive: true })
-	for (const file of ['reference.ts', 'reference.css'])
-		await copyFile(join(DOGFOOD_ADAPTERS, file), join(root, 'kit', 'adapters', file))
+	await mkdir(join(root, 'kit', 'dist'), { recursive: true })
+	for (const file of ['uiux.js', 'uiux.css'])
+		await copyFile(join(DOGFOOD_DIST, file), join(root, 'kit', 'dist', file))
 	return root
 }
 
@@ -96,16 +97,16 @@ async function until(condition: () => boolean, label: string): Promise<void> {
 }
 
 describe('Reference Adapter styles', () => {
-	it('builds the CSS that reference.ts imports into the Product Kit stylesheet, not into the module', async () => {
+	it('builds the CSS that the kit build output imports into the Product Kit stylesheet, not into the module', async () => {
 		const root = await referenceWorkspace()
 		const bundle = await getSelectedWorkspacePreviewBundle(root)
 		if (bundle.state !== 'valid') throw new Error(`Expected a valid bundle: ${JSON.stringify(bundle.diagnostics)}`)
 
 		expect(bundle.stylesheet).toBe(PREVIEW_BUNDLE_STYLESHEET)
 		const css = new TextDecoder().decode(bundle.files.get(PREVIEW_BUNDLE_STYLESHEET)!.contents)
-		for (const selector of ['.uiux-ref-scope', '.uiux-theme-dark', '.uiux-ref-badge', '.uiux-ref-empty'])
+		for (const selector of ['.uiux-ref-scope', '.uiux-theme-dark', '.kit-badge', '.kit-btn', '.kit-comment-pin', '.kit-field', '--color-iris-600', '--kit-primary', '.uiux-ref-empty'])
 			expect(css, selector).toContain(selector)
-		expect(bundle.bundleJs).not.toContain('.uiux-ref-badge {')
+		expect(bundle.bundleJs).not.toContain('.kit-badge {')
 		expect(bundle.bundleJs).not.toContain('uiux-reference-adapter-styles')
 	})
 
@@ -139,7 +140,7 @@ describe('Reference Adapter styles', () => {
 		expect(statuses).toEqual([expect.objectContaining({ status: 'ready' })])
 
 		const badge = container.querySelector('[data-widget-id="badge"]')!
-		expect(badge.classList.contains('uiux-ref-badge')).toBe(true)
+		expect(badge.classList.contains('kit-badge')).toBe(true)
 		const style = window.getComputedStyle(badge as never)
 		expect(style.display).toBe('inline-flex')
 		expect(style.fontSize).toBe('12px')

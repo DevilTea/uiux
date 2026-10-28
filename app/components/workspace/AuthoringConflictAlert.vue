@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useI18n } from '#imports'
+import KitButton from '~/components/kit/ui/Button.vue'
 import { diffJson } from '../../utils/workspace-authoring'
 
 /**
@@ -130,20 +131,18 @@ function reload(): void {
     </template>
     <template #footer>
       <div class="flex w-full flex-wrap justify-end gap-2">
-        <UButton
-          color="neutral"
+        <KitButton
           variant="outline"
           @click="reload"
         >
           {{ t('authoring.compare.keepTheirs') }}
-        </UButton>
-        <UButton
-          color="primary"
-          variant="solid"
+        </KitButton>
+        <KitButton
+          variant="primary"
           @click="keepMine"
         >
           {{ t('authoring.compare.keepMine') }}
-        </UButton>
+        </KitButton>
       </div>
     </template>
   </UModal>
