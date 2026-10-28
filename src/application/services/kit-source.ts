@@ -2,10 +2,10 @@ import { readKitDependencyRanges } from '../../adapters/kit-dependencies'
 import { locateKitProject, maskHostPaths, type KitProject } from '../../adapters/kit-registry'
 import { isKitFilePath, listKitFiles, MAX_KIT_FILE_BYTES, readKitFile, readKitSourceFile, type KitFileEntry } from '../../adapters/kit-source-files'
 import { componentClosure } from '../../domain/product-kit/closure'
-import { copyPathBelowTarget, type CopyRecordEntry } from '../../domain/product-kit/copy-record'
+import { addedFiles, copyPathBelowTarget, type CopyRecordEntry } from '../../domain/product-kit/copy-record'
 import { componentDigest, fileDigest } from '../../domain/product-kit/digest'
 import { PRODUCT_KIT_RESOURCE_KEY, validateProductKit, type ProductKit } from '../../domain/product-kit/schema'
-import { jsonPointer, type Diagnostic } from '../../domain/validation'
+import { isSafeRelativePath, jsonPointer, type Diagnostic } from '../../domain/validation'
 import type { FileNativePersistence } from '../../persistence'
 
 /**
@@ -66,8 +66,8 @@ export type GetComponentSourceResult =
 	| KitSourceTooLarge
 	| KitSourceInvalid
 
-/** A recorded copy as the copy record holds it; only `files` is read. */
-export type RecordedCopy = Readonly<{ files: Readonly<Record<string, Readonly<{ source: string; digest: string }>>> }>
+/** A recorded copy as the copy record holds it; only `files` and, for the path of an `added` file, `target` are read. */
+export type RecordedCopy = Readonly<{ target?: string; files: Readonly<Record<string, Readonly<{ source: string; digest: string }>>> }>
 
 /** Whether the current Workspace original still matches the recorded digest, or its component is no longer in the registry. */
 export type OriginalState = 'matches' | 'differs' | 'removed'
@@ -83,8 +83,22 @@ export type ComparedCopyFile = Readonly<{
 	originalDigest?: string | null
 }>
 
+/**
+ * A file that a recorded copy's component lists in the registry and its record does not (state
+ * `added`, Clause 01a11bb1-8c9b-…).
+ */
+export type AddedCopyFile = Readonly<{
+	component: string
+	/** Where `uiux components add` would copy it: relative to the product project root, under the copy's recorded `target`; `null` when the copy gives no usable `target`. */
+	path: string | null
+	/** The file's path relative to `kit/`. */
+	source: string
+	/** The Workspace original's digest now, `null` when it cannot be read. */
+	originalDigest: string | null
+}>
+
 export type CompareComponentCopiesResult =
-	| Readonly<{ status: 'compared'; key: Key; files: readonly ComparedCopyFile[] }>
+	| Readonly<{ status: 'compared'; key: Key; files: readonly ComparedCopyFile[]; added: readonly AddedCopyFile[] }>
 	| KitSourceTooLarge
 	| KitSourceInvalid
 
@@ -201,8 +215,10 @@ export function createKitSourceService(persistence: FileNativePersistence, optio
 			// Rule 01a11bb1-a630-… and Clause 01a11bb1-8c9b-…, the Workspace side: as `uiux components diff`
 			// reads it, an original the component no longer declares, or that is gone, differs from the record.
 			const files: ComparedCopyFile[] = []
+			const added: AddedCopyFile[] = []
 			for (const name of Object.keys(input.copies).sort()) {
-				const recorded = input.copies[name]!.files
+				const copy = input.copies[name]!
+				const recorded = copy.files
 				const component = Object.hasOwn(productKit.components, name) ? productKit.components[name] : undefined
 				for (const path of Object.keys(recorded).sort()) {
 					const { source, digest } = recorded[path]!
@@ -215,8 +231,16 @@ export function createKitSourceService(persistence: FileNativePersistence, optio
 					const originalDigest = read?.status === 'found' ? await fileDigest(read.bytes) : null
 					files.push({ component: name, path, source, recordedDigest: digest, original: originalDigest === digest ? 'matches' : 'differs', originalDigest })
 				}
+				// Clause 01a11bb1-8c9b-…: the registry's files that the record does not list are `added`, at the path under the recorded target.
+				if (component === undefined) continue
+				const target = isSafeRelativePath(copy.target) ? copy.target : undefined
+				for (const file of addedFiles({ declared: component.files, recorded: Object.values(recorded).map(entry => entry.source), target })) {
+					const read = await readKitSourceFile(kit, file.source, { maxBytes: MAX_KIT_FILE_BYTES })
+					if (read.status === 'too_large') return tooLarge(file.source, jsonPointer('/copies', name))
+					added.push({ component: name, path: file.path ?? null, source: file.source, originalDigest: read.status === 'found' ? await fileDigest(read.bytes) : null })
+				}
 			}
-			return { status: 'compared', key: KEY, files }
+			return { status: 'compared', key: KEY, files, added }
 		},
 	})
 }
