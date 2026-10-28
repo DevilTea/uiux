@@ -113,7 +113,7 @@ function view(id: string, name: string, widgets: readonly Readonly<{ id: string;
 			slots: { content: widgets.map(widget => ({ ...widget, props: {}, bindings: {}, events: {} })) },
 		},
 		variants,
-		spec: { intent: name, entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], decisions: [] },
+		spec: { intent: name, entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], requirements: [], decisions: [] },
 	} as unknown as ViewResource
 }
 

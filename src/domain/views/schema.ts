@@ -1,8 +1,11 @@
 import { jsonPointer, rejectUnknownKeys, validateJsonValue, validateUuid, Validator, type JsonValue, type ValidationResult } from '../validation'
+import { validateRequirementIds } from '../requirements/schema'
 import { validateViewSpec, type ViewSpec } from '../spec/schema'
 
 export type VariantEntry = Readonly<{
 	state: Readonly<Record<string, Readonly<Record<string, JsonValue>>>>
+	/** Requirement references (Clause 01a18120-f403-796d-9ae7-7889fa233bca). */
+	requirements?: readonly string[]
 }>
 
 export type ViewResource = Readonly<{
@@ -106,8 +109,10 @@ function validateVariants(value: unknown, v: Validator): void {
 		const variant = v.object(entry, path)
 		if (!variant)
 			continue
-		// A Variant entry is exactly `{ state }` (Clause 01a1144e-5423-7def-a70a-7962ad2d2af7).
-		rejectUnknownKeys(variant, ['state'], path, v)
+		// A Variant entry is exactly `{ state, requirements? }` (Clause 01a1144e-5423-7def-a70a-7962ad2d2af7).
+		rejectUnknownKeys(variant, ['state', 'requirements'], path, v)
+		if (Object.hasOwn(variant, 'requirements'))
+			validateRequirementIds(variant.requirements, `${path}/requirements`, v)
 		const state = v.object(variant.state, `${path}/state`)
 		if (!state)
 			continue

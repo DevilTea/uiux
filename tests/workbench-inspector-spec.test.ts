@@ -164,7 +164,7 @@ describe('Spec document (R5)', () => {
 			expect(await spec.locator('[data-spec-edit], [data-spec-editor], [data-spec-edit-on-desktop]').count()).toBe(0)
 			expect(await spec.locator('textarea, input').count()).toBe(0)
 			const toggles = spec.locator('h3 button[aria-expanded]')
-			expect(await toggles.count()).toBe(7)
+			expect(await toggles.count()).toBe(8)
 			expect(await toggles.first().getAttribute('aria-expanded')).toBe('true')
 			expect(await toggles.nth(1).getAttribute('aria-expanded')).toBe('false')
 			const measure = await spec.locator('#spec-body-intent').evaluate((element) => {

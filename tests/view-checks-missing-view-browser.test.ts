@@ -25,7 +25,7 @@ function viewWithWidgetFinding(): string {
 		name: VIEW_NAME,
 		ir: { type: 'RootShell', id: 'root', slots: { content: [{ type: 'Text', id: 'bad-text', config: {} }] } },
 		variants: { broken: { state: { 'bad-text': { '': 1 } } } },
-		spec: { intent: 'A View with a Widget finding.', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], decisions: [] },
+		spec: { intent: 'A View with a Widget finding.', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], requirements: [], decisions: [] },
 	}, null, '\t')}\n`
 }
 

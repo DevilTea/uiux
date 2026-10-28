@@ -323,7 +323,7 @@
       "adaptersUnavailable": "目前的 Adapter 無法完整解析，因此無法判斷這筆擷取是否最新。",
       "flowMissing": "這個 Flow 已不存在。",
       "flowChanged": "這份軌跡產生後 Flow 已變更。",
-      "noFlowRevision": "這份軌跡沒有記錄所依據的 Flow 修訂版本。請重新執行。",
+      "noFlowRevision": "這份軌跡沒有記錄所依據的 Flow 摘要。請重新執行。",
       "traceCaptureMissing": "這份軌跡所引用的擷取已不存在。",
       "traceCaptureStale": "這份軌跡所引用的擷取已過期。",
       "traceCaptureUnknown": "這份軌跡所引用的擷取無法判斷是否最新。",
@@ -434,7 +434,8 @@
       "eventPickHelp": "此 Widget 宣告的事件。",
       "eventNotDeclared": "{event}（此 Widget 未宣告）",
       "eventsNone": "此 Widget 沒有宣告任何事件。",
-      "searchEvents": "搜尋事件"
+      "searchEvents": "搜尋事件",
+      "requirements": "需求"
     },
     "addStep": {
       "title": "新增步驟",
@@ -1172,7 +1173,8 @@
       "constraints": "尚無限制。",
       "a11y": "尚無無障礙說明。",
       "decisions": "尚無 Decision。將 Review 討論串升級即可記錄。",
-      "refs": "尚無參考資料。"
+      "refs": "尚無參考資料。",
+      "requirements": "尚未有需求參照。Agent 可透過 MCP 加入。"
     },
     "editSection": "編輯{section}",
     "addSection": "新增{section}",
@@ -1211,7 +1213,8 @@
       "remove": "移除參考資料 {n}",
       "add": "新增參考資料",
       "relationPlaceholder": "例如「design」"
-    }
+    },
+    "requirements": "需求"
   },
   "viewHeader": {
     "edit": "重新命名或變更功能標籤",
@@ -1656,7 +1659,8 @@
       "views": "Views",
       "checks": "檢查",
       "decisions": "Decision",
-      "activity": "動態"
+      "activity": "動態",
+      "requirements": "需求"
     },
     "updated": "自你上次查看後已更新",
     "columns": {
@@ -2856,6 +2860,15 @@
       "component_unread": "無法完整讀取這個 Component 的原始碼，因此未檢查。",
       "nondeterministic_context": "這個算繪情境兩次擷取的結果不同，因此未進行即時比對。",
       "product_kit_invalid": "Product Kit 檔案無效，因此未檢查其中的 Component。"
+    },
+    "requirements": {
+      "invalid_id": "需求 ID 須為 1 到 200 個字元，且前後不可有空白。",
+      "duplicate_id": "同一個需求 ID 列了不只一次。",
+      "too_many": "一個清單最多只能有 100 個需求 ID。",
+      "provider_invalid": "需求來源設定無效。",
+      "no_ui_invalid": "每筆「noUi」都需要有效的需求 ID，以及 1 到 500 個字元的原因。",
+      "unresolved": "需求來源中沒有這個 ID 的規則。",
+      "provider_unavailable": "無法讀取需求來源。"
     }
   },
   "diagnosticFallback": {
@@ -2898,7 +2911,8 @@
     "time": "時間格式不正確。",
     "revision": "修訂紀錄無效。",
     "copy_record": "複製紀錄 uiux-components.json 有問題。",
-    "checks": "有一項檢查無法完成。"
+    "checks": "有一項檢查無法完成。",
+    "requirements": "需求參照有問題。"
   },
   "threadContext": {
     "srPrefix": "記錄的預覽情境：",
@@ -3313,5 +3327,55 @@
       "denied": "你的權限鍵無法刪除這個項目",
       "failed": "無法刪除"
     }
+  },
+  "requirements": {
+    "title": "需求",
+    "loading": "正在讀取需求…",
+    "loadFailed": "無法讀取需求。",
+    "retry": "再試一次",
+    "coverage": "涵蓋率 {percent}%・已參照 {covered} / {total} 項需求",
+    "coverageNone": "沒有需要涵蓋的需求：來源中除了「noUi」之外沒有需求。",
+    "counts": {
+      "referenced": "{n} 項已參照",
+      "unreferenced": "{n} 項未參照",
+      "noUi": "{n} 項「noUi」",
+      "unresolved": "{n} 項無法解析"
+    },
+    "filter": {
+      "label": "顯示需求",
+      "all": "全部"
+    },
+    "state": {
+      "referenced": "已參照",
+      "unreferenced": "未參照",
+      "noUi": "「noUi」"
+    },
+    "reason": "原因：{reason}",
+    "referencedBy": "參照於",
+    "notReferenced": "目前沒有任何項目參照這項需求。",
+    "kind": {
+      "view": "View {name}",
+      "variant": "{name} 的 Variant {variant}",
+      "flow": "Flow {name}"
+    },
+    "unresolved": {
+      "title": "無法解析的 ID",
+      "hint": "來源中沒有這些 ID 的規則，系統會依原樣保留。",
+      "badge": "不在來源中"
+    },
+    "unverified": {
+      "title": "未驗證的 ID",
+      "hint": "這些 ID 尚未對照需求來源檢查。",
+      "badge": "未驗證"
+    },
+    "unavailable": {
+      "title": "無法讀取需求來源",
+      "body": "已參照的 ID 會顯示為未驗證，因此沒有涵蓋率數字。請檢查 Workspace 設定中的來源路徑。"
+    },
+    "empty": "需求來源中沒有任何需求。",
+    "noMatch": "沒有處於這個狀態的需求。",
+    "viaVariant": "來自 Variant {name}",
+    "open": "開啟需求 {id}",
+    "listLabel": "需求參照"
   }
 }

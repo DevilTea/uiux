@@ -22,6 +22,7 @@ import type { FlowStep } from '../domain/flows/schema'
 import { REVIEW_RESOLUTIONS, type ReviewAnchor, type ReviewDisplayHint, type ReviewEvidenceRef, type ReviewRenderContext, type ReviewResourceRevision } from '../domain/reviews/schema'
 import { CHANGE_DOMAINS } from '../domain/reviews/change-domains'
 import type { ThemeEntry, ViewportPreset } from '../domain/workspace/schema'
+import type { RequirementsSetting } from '../domain/requirements/schema'
 import type { ProductKitComponent, ProductKitWidgetMapping } from '../domain/product-kit/schema'
 import { ACCESS_PRESETS_RESOURCE_KIND } from '../domain/access-presets/schema'
 import { isFullUuid, isSha256Digest, type JsonObject, type JsonValue } from '../domain/validation'
@@ -64,6 +65,8 @@ const viewSpecContentSchema = z.object({
 	constraints: z.array(z.string()),
 	accessibility: z.array(z.string()),
 	references: z.array(z.unknown()),
+	requirements: z.array(z.unknown()).optional()
+		.describe('Requirement references: IDs of the requirements this View implements (each 1 to 200 characters, trimmed, unique, at most 100). Omitted keeps the existing ones (create_view stores []); [] clears them.'),
 }).strict()
 
 const createViewSchema = z.object({
@@ -147,6 +150,8 @@ const updateWorkspaceSettingsSchema = z.object({
 			}).catchall(z.unknown()),
 		}).catchall(z.unknown())),
 		themes: z.record(z.string(), z.record(z.string(), z.unknown())),
+		requirements: z.unknown().optional()
+			.describe('The requirements setting, replacing the whole setting: { provider: "spec", path, noUi? } (path relative to the Workspace root, inside the Git work tree) or { provider: "url", template, noUi? } (an http(s) URL with one {id}); noUi maps requirement IDs to reasons. null removes the setting; omitted keeps it.'),
 	}).strict(),
 	acknowledgeImpact: z.boolean().optional().describe(ACKNOWLEDGE_IMPACT_DESCRIPTION),
 }).strict()
@@ -191,6 +196,9 @@ const compareComponentCopiesSchema = z.object({
 	copies: z.record(z.string(), recordedCopySchema).describe('The components member of the product project\'s copy record (uiux-components.json): component name → { target, componentDigest, exportedAt, files }, files mapping each copied file\'s path to { source, digest }. Only files and target are read.'),
 }).strict()
 
+/** The URI of the requirement coverage Resource (Clause 01a18120-f903-7f8d-9b44-d581ab520c0d). */
+export const REQUIREMENTS_RESOURCE_URI = 'uiux://requirements'
+
 /** The URI of the Product Kit Resource (Clause 01a11bb1-b0f1-7e5d-85ad-230c43ad99fb). */
 export const PRODUCT_KIT_RESOURCE_URI = 'uiux://product-kit'
 
@@ -219,12 +227,15 @@ const flowStepSchema = z.object({
 	}).strict()),
 }).strict()
 
+const FLOW_REQUIREMENTS_DESCRIPTION = 'Requirement references: IDs of the requirements this Flow implements (each 1 to 200 characters, trimmed, unique, at most 100). Omitted keeps the existing ones (create_flow stores []); [] clears them.'
+
 const createFlowSchema = z.object({
 	id: z.string().optional(),
 	name: z.string(),
 	scenarioRef: z.record(z.string(), z.unknown()).optional(),
 	entryStepId: z.string(),
 	steps: z.record(z.string(), flowStepSchema),
+	requirements: z.array(z.unknown()).optional().describe(FLOW_REQUIREMENTS_DESCRIPTION),
 }).strict()
 
 const updateFlowSchema = z.object({
@@ -234,6 +245,7 @@ const updateFlowSchema = z.object({
 	scenarioRef: z.record(z.string(), z.unknown()).optional(),
 	entryStepId: z.string(),
 	steps: z.record(z.string(), flowStepSchema),
+	requirements: z.array(z.unknown()).optional().describe(FLOW_REQUIREMENTS_DESCRIPTION),
 }).strict()
 
 // The closed anchor union: the Widget arm { viewId, widgetId } or the Workspace arm { scope: "workspace" }.
@@ -579,6 +591,15 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 	// Clause 01a11bb1-b0f1-7e5d-85ad-230c43ad99fb: the Product Kit file with its build state (the kit
 	// build runner's under uiux dev), Adapter resolution, resolved external packages and findings. A
 	// Workspace without the file has no such Resource.
+	// Clause 01a18120-f903-7f8d-9b44-d581ab520c0d: the requirement coverage, with the provider `status`
+	// and the `unverified` IDs, so an unreadable provider never looks like full coverage.
+	server.registerResource(
+		'requirements',
+		REQUIREMENTS_RESOURCE_URI,
+		{ title: 'UIUX requirement coverage (read-only)', mimeType: 'application/json' },
+		async uri => ({ contents: [{ uri: uri.href, mimeType: 'application/json', text: JSON.stringify(await app.readRequirements()) }] }),
+	)
+
 	server.registerResource(
 		'product-kit',
 		PRODUCT_KIT_RESOURCE_URI,
@@ -692,7 +713,7 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 		'create_view',
 		{
 			title: 'Create UIUX View',
-			description: 'Create a spec-first View with canonical empty RootShell IR, no Variants, and no Decisions. This is a domain-specific authoring operation, not a generic Resource write.',
+			description: 'Create a spec-first View with canonical empty RootShell IR, no Variants, and no Decisions, with the requirement references spec.requirements gives (none when omitted). This is a domain-specific authoring operation, not a generic Resource write. An ID the Workspace\'s spec requirements provider lacks is kept and reported as requirements.unresolved in the result\'s diagnostics.',
 			inputSchema: createViewSchema,
 			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
 		},
@@ -708,7 +729,7 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 		'update_view_spec',
 		{
 			title: 'Update UIUX View Spec',
-			description: 'Replace the descriptive View Spec fields while preserving Decisions and every non-Spec View field. Requires the revision previously read by the caller.',
+			description: 'Replace the descriptive View Spec fields while preserving Decisions and every non-Spec View field. spec.requirements, when omitted, keeps the View\'s requirement references; [] clears them. Requires the revision previously read by the caller.',
 			inputSchema: updateViewSpecSchema,
 			annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
 		},
@@ -723,7 +744,7 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 		'update_view_structure',
 		{
 			title: 'Update UIUX View Structure',
-			description: 'Replace the canonical View IR and Variants together while preserving View identity, name, feature, and View Spec. Requires the revision previously read by the caller. A Variant varies presentation only through author-writable State: each variants entry is exactly { state }, where state maps Widget IDs to State member overrides; any other entry key (config, id, name) is refused. A Variant name the View has now and the new Variants lack counts as renamed or removed: when Review threads name it, or UX Flow steps or View Spec references target it, nothing is written and the result is impact_acknowledgement_required with impacts; call again with acknowledgeImpact true to write (nothing referencing it is changed). A Variant nothing references is removed without acknowledgement.',
+			description: 'Replace the canonical View IR and Variants together while preserving View identity, name, feature, and View Spec. Requires the revision previously read by the caller. A Variant varies presentation only through author-writable State: each variants entry is { state, requirements? }, where state maps Widget IDs to State member overrides and requirements lists requirement references (an entry that omits requirements keeps those of the Variant of the same name, [] clears them, and an entry of a new name starts with none); any other entry key (config, id, name) is refused. A Variant name the View has now and the new Variants lack counts as renamed or removed: when Review threads name it, or UX Flow steps or View Spec references target it, nothing is written and the result is impact_acknowledgement_required with impacts; call again with acknowledgeImpact true to write (nothing referencing it is changed). A Variant nothing references is removed without acknowledgement.',
 			inputSchema: updateViewStructureSchema,
 			annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
 		},
@@ -804,7 +825,7 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 		'update_workspace_settings',
 		{
 			title: 'Update UIUX Workspace Settings',
-			description: 'Update manifest-owned Workspace settings (i18n.defaultLocale, viewports, themes) with revision CAS while preserving schemaVersion. The Adapters are the Product Kit\'s (compose_product_kit, update_product_kit). Removing or renaming a viewport or theme key changes its identity: nothing is written and the result is impact_acknowledgement_required with impacts (the threads whose render context names the key, formal Evidence that would become stale and the other impacts a restore of the settings lists); call again with acknowledgeImpact true to write.',
+			description: 'Update manifest-owned Workspace settings (i18n.defaultLocale, viewports, themes, requirements) with revision CAS while preserving schemaVersion. settings.requirements replaces the whole requirements setting (provider and noUi), null removes it and an omitted one keeps it; an invalid setting is refused with requirements.provider_invalid or requirements.no_ui_invalid, and an ID the provider lacks is reported as requirements.unresolved. The Adapters are the Product Kit\'s (compose_product_kit, update_product_kit). Removing or renaming a viewport or theme key changes its identity: nothing is written and the result is impact_acknowledgement_required with impacts (the threads whose render context names the key, formal Evidence that would become stale and the other impacts a restore of the settings lists); call again with acknowledgeImpact true to write.',
 			inputSchema: updateWorkspaceSettingsSchema,
 			annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
 		},
@@ -814,6 +835,7 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 				i18n: input.settings.i18n,
 				viewports: input.settings.viewports as Record<string, ViewportPreset>,
 				themes: input.settings.themes as Record<string, ThemeEntry>,
+				...(input.settings.requirements === undefined ? {} : { requirements: input.settings.requirements as RequirementsSetting | null }),
 			},
 			...(input.acknowledgeImpact === undefined ? {} : { acknowledgeImpact: input.acknowledgeImpact }),
 		})),
@@ -957,7 +979,7 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 		'create_flow',
 		{
 			title: 'Create UIUX Flow',
-			description: 'Create a canonical UX Flow with UUID identity, entry step, and step transition graph. Fails if the flow already exists.',
+			description: 'Create a canonical UX Flow with UUID identity, entry step, step transition graph and requirement references (none when omitted). Fails if the flow already exists.',
 			inputSchema: createFlowSchema,
 			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
 		},
@@ -967,6 +989,7 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 			...(input.scenarioRef ? { scenarioRef: input.scenarioRef as JsonObject } : {}),
 			entryStepId: input.entryStepId,
 			steps: input.steps as Record<string, FlowStep>,
+			...(input.requirements === undefined ? {} : { requirements: input.requirements as string[] }),
 		})),
 	)
 
@@ -974,7 +997,7 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 		'update_flow',
 		{
 			title: 'Update UIUX Flow',
-			description: 'Update a canonical UX Flow with revision CAS while preserving its immutable identity.',
+			description: 'Update a canonical UX Flow with revision CAS while preserving its immutable identity. requirements, when omitted, keeps the Flow\'s requirement references; [] clears them.',
 			inputSchema: updateFlowSchema,
 			annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
 		},
@@ -985,6 +1008,7 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 			...(input.scenarioRef ? { scenarioRef: input.scenarioRef as JsonObject } : {}),
 			entryStepId: input.entryStepId,
 			steps: input.steps as Record<string, FlowStep>,
+			...(input.requirements === undefined ? {} : { requirements: input.requirements as string[] }),
 		})),
 	)
 

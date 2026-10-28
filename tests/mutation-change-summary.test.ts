@@ -302,7 +302,7 @@ describe('change summaries over HTTP and MCP', { timeout: HEAVY_SERVER_SUITE_TIM
 			'update_view_metadata': { changes: [{ path: '/name', op: 'replace' }] },
 			'update_view_structure': { changes: [{ path: '/ir/slots/content/pay', op: 'add' }] },
 			'update_view_spec (unchanged)': { changes: [] },
-			'create_flow': { changes: ['/entryStepId', '/id', '/name', '/steps'].map(path => ({ path, op: 'add' })) },
+			'create_flow': { changes: ['/entryStepId', '/id', '/name', '/requirements', '/steps'].map(path => ({ path, op: 'add' })) },
 			// Transitions carry no `id`, so the changed array is reported whole.
 			'update_flow': { changes: [{ path: '/name', op: 'replace' }, { path: `/steps/${STEP_1}/transitions`, op: 'replace' }, { path: `/steps/${STEP_2}`, op: 'add' }] },
 			// A message key named like an Object.prototype property is a member like any other.

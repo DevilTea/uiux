@@ -71,6 +71,7 @@ function viewA(): ViewResource {
 			constraints: [],
 			accessibility: ['focus order'],
 			references: [{ type: 'external', uri: 'https://example.com/spec' }, { type: 'view', viewId: VIEW_B }],
+			requirements: [],
 			decisions: [
 				{ id: DECISION(1), question: 'One button?', status: 'pending', history: [] },
 				{ id: DECISION(2), question: 'Show tax?', status: 'pending', history: [] },
@@ -87,7 +88,7 @@ function viewB(): ViewResource {
 		name: 'Receipt',
 		ir: { type: 'RootShell', id: 'root', slots: { content: [] } },
 		variants: {},
-		spec: { intent: 'Show the receipt.', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], decisions: [] },
+		spec: { intent: 'Show the receipt.', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], requirements: [], decisions: [] },
 	}
 }
 
@@ -96,6 +97,7 @@ function flow(): FlowResource {
 		id: FLOW,
 		name: 'Pay',
 		entryStepId: STEP_1,
+		requirements: [],
 		steps: {
 			[STEP_1]: { target: { viewId: VIEW_A }, transitions: [{ trigger: { widgetId: 'pay', event: 'click' }, targetStepId: STEP_2 }, { trigger: { widgetId: 'pay', event: 'dblclick' }, targetStepId: STEP_3 }] },
 			[STEP_2]: { target: { viewId: VIEW_B }, transitions: [] },

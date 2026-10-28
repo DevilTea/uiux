@@ -209,7 +209,7 @@ function kitView(): ViewResource {
 		name: 'Kit Providers View',
 		ir: { type: 'RootShell', id: 'root', slots: { content: [{ id: 'l1', type: 'KitLabel' }, { id: 'b1', type: 'KitBadge' }] } } as never,
 		variants: { Other: { state: {} } } as never,
-		spec: { intent: 'Kit providers', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], decisions: [] },
+		spec: { intent: 'Kit providers', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], requirements: [], decisions: [] },
 	}
 }
 

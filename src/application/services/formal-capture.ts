@@ -3,6 +3,7 @@ import packageJson from '../../../package.json' with { type: 'json' }
 import playwrightPackage from 'playwright/package.json' with { type: 'json' }
 import { canonicalJsonBytes } from '../../domain/canonical-json'
 import { renderInputDigest } from '../../domain/evidence/render-input-digest'
+import { flowInputDigest } from '../../domain/flows/input-digest'
 import {
 	validateFormalEvidenceRecord,
 	type FormalEvidenceRecord,
@@ -65,6 +66,9 @@ export type AdapterThemeSupportSource = () => Promise<Readonly<{ unsupportedThem
 /** A View's current render-input digest (Clause 01a14e30-2d4a-…) and the revision it was read at. */
 export type ViewRenderInput = Readonly<{ key: string; revision: string; renderInputDigest: string }>
 
+/** A Flow's current Flow input digest (Clause 01a1814f-81c2-…) and the revision it was read at. */
+export type FlowInput = Readonly<{ key: string; revision: string; flowInputDigest: string }>
+
 /** One recipe replayed in one render context's Preview (see `replay`). */
 export type ReplayInteractionsCommand = Readonly<{
 	context: ResolvedRenderContext
@@ -94,6 +98,8 @@ export interface FormalCaptureService {
 	listEvidence(viewId?: string, kinds?: readonly string[]): Promise<readonly FormalEvidenceItem[]>
 	/** Every readable View's current render-input digest, against which Evidence freshness is judged. */
 	viewRenderInputs(): Promise<readonly ViewRenderInput[]>
+	/** Every readable Flow's current Flow input digest, against which Flow trace freshness is judged (Rule 01a1814f-8256-…). */
+	flowInputs(): Promise<readonly FlowInput[]>
 }
 
 /** The formal capture record in a parsed artifact, if it is one; used to filter inside the read lock. */
@@ -646,11 +652,28 @@ export function createFormalCaptureService(
 		return inputs.sort((a, b) => a.key.localeCompare(b.key))
 	}
 
+	async function flowInputs(): Promise<readonly FlowInput[]> {
+		const inputs: FlowInput[] = []
+		for (const { key, read: settled } of await persistence.flows.readAllInspected()) {
+			// A Flow file that is not valid JSON has no input: skip it, as discovery does; its traces then read as stale.
+			let read: Awaited<ReturnType<typeof persistence.flows.readInspected>>
+			try { read = settledValue(settled) }
+			catch (error: unknown) {
+				if (error instanceof PersistenceError && error.code === 'persistence.invalid_json') continue
+				throw error
+			}
+			if (!read?.resource || !read.revision) continue
+			inputs.push({ key, revision: read.revision, flowInputDigest: flowInputDigest(read.resource) })
+		}
+		return inputs.sort((a, b) => a.key.localeCompare(b.key))
+	}
+
 	return {
 		capture,
 		replay,
 		openReplaySession,
 		listEvidence,
 		viewRenderInputs,
+		flowInputs,
 	}
 }

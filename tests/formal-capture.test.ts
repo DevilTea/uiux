@@ -198,6 +198,7 @@ function createCounterView(): ViewResource {
 			constraints: [],
 			accessibility: [],
 			references: [],
+			requirements: [],
 			decisions: [],
 		},
 	}

@@ -49,7 +49,7 @@ export async function startWorkbenchServer(options: Readonly<{ prepare?: (worksp
 	const workspaceRoot = await mkdtemp(join(REPOSITORY_ROOT, '.uiux-browser-test-'))
 	let token: string
 	try {
-		// The frozen fixture is a current-schema Workspace (schemaVersion 6): its root holds
+		// The frozen fixture is a current-schema Workspace (schemaVersion 7): its root holds
 		// workspace.json, product-kit.json and access-presets.json, and its Adapter is in kit/. The
 		// private copy is served as copied.
 		await cp(WORKBENCH_FIXTURE_WORKSPACE, workspaceRoot, { recursive: true })

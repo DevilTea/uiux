@@ -29,7 +29,7 @@ function view(): string {
 		name: 'Region status',
 		ir: { type: 'RootShell', id: 'root', slots: { content: [{ type: 'Text', id: WIDGET_ID, config: { text: 'A Widget that gets covered', variant: 'h3' } }] } },
 		variants: {},
-		spec: { intent: 'A View whose Widget is covered.', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], decisions: [] },
+		spec: { intent: 'A View whose Widget is covered.', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], requirements: [], decisions: [] },
 	}, null, '\t')}\n`
 }
 

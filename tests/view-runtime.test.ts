@@ -664,7 +664,7 @@ function viewFixture(
 		id: VIEW_ID, name: 'Runtime fixture',
 		ir: { type: 'RootShell', id: 'root', slots: { content: [child] } } as never,
 		variants,
-		spec: { intent: '', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], decisions: [] },
+		spec: { intent: '', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], requirements: [], decisions: [] },
 	}
 }
 

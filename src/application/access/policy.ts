@@ -42,6 +42,8 @@ export const ACCESS_OPERATIONS = {
 	subscribeEvents: { requiredKeys: ['workspace.read'] },
 	// Clause 01a11bb1-b3c2-7937-96fb-e139c5e566f5: the Product Kit file, its build state and findings need no Product Kit key.
 	readProductKit: { requiredKeys: ['workspace.read'] },
+	// Clause 01a18120-f903-7f8d-9b44-d581ab520c0d: the requirement coverage, `uiux://requirements`.
+	readRequirements: { requiredKeys: ['workspace.read'] },
 	// Clause 01a11485-fa00-72da-bc46-98302a3c106e: reading the Access presets on HTTP.
 	readAccessPresets: { requiredKeys: ['workspace.read'] },
 	// `history.read`: version history reads, which a system credential never gets (Clause 01a11485-f978-767a-b977-33028aee7ae7).

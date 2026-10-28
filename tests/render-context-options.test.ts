@@ -24,7 +24,7 @@ function baseView(variants: ViewResource['variants'] = {}): ViewResource {
 		name: 'Test View',
 		ir: { type: 'RootShell', id: 'root', slots: { content: [] } },
 		variants,
-		spec: { intent: '', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], decisions: [] },
+		spec: { intent: '', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], requirements: [], decisions: [] },
 	}
 }
 

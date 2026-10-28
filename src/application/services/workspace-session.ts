@@ -90,6 +90,7 @@ import {
 	type AdapterThemeSupportSource,
 	type CaptureFormalEvidenceCommand,
 	type CaptureFormalEvidenceResult,
+	type FlowInput,
 	type FormalEvidenceItem,
 	type ViewRenderInput,
 } from './formal-capture'
@@ -144,6 +145,7 @@ import {
 	type AccessPresetsRead,
 	type UpdateAccessPresetsCommand,
 } from './access-presets-authoring'
+import { createRequirementsService, type RequirementsCoverage } from './requirements'
 import { createKitBuildService, type KitBuildLogRead, type KitBuildRead, type RestartKitBuildResult } from './kit-build'
 import type { KitBuildControl } from '../ports/kit-build'
 import { createKitSourceService, type KitSourceService } from './kit-source'
@@ -190,6 +192,8 @@ export interface WorkspaceApplicationSession {
 	decideDecision(command: DecideDecisionCommand): Promise<ViewAuthoringResult>
 	reopenDecision(command: DecisionLifecycleCommand): Promise<ViewAuthoringResult>
 	updateWorkspaceSettings<R = never>(command: UpdateWorkspaceSettingsCommand, guard?: WorkspaceSettingsGuard<R>): Promise<WorkspaceAuthoringResult | R>
+	/** The requirement coverage (Clause 01a18120-f903-…), the content of `uiux://requirements`. */
+	readRequirements(): Promise<RequirementsCoverage>
 	readProductKit(): Promise<ProductKitRead | undefined>
 	composeProductKit<R = never>(command: ComposeProductKitCommand, guard?: ProductKitGuard<R>): Promise<ProductKitAuthoringResult | R>
 	updateProductKit<R = never>(command: UpdateProductKitCommand, guard?: ProductKitGuard<R>): Promise<ProductKitAuthoringResult | R>
@@ -234,6 +238,8 @@ export interface WorkspaceApplicationSession {
 	listEvidence(viewId?: string, kinds?: readonly string[]): Promise<readonly FormalEvidenceItem[]>
 	/** Every readable View's current render-input digest (Rule 01a115cd-c5a5-…). */
 	viewRenderInputs(): Promise<readonly ViewRenderInput[]>
+	/** Every readable Flow's current Flow input digest (Rule 01a1814f-8256-…). */
+	flowInputs(): Promise<readonly FlowInput[]>
 	/** The Product Kit Checks (issue #141 Part 14 decision 7), run on request and non-blocking. */
 	runProductKitChecks(command?: Readonly<{ readSource?: boolean }>): Promise<ProductKitChecksResult>
 	/** The current Product Kit provenance, against which Evidence freshness is judged (Rules 01a11bb1-be4a-… and 01a1161b-ff68-…). */
@@ -333,6 +339,7 @@ export function createWorkspaceApplicationSession(
 	const historyPreview = createHistoryPreviewService(persistence, options?.history)
 	const productKitAuthoring = createProductKitAuthoringService(persistence, options?.kitBuild ? { buildStatus: () => options.kitBuild!.status() } : {})
 	const accessPresetsAuthoring = createAccessPresetsAuthoringService(persistence)
+	const requirements = createRequirementsService(persistence)
 	const kitBuild = createKitBuildService(options?.kitBuild)
 	const kitSource = createKitSourceService(persistence)
 	const productKitChecks = createProductKitChecksService(persistence, {
@@ -580,6 +587,8 @@ export function createWorkspaceApplicationSession(
 		recordChecksRun: checksRunEvidence.record,
 		listEvidence: formalCapture.listEvidence,
 		viewRenderInputs: formalCapture.viewRenderInputs,
+		readRequirements: requirements.readCoverage,
+		flowInputs: formalCapture.flowInputs,
 		runProductKitChecks: command => productKitChecks.run({ ...(command?.readSource === false ? { readSource: false } : {}) }),
 		productKitProvenance: () => readCurrentProductKitProvenance(persistence),
 		adapterProvenance: () => readCurrentAdapterProvenance(persistence, adapterProvenanceSource),

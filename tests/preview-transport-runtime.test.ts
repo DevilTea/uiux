@@ -139,7 +139,7 @@ describe('preview protocol transport & runtime materialization', () => {
 				name: 'RootShell View',
 				ir: { type: 'RootShell', id: 'root', slots: { content: [] } },
 				variants: {},
-				spec: { intent: '', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], decisions: [] },
+				spec: { intent: '', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], requirements: [], decisions: [] },
 			}
 			const context = testContext()
 			const result = materializePreviewView({ view, context })
@@ -169,7 +169,7 @@ describe('preview protocol transport & runtime materialization', () => {
 					},
 				},
 				variants: {},
-				spec: { intent: '', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], decisions: [] },
+				spec: { intent: '', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], requirements: [], decisions: [] },
 			}
 			const context = testContext()
 			const result = materializePreviewView({ view, context })

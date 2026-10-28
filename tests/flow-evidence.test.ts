@@ -39,6 +39,7 @@ function twoStepFlow(): FlowResource {
 		id: FLOW_ID,
 		name: 'Two steps',
 		entryStepId: STEP_A,
+		requirements: [],
 		steps: {
 			[STEP_A]: { target: { viewId: VIEW_A }, transitions: [{ trigger: { widgetId: 'root', event: 'press' }, targetStepId: STEP_B }] },
 			[STEP_B]: { target: { viewId: VIEW_B }, transitions: [] },
@@ -436,6 +437,6 @@ function view(id: string): ViewResource {
 		name: `View ${id.slice(0, 2)}`,
 		ir: { type: 'RootShell', id: 'root', slots: { content: [] } },
 		variants: {},
-		spec: { intent: '', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], decisions: [] },
+		spec: { intent: '', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], requirements: [], decisions: [] },
 	}
 }

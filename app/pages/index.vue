@@ -5,6 +5,7 @@ import { defineShortcuts, navigateTo, useI18n, useRoute, useRouter } from '#impo
 import type { TableColumn, TabsItem } from '@nuxt/ui'
 import { useMediaQuery } from '../composables/useMediaQuery'
 import { useReadiness } from '../composables/useReadiness'
+import { useRequirements } from '../composables/useRequirements'
 import { useWorkbench } from '../composables/useWorkbench'
 import { useWorkbenchShell } from '../composables/useWorkbenchShell'
 import { splitReadinessDiagnostics, updatedSince } from '../utils/readiness'
@@ -13,6 +14,7 @@ import WorkbenchPage from '../components/workbench/WorkbenchPage.vue'
 import OverviewChecks from '../components/readiness/OverviewChecks.vue'
 import OverviewActivity from '../components/readiness/OverviewActivity.vue'
 import PendingDecisionsList from '../components/workbench/PendingDecisionsList.vue'
+import OverviewRequirements from '../components/workbench/OverviewRequirements.vue'
 import HandoffExportModal from '../components/readiness/HandoffExportModal.vue'
 import WorkspaceFirstRun from '../components/workbench/WorkspaceFirstRun.vue'
 
@@ -31,6 +33,7 @@ const workbench = useWorkbench()
 const lastViewId = workbench.lastViewId()
 const shell = useWorkbenchShell()
 const readiness = useReadiness()
+const requirements = useRequirements()
 const { views, reviews, loading, readyReviewCount, openReviewCount, workspaceFindingCount } = workbench
 const atLeastTablet = useMediaQuery('(min-width: 768px)')
 
@@ -137,12 +140,13 @@ const attention = computed<AttentionPart[]>(() => ([
  * Views, and switching back to Views drops the query, so a bare `/` stays bare (a phone cold load of
  * `/` opens Reviews, see the default layout). Nothing writes the query on load.
  */
-const TAB_VALUES = ['views', 'checks', 'decisions', 'activity'] as const
+const TAB_VALUES = ['views', 'checks', 'decisions', 'requirements', 'activity'] as const
 function isTab(value: unknown): value is typeof TAB_VALUES[number] {
 	return typeof value === 'string' && (TAB_VALUES as readonly string[]).includes(value)
 }
 const tab = computed<string>({
-	get: () => isTab(route.query.tab) ? route.query.tab : 'views',
+	// The Requirements tab exists only with a `spec` provider (Rule 01a18120-feff-…).
+	get: () => isTab(route.query.tab) && (route.query.tab !== 'requirements' || requirements.hasSpecProvider.value) ? route.query.tab : 'views',
 	set: (value) => {
 		if (!isTab(value) || value === tab.value) return
 		const query = { ...route.query }
@@ -161,6 +165,7 @@ const tabs = computed<TabsItem[]>(() => [
 	{ value: 'views', slot: 'views' as const, label: t('overview.tab.views') },
 	{ value: 'checks', slot: 'checks' as const, label: t('overview.tab.checks'), badge: workspaceFindingCount.value ? { label: String(workspaceFindingCount.value), color: 'neutral', variant: 'soft', size: 'sm' } : undefined },
 	{ value: 'decisions', slot: 'decisions' as const, label: t('overview.tab.decisions') },
+	...(requirements.hasSpecProvider.value ? [{ value: 'requirements', slot: 'requirements' as const, label: t('overview.tab.requirements') }] : []),
 	{ value: 'activity', slot: 'activity' as const, label: t('overview.tab.activity') },
 ])
 
@@ -497,6 +502,9 @@ function evidenceLabel(row: ViewRow): { text: string; icon: string; tone: string
 
         <template #decisions>
           <PendingDecisionsList />
+        </template>
+        <template #requirements>
+          <OverviewRequirements />
         </template>
         <template #activity>
           <OverviewActivity />

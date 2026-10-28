@@ -37,6 +37,7 @@ import { validateWorkspaceManifest } from '../src/domain/workspace/schema'
 import { validateAssetMetadata, type AuthoredAsset } from '../src/domain/assets/schema'
 import { artifactBytesMatch } from '../src/domain/artifacts/schema'
 import { canonicalJsonBytes } from '../src/domain/canonical-json'
+import { flowInputDigest } from '../src/domain/flows/input-digest'
 import { renderInputDigest } from '../src/domain/evidence/render-input-digest'
 import type { FormalEvidenceRecord } from '../src/domain/evidence/schema'
 import type { ReviewThread } from '../src/domain/reviews/schema'
@@ -266,6 +267,7 @@ function createSampleView(id: string, name: string, assetRefId?: string): ViewRe
 			constraints: [],
 			accessibility: [],
 			references: assetRefId ? [{ type: 'external', uri: `uiux://asset/${assetRefId}` }] : [],
+			requirements: [],
 			decisions: [],
 		},
 	}
@@ -277,6 +279,7 @@ function createSampleFlow(id: string, targetViewId: string): FlowResource {
 		id,
 		name: 'Main Flow',
 		entryStepId: stepId,
+		requirements: [],
 		steps: {
 			[stepId]: {
 				target: { viewId: targetViewId },
@@ -758,6 +761,7 @@ describe('Handoff closure export and readiness evaluation', { timeout: HEAVY_SER
 				constraints: [],
 				accessibility: [],
 				references: [],
+				requirements: [],
 				decisions: [],
 			},
 		}
@@ -1928,15 +1932,17 @@ describe('Flow traces in a Handoff (issue #88)', { timeout: HEAVY_SERVER_SUITE_T
 
 	/** A `flow_trace` as the Flow Evidence service records it for the one-step Flow, referencing `capture`. */
 	async function putFlowTrace(persistence: FileNativePersistence, input: Readonly<{ flowRevision: string; capture: string }>): Promise<string> {
+		const flowNow = (await persistence.flows.readInspected(FLOW_1_ID))!
 		const record: FormalEvidenceRecord = {
 			schemaVersion: 1,
 			kind: 'flow_trace',
 			executionContext: { flowId: FLOW_1_ID, locale: 'en-US', viewportId: 'desktop', themeId: 'light' },
 			coverage: { complete: true },
 			provenance: {
-				workspaceSchemaVersion: 6,
+				workspaceSchemaVersion: 7,
 				resources: [{ identity: { type: 'flow', id: FLOW_1_ID }, revision: input.flowRevision }, { identity: { type: 'view', id: VIEW_1_ID }, revision: 'r1' }],
 				versions: { uiux: '0.1.0' },
+				flowInputDigest: flowInputDigest(flowNow.resource),
 			},
 			artifactRefs: [],
 			evidenceRefs: [{ kind: 'formal_capture', evidence: input.capture }],

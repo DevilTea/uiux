@@ -65,15 +65,17 @@ export function interactionReplayRecord(viewId: string, result: 'pass' | 'fail' 
 
 /**
  * A valid `flow_trace` record (Clauses 01a172cc-d382-…, 01a172cc-d6f0-… and 01a172cc-daa6-…) of a Flow of one
- * step that enters `viewId`, recording the Flow at `flowRevision` and referencing `capture`.
+ * step that enters `viewId`, recording the Flow at `flowRevision` and, with `flowInputDigest`, its Flow input
+ * digest (Clause 01a1814f-81c2-…), and referencing `capture`. A trace without a digest is stale (Rule
+ * 01a1814f-8256-…).
  */
-export function flowTraceRecord(flow: Readonly<{ flowId: string; flowRevision: string; stepId: string; viewId: string }>, capture: string): Record<string, unknown> {
+export function flowTraceRecord(flow: Readonly<{ flowId: string; flowRevision: string; flowInputDigest?: string; stepId: string; viewId: string }>, capture: string): Record<string, unknown> {
 	return {
 		schemaVersion: 1,
 		kind: 'flow_trace',
 		executionContext: { flowId: flow.flowId, locale: 'en-US', viewportId: 'desktop', themeId: 'light' },
 		coverage: { complete: true },
-		provenance: { workspaceSchemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION, resources: [{ identity: { type: 'flow', id: flow.flowId }, revision: flow.flowRevision }], versions: { uiux: '0.1.0' } },
+		provenance: { workspaceSchemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION, resources: [{ identity: { type: 'flow', id: flow.flowId }, revision: flow.flowRevision }], versions: { uiux: '0.1.0' }, ...(flow.flowInputDigest === undefined ? {} : { flowInputDigest: flow.flowInputDigest }) },
 		artifactRefs: [],
 		evidenceRefs: [{ kind: 'formal_capture', evidence: capture }],
 		data: {

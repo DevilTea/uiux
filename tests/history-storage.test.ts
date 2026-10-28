@@ -815,13 +815,13 @@ function viewFixture(): ViewResource {
 		name: 'Checkout',
 		ir: { type: 'RootShell', id: 'root', slots: { content: [] } },
 		variants: {},
-		spec: { intent: '', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], decisions: [] },
+		spec: { intent: '', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], requirements: [], decisions: [] },
 	}
 }
 
 function flowFixture() {
 	const stepId = '66666666-6666-4666-8666-666666666666'
-	return { id: FLOW_ID, name: 'Checkout Flow', entryStepId: stepId, steps: { [stepId]: { target: { viewId: VIEW_ID }, transitions: [] } } }
+	return { id: FLOW_ID, name: 'Checkout Flow', entryStepId: stepId, requirements: [], steps: { [stepId]: { target: { viewId: VIEW_ID }, transitions: [] } } }
 }
 
 function assetFixture(contentFilename: string) {

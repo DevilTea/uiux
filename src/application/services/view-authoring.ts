@@ -6,6 +6,8 @@ import { validateResourceRevision } from '../dto/revisions'
 import { transitionDecision, type Decision, type DecisionActor, type DecisionOutcome, type DecisionStatus, type Reference, type ViewSpec } from '../../domain/spec/schema'
 import { isFullUuid, type Diagnostic } from '../../domain/validation'
 import { validateViewResource, type ViewResource } from '../../domain/views/schema'
+import { trimRequirementIds } from '../../domain/requirements/schema'
+import { readRequirementsProvider, requirementListDiagnostics } from './requirements-provider'
 import type { FileNativePersistence } from '../../persistence'
 import { PersistenceError } from '../../persistence/errors'
 
@@ -16,6 +18,11 @@ export type ViewSpecContent = Readonly<{
 	constraints: readonly string[]
 	accessibility: readonly string[]
 	references: readonly Reference[]
+	/**
+	 * Requirement references (Clause 01a18120-f403-…). Omitted, `create_view` stores `[]` and an update
+	 * keeps the existing ones; `[]` clears them (Clause 01a1814f-83f2-…).
+	 */
+	requirements?: readonly string[]
 }>
 
 export type CreateViewCommand = Readonly<{
@@ -93,6 +100,20 @@ export type ViewAuthoringService = Readonly<{
 }>
 
 export function createViewAuthoringService(persistence: FileNativePersistence): ViewAuthoringService {
+	/**
+	 * Clause 01a18120-f5b9-…: the diagnostics a write's result adds to the resource's own: each ID of the
+	 * View's Spec and Variants the `spec` provider lacks is `requirements.unresolved`, an unreadable
+	 * provider is `requirements.provider_unavailable`. The write has already succeeded and kept every ID.
+	 */
+	async function withRequirementDiagnostics(view: ViewResource, base: readonly Diagnostic[]): Promise<readonly Diagnostic[]> {
+		const lists: [readonly string[], string][] = [[view.spec?.requirements ?? [], '/spec/requirements']]
+		for (const [name, entry] of Object.entries(view.variants ?? {})) lists.push([entry.requirements ?? [], `/variants/${name.replaceAll('~', '~0').replaceAll('/', '~1')}/requirements`])
+		if (lists.every(([ids]) => ids.length === 0)) return base
+		const setting = (await persistence.workspace.readInspected()).resource?.requirements
+		const added = requirementListDiagnostics(await readRequirementsProvider(persistence.root, setting), lists)
+		return added.length > 0 ? [...base, ...added] : base
+	}
+
 	async function createView(command: CreateViewCommand): Promise<ViewAuthoringResult> {
 		const resource: ViewResource = {
 			id: command.id,
@@ -100,7 +121,7 @@ export function createViewAuthoringService(persistence: FileNativePersistence): 
 			...(command.feature === undefined ? {} : { feature: command.feature }),
 			ir: { type: 'RootShell', id: 'root', slots: { content: [] } },
 			variants: {},
-			spec: withPreservedDecisions(command.spec, []),
+			spec: withPreservedDecisions(command.spec, [], trimRequirementIds(command.spec.requirements ?? [])),
 		}
 		const validation = validateViewResource(resource)
 		if (!validation.ok)
@@ -109,7 +130,7 @@ export function createViewAuthoringService(persistence: FileNativePersistence): 
 		try {
 			const revision = await persistence.views.create(command.id, resource)
 			const inspected = await persistence.views.readInspected(command.id)
-			return { status: 'created', key: command.id, revision, diagnostics: inspected?.diagnostics ?? [], changeSummary: summarizeChange(undefined, resource) }
+			return { status: 'created', key: command.id, revision, diagnostics: await withRequirementDiagnostics(resource, inspected?.diagnostics ?? []), changeSummary: summarizeChange(undefined, resource) }
 		}
 		catch (error) {
 			if (!(error instanceof PersistenceError) || error.code !== 'persistence.resource_exists') throw error
@@ -135,7 +156,8 @@ export function createViewAuthoringService(persistence: FileNativePersistence): 
 
 		const next: ViewResource = {
 			...current.resource,
-			spec: withPreservedDecisions(command.spec, current.resource.spec.decisions),
+			// Clause 01a1814f-83f2-…: omitted `requirements` keeps the existing references, `[]` clears them.
+			spec: withPreservedDecisions(command.spec, current.resource.spec.decisions, command.spec.requirements === undefined ? current.resource.spec.requirements ?? [] : trimRequirementIds(command.spec.requirements)),
 		}
 		const validation = validateViewResource(next)
 		if (!validation.ok)
@@ -149,7 +171,7 @@ export function createViewAuthoringService(persistence: FileNativePersistence): 
 		if (!commit.ok)
 			return { status: 'conflict', key: command.key, currentRevision: commit.conflict.currentRevision }
 		const inspected = await persistence.views.readInspected(command.key)
-		return { status: 'updated', key: command.key, revision: commit.revision, diagnostics: inspected?.diagnostics ?? [], changeSummary: summarizeChange(current.resource, next) }
+		return { status: 'updated', key: command.key, revision: commit.revision, diagnostics: await withRequirementDiagnostics(next, inspected?.diagnostics ?? []), changeSummary: summarizeChange(current.resource, next) }
 	}
 
 	async function updateViewStructure(command: UpdateViewStructureCommand): Promise<ViewAuthoringResult> {
@@ -170,7 +192,7 @@ export function createViewAuthoringService(persistence: FileNativePersistence): 
 		const next: ViewResource = {
 			...current.resource,
 			ir: command.ir,
-			variants: command.variants,
+			variants: variantsKeepingRequirements(command.variants, current.resource.variants),
 		}
 		const validation = validateViewResource(next)
 		if (!validation.ok)
@@ -194,7 +216,7 @@ export function createViewAuthoringService(persistence: FileNativePersistence): 
 		if (!commit.ok)
 			return { status: 'conflict', key: command.key, currentRevision: commit.conflict.currentRevision }
 		const inspected = await persistence.views.readInspected(command.key)
-		return { status: 'updated', key: command.key, revision: commit.revision, diagnostics: inspected?.diagnostics ?? [], changeSummary: summarizeChange(current.resource, next), ...(impacts.length > 0 ? { impacts } : {}) }
+		return { status: 'updated', key: command.key, revision: commit.revision, diagnostics: await withRequirementDiagnostics(next, inspected?.diagnostics ?? []), changeSummary: summarizeChange(current.resource, next), ...(impacts.length > 0 ? { impacts } : {}) }
 	}
 
 	/**
@@ -360,7 +382,23 @@ function trimmed(value: string): string {
 	return typeof value === 'string' ? value.trim() : value
 }
 
-function withPreservedDecisions(content: ViewSpecContent, decisions: ViewSpec['decisions']): ViewSpec {
+/**
+ * Clause 01a1814f-83f2-76d7-8a6d-c365b548c21c: each Variant entry of a structure write keeps the
+ * `requirements` the View's entry of the same name has when it gives none, trims the ones it gives
+ * (`[]` clears them), and an entry of a new name starts with none. An entry that is not an object is
+ * passed through, so the View validator reports it.
+ */
+function variantsKeepingRequirements(next: ViewResource['variants'], current: ViewResource['variants'] | undefined): ViewResource['variants'] {
+	if (typeof next !== 'object' || next === null || Array.isArray(next)) return next
+	return Object.fromEntries(Object.entries(next).map(([name, entry]) => {
+		if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) return [name, entry]
+		if (Object.hasOwn(entry, 'requirements')) return [name, { ...entry, requirements: trimRequirementIds(entry.requirements) }]
+		const kept = current && Object.hasOwn(current, name) ? current[name]?.requirements : undefined
+		return [name, kept === undefined ? entry : { ...entry, requirements: kept }]
+	}))
+}
+
+function withPreservedDecisions(content: ViewSpecContent, decisions: ViewSpec['decisions'], requirements: readonly string[]): ViewSpec {
 	return {
 		intent: content.intent,
 		entryConditions: content.entryConditions,
@@ -368,6 +406,7 @@ function withPreservedDecisions(content: ViewSpecContent, decisions: ViewSpec['d
 		constraints: content.constraints,
 		accessibility: content.accessibility,
 		references: content.references,
+		requirements,
 		decisions,
 	}
 }

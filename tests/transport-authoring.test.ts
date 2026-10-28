@@ -123,6 +123,7 @@ describe('MCP View authoring', () => {
 			variants: {},
 			spec: {
 				...spec('Original'),
+				requirements: [],
 				decisions: [{
 					id: DECISION_ID,
 					question: 'Keep the split-pane layout?',
@@ -282,6 +283,7 @@ describe('MCP View authoring', () => {
 			variants: {},
 			spec: {
 				...spec('Original intent', ['Condition 1']),
+				requirements: [],
 				decisions: [{
 					id: DECISION_ID,
 					question: 'Decision to preserve?',

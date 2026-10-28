@@ -47,6 +47,7 @@ Nitro serves `GET /api/health`, selected-Workspace point reads under `/api/resou
 MCP exposes compact read-only discovery plus domain-specific authoring operations with revision CAS:
 - Views: `create_view`, `update_view_spec`, `update_view_structure`, `update_view_metadata`, `delete_view`
 - Workspace settings: `update_workspace_settings`
+- Requirement references: the `requirements` of `create_view`, `update_view_spec` (in `spec`), `update_view_structure` (on each Variant entry), `create_flow` and `update_flow`, and the `requirements` setting of `update_workspace_settings`; the read-only Resource `uiux://requirements`
 - Locales: `create_locale`, `update_locale`
 - UX Flows: `create_flow`, `update_flow`, `delete_flow`
 - Reviews: `create_review_thread`, `append_review_message`, `edit_review_message`, `reanchor_review_thread`, `set_review_display_hint`, `submit_ready_for_review`, `resolve_review_thread`, `reopen_review_thread`, `promote_review_to_decision`, `create_decision_from_review`, `retract_review_thread`
@@ -146,7 +147,23 @@ Consider denying `uiux member`, `token`, `invite`, `session` and `access` in you
 
 ### Workspace format
 
-A Workspace records its format in `workspace.json` `schemaVersion`. This UIUX reads only `schemaVersion` 6, which `uiux init` writes. There is no migration: no command, MCP tool or HTTP route upgrades a Workspace. `uiux dev`, the packaged server and every roster command refuse a Workspace at any other `schemaVersion` before touching it (exit status 2, `workspace.schema_unsupported`, naming the version found), and a Workspace whose manifest changes to another version under a running server cannot be changed. To start over, run `uiux init` in a new directory ([Discussion #231](https://github.com/DevilTea/uiux/discussions/231)).
+A Workspace records its format in `workspace.json` `schemaVersion`. This UIUX reads only `schemaVersion` 7, which `uiux init` writes. There is no migration: no command, MCP tool or HTTP route upgrades a Workspace. `uiux dev`, the packaged server and every roster command refuse a Workspace at any other `schemaVersion` before touching it (exit status 2, `workspace.schema_unsupported`, naming the version found), and a Workspace whose manifest changes to another version under a running server cannot be changed. To start over, run `uiux init` in a new directory ([Discussion #231](https://github.com/DevilTea/uiux/discussions/231)).
+
+### Requirement references
+
+A View's Spec, each of its Variants and each UX Flow can list requirement references: opaque IDs of requirements that the product's own specification states (for this repository, the UUIDs of `.spec/` Rules). Each ID is 1 to 200 characters with no leading or trailing white space, unique in its array, and an array holds at most 100. Every authoring tool that takes `requirements` keeps the existing references when the member is omitted and clears them for `[]`; a Variant entry of a new name starts with none. A reference-only edit changes no render-input digest and no Flow input digest, so it stales no Evidence.
+
+The optional `requirements` setting of `workspace.json` names where the requirements come from:
+
+```json
+{ "requirements": { "provider": "spec", "path": "../.spec", "noUi": { "<rule-uuid>": "Why this requirement has no UI." } } }
+```
+
+- `{ "provider": "spec", "path": "<relative path>" }` reads the Rules of a Spec Tool workspace (`@deviltea/spec-tool`, read-only) at `path` relative to the Workspace root. `path` names the directory that holds `.spec/`, or `.spec/` itself, and its real path must lie inside the Git work tree that holds the Workspace root. An ID the provider lacks is kept as written and reported as `requirements.unresolved`; a provider that cannot be read is `requirements.provider_unavailable`.
+- `{ "provider": "url", "template": "https://example.com/req/{id}" }` turns each reference into a link in the Workbench and supplies no coverage.
+- `noUi` maps requirement IDs to reasons: a requirement marked `noUi` is outside coverage, whatever references it.
+
+The Resource `uiux://requirements` (and, for the Workbench, `GET /api/requirements`) holds `{ provider, status, counts, requirements, unresolved, unverified }`. `status` is `none`, `url`, `ok` (a `spec` provider that was read) or `unavailable`; only `ok` lists each requirement as `referenced`, `unreferenced` or `noUi` with the Views, Variants and Flows that reference it, and `unverified` lists every referenced ID that is not checked against a provider read with `ok`, so an unreadable provider never looks like full coverage. With a `spec` provider the Workbench's Overview has a Requirements tab with the same coverage.
 
 ### Writing an Adapter
 
@@ -266,7 +283,7 @@ A proxy that rewrites `Host` to the loopback address makes its requests look loc
 
 ## Dogfood Workspace
 
-This repository keeps its own UIUX specification in `<repo>/.uiux/`, a `schemaVersion` 6 Workspace. Initialize a new Workspace with `uiux init`; once a UIUX server is running against it, agents should author canonical resources through domain-specific MCP tools rather than editing files in `.uiux/` directly. The Workbench is the human inspection surface for the same canonical state.
+This repository keeps its own UIUX specification in `<repo>/.uiux/`, a Workspace that is still at `schemaVersion` 6 until its reset to the current schema (issue #382), so this UIUX refuses it. Initialize a new Workspace with `uiux init`; once a UIUX server is running against it, agents should author canonical resources through domain-specific MCP tools rather than editing files in `.uiux/` directly. The Workbench is the human inspection surface for the same canonical state.
 
 ## Checks
 

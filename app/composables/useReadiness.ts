@@ -17,7 +17,7 @@ import {
 	type CaptureContext,
 	type EvidenceFreshness,
 } from '../utils/readiness'
-import { useUiuxClient, type EvidenceViewRenderInput } from './useUiuxClient'
+import { useUiuxClient, type EvidenceFlowInput, type EvidenceViewRenderInput } from './useUiuxClient'
 import { useWorkbench } from './useWorkbench'
 
 /**
@@ -89,6 +89,11 @@ const currentAdapters = shallowRef<Readonly<{ adapters?: readonly EvidenceAdapte
  * 01a115cd-c5a5-…: the View condition compares it, not the View revision).
  */
 const viewRenderInputs = shallowRef<ReadonlyMap<string, EvidenceViewRenderInput>>(new Map())
+/**
+ * Each Flow's current Flow input digest, read with the Evidence list, by Flow key (Rule
+ * 01a1814f-8256-…: a trace is judged by it, not by the Flow revision).
+ */
+const flowInputs = shallowRef<ReadonlyMap<string, EvidenceFlowInput>>(new Map())
 /** The non-capture Evidence records a submission may cite, read when the Submit for review dialog opens. */
 const citableItems = shallowRef<readonly EvidenceItem[]>([])
 const citableLoading = shallowRef(false)
@@ -160,7 +165,7 @@ export function useReadiness() {
 	// ----- Evidence --------------------------------------------------------------------------
 
 	function viewSignature(): string {
-		return views.value.map(view => `${view.key}@${view.revision}`).join(',')
+		return [...views.value.map(view => `${view.key}@${view.revision}`), ...flows.value.map(flow => `flow:${flow.key}@${flow.revision}`)].join(',')
 	}
 
 	async function loadEvidence(force = false): Promise<void> {
@@ -169,10 +174,11 @@ export function useReadiness() {
 		evidenceLoading.value = true
 		const startedWith = viewSignature()
 		const run = uiux.listEvidenceForFreshness<EvidenceItem, ProductKitProvenance>()
-			.then(({ items, views: inputs, productKit, productKitUnavailable, adapters, adaptersUnavailable }) => {
+			.then(({ items, views: inputs, flows: flowDigests, productKit, productKitUnavailable, adapters, adaptersUnavailable }) => {
 				currentProductKit.value = { ...(productKit ? { productKit } : {}), ...(productKitUnavailable === true ? { productKitUnavailable } : {}) }
 				currentAdapters.value = { ...(adapters ? { adapters } : {}), ...(adaptersUnavailable === true ? { adaptersUnavailable } : {}) }
 				viewRenderInputs.value = new Map((inputs ?? []).map(input => [input.key, input]))
+				flowInputs.value = new Map((flowDigests ?? []).map(input => [input.key, input]))
 				evidenceItems.value = (items ?? []).filter(item => item?.record?.kind === 'formal_capture')
 				evidenceError.value = undefined
 			})
@@ -198,7 +204,8 @@ export function useReadiness() {
 	watch(viewSignature, () => {
 		if (!evidenceLoaded.value || evidencePromise) return
 		const inputs = viewRenderInputs.value
-		if (views.value.every(view => inputs.get(view.key)?.revision === view.revision)) return
+		const digests = flowInputs.value
+		if (views.value.every(view => inputs.get(view.key)?.revision === view.revision) && flows.value.every(flow => digests.get(flow.key)?.revision === flow.revision)) return
 		void loadEvidence(true)
 	})
 
@@ -239,8 +246,10 @@ export function useReadiness() {
 		const serial = ++citableSerial
 		citableLoading.value = true
 		try {
-			const items = await uiux.listEvidenceOfKinds<EvidenceItem>(CITABLE_EVIDENCE_KINDS)
+			const { items, flows: flowDigests } = await uiux.listEvidenceOfKinds<EvidenceItem>(CITABLE_EVIDENCE_KINDS)
 			if (serial !== citableSerial) return
+			// A listed trace is judged by the Flow input digests that arrive with it, so it never waits for the freshness list.
+			if (flowDigests) flowInputs.value = new Map(flowDigests.map(input => [input.key, input]))
 			citableItems.value = items.filter(item => CITABLE_EVIDENCE_KINDS.includes(item?.record?.kind as CitableEvidenceKind))
 			citableError.value = undefined
 		}
@@ -261,7 +270,7 @@ export function useReadiness() {
 		if (!viewId) return []
 		const ranAt = (record: FormalEvidenceRecord) => String((record.executionContext as Record<string, unknown>)?.ranAt ?? '')
 		const captures = new Map(evidenceItems.value.map(item => [item.digest, item.record]))
-		const traceContext = { ...stalenessContext.value, flows: flows.value.map(flow => ({ key: flow.key, revision: flow.revision })), captures }
+		const traceContext = { ...stalenessContext.value, flows: flows.value.flatMap(flow => flowInputs.value.has(flow.key) ? [{ key: flow.key, flowInputDigest: flowInputs.value.get(flow.key)!.flowInputDigest }] : []), captures }
 		const inputs = viewRenderInputs.value
 		const revisions = new Map(views.value.map(view => [view.key, view.revision]))
 		const entries: CitableEvidenceEntry[] = []

@@ -1,5 +1,6 @@
 import packageJson from '../../../package.json' with { type: 'json' }
 import { canonicalJsonBytes } from '../../domain/canonical-json'
+import { flowInputDigest } from '../../domain/flows/input-digest'
 import { FLOW_TRACE_KIND, validateFormalEvidenceRecord, type FormalEvidenceRecord } from '../../domain/evidence/schema'
 import { deriveFlowRecipe, flowRecipeEntries, validateFlowRecipe, type FlowRecipe, type FlowRecipeEntry } from '../../domain/flows/recipe'
 import type { FlowResource } from '../../domain/flows/schema'
@@ -173,6 +174,8 @@ export function createFlowEvidenceService(
 				workspaceSchemaVersion: captured.results[0]!.evidence!.provenance.workspaceSchemaVersion,
 				resources: [...resources.values()].sort((a, b) => String(a.identity.type).localeCompare(String(b.identity.type)) || String(a.identity.id).localeCompare(String(b.identity.id))),
 				versions: { uiux: packageJson.version },
+				// Clause 01a1814f-81c2-…: the digest of the Flow without `requirements`, which the trace is judged by.
+				flowInputDigest: flowInputDigest(flowRead.resource),
 			},
 			artifactRefs: [],
 			evidenceRefs,

@@ -86,23 +86,24 @@ describe('Flow trace freshness in the picker (shown, never refused)', () => {
 	const FLOW = '22222222-2222-4222-8222-222222222222'
 	const STEP = '33333333-3333-4333-8333-333333333333'
 	const captureDigest = `sha256:${'c'.repeat(64)}`
-	const trace = (flowRevision: string) => flowTraceRecord({ flowId: FLOW, flowRevision, stepId: STEP, viewId: VIEW }, captureDigest) as unknown as FormalEvidenceRecord
-	const context = (flows: readonly { key: string; revision: string }[], captures = new Map<string, FormalEvidenceRecord>()) => ({ allViews: [], flows, captures })
+	const trace = (flowInputDigest: string) => flowTraceRecord({ flowId: FLOW, flowRevision: 'r_recorded', flowInputDigest, stepId: STEP, viewId: VIEW }, captureDigest) as unknown as FormalEvidenceRecord
+	const context = (flows: readonly { key: string; flowInputDigest: string }[], captures = new Map<string, FormalEvidenceRecord>()) => ({ allViews: [], flows, captures })
 
-	it('is stale when the Flow changed or is gone, or a referenced capture is missing', () => {
-		expect(flowTraceFreshness(trace('r_old'), context([{ key: FLOW, revision: 'r_new' }]))).toEqual({ state: 'stale', reason: 'flowChanged' })
-		expect(flowTraceFreshness(trace('r_new'), context([]))).toEqual({ state: 'stale', reason: 'flowMissing' })
-		expect(flowTraceFreshness(trace('r_new'), context([{ key: FLOW, revision: 'r_new' }]))).toEqual({ state: 'stale', reason: 'traceCaptureMissing' })
+	it('is stale when the Flow changed or is gone, the trace records no Flow input digest, or a referenced capture is missing', () => {
+		expect(flowTraceFreshness(trace('d_old'), context([{ key: FLOW, flowInputDigest: 'd_new' }]))).toEqual({ state: 'stale', reason: 'flowChanged' })
+		expect(flowTraceFreshness(trace('d_new'), context([]))).toEqual({ state: 'stale', reason: 'flowMissing' })
+		expect(flowTraceFreshness(flowTraceRecord({ flowId: FLOW, flowRevision: 'r', stepId: STEP, viewId: VIEW }, captureDigest) as unknown as FormalEvidenceRecord, context([{ key: FLOW, flowInputDigest: 'd_new' }]))).toEqual({ state: 'stale', reason: 'noFlowRevision' })
+		expect(flowTraceFreshness(trace('d_new'), context([{ key: FLOW, flowInputDigest: 'd_new' }]))).toEqual({ state: 'stale', reason: 'traceCaptureMissing' })
 	})
 
-	it('is fresh when the Flow has the recorded revision and no referenced capture is stale', () => {
-		const withoutCaptures = { ...trace('r_new'), evidenceRefs: [] } as FormalEvidenceRecord
-		expect(flowTraceFreshness(withoutCaptures, context([{ key: FLOW, revision: 'r_new' }]))).toEqual({ state: 'fresh' })
+	it('is fresh when the Flow has the recorded input digest and no referenced capture is stale', () => {
+		const withoutCaptures = { ...trace('d_new'), evidenceRefs: [] } as FormalEvidenceRecord
+		expect(flowTraceFreshness(withoutCaptures, context([{ key: FLOW, flowInputDigest: 'd_new' }]))).toEqual({ state: 'fresh' })
 	})
 
 	it('is offered for a View only when a step of its Flow enters that View', () => {
-		expect(flowTraceEntersView(trace('r_new'), VIEW)).toBe(true)
-		expect(flowTraceEntersView(trace('r_new'), '99999999-9999-4999-8999-999999999999')).toBe(false)
+		expect(flowTraceEntersView(trace('d_new'), VIEW)).toBe(true)
+		expect(flowTraceEntersView(trace('d_new'), '99999999-9999-4999-8999-999999999999')).toBe(false)
 		expect(flowTraceEntersView({ ...trace('r_new'), data: undefined } as unknown as FormalEvidenceRecord, VIEW)).toBe(false)
 	})
 })

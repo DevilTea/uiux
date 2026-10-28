@@ -49,14 +49,14 @@ beforeAll(async () => {
 	newestRun = await recordRun('2026-10-26T09:00:00.000Z')
 	// The Flow changed since this trace ran, so it is stale; it can still be cited.
 	const capture = `sha256:${'c'.repeat(64)}`
-	staleTrace = await putRecordInWorkspace(server.workspaceRoot, flowTraceRecord({ flowId: FLOW_ID, flowRevision: 'r_earlier', stepId: STEP_ID, viewId: VIEW_ID }, capture))
+	staleTrace = await putRecordInWorkspace(server.workspaceRoot, flowTraceRecord({ flowId: FLOW_ID, flowRevision: 'r_earlier', flowInputDigest: `sha256:${'d'.repeat(64)}`, stepId: STEP_ID, viewId: VIEW_ID }, capture))
 	// A replay copies its capture's context and provenance, so these are current unless the View's render input changed since (Clause 01a14e30-2e43-…).
 	passingReplay = await putRecordInWorkspace(server.workspaceRoot, await currentInteractionReplayRecord(server.workspaceRoot, VIEW_ID, { capture }))
 	failingReplay = await putRecordInWorkspace(server.workspaceRoot, await currentInteractionReplayRecord(server.workspaceRoot, VIEW_ID, { result: 'fail', capture: `sha256:${'d'.repeat(64)}` }))
 	// Every assertion passed, but the View's IR or Variants changed after the capture: stale.
 	staleReplay = await putRecordInWorkspace(server.workspaceRoot, await currentInteractionReplayRecord(server.workspaceRoot, VIEW_ID, { capture: `sha256:${'f'.repeat(64)}`, staleRenderInput: true }))
 	// A trace of a Flow that does not enter this View is not offered for it.
-	otherViewTrace = await putRecordInWorkspace(server.workspaceRoot, flowTraceRecord({ flowId: FLOW_ID, flowRevision: 'r_earlier', stepId: STEP_ID, viewId: '99999999-9999-4999-8999-999999999999' }, `sha256:${'e'.repeat(64)}`))
+	otherViewTrace = await putRecordInWorkspace(server.workspaceRoot, flowTraceRecord({ flowId: FLOW_ID, flowRevision: 'r_earlier', flowInputDigest: `sha256:${'d'.repeat(64)}`, stepId: STEP_ID, viewId: '99999999-9999-4999-8999-999999999999' }, `sha256:${'e'.repeat(64)}`))
 }, 120_000)
 
 afterAll(async () => {

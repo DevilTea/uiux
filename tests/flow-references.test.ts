@@ -31,6 +31,7 @@ describe('Flow reference diagnostics (Rule 01a11544-629c-7dbf-8e41-36c8e37537b3)
 			id: FLOW_ID,
 			name: 'Refs',
 			entryStepId: ENTRY,
+			requirements: [],
 			steps: {
 				[ENTRY]: { target: { viewId: VIEW_ID, variantName: 'loading' }, transitions: [{ trigger: { widgetId: 'ghost', event: 'press' }, targetStepId: SECOND }, { trigger: { widgetId: 'go', event: 'undeclared' }, targetStepId: SECOND }] },
 				[SECOND]: { target: { viewId: GONE_VIEW_ID, variantName: 'x' }, transitions: [{ trigger: { widgetId: 'nothing', event: 'press' }, targetStepId: ENTRY }] },
@@ -66,6 +67,7 @@ describe('Flow reads report reference diagnostics', () => {
 			id: FLOW_ID,
 			name: 'Dangling',
 			entryStepId: ENTRY,
+			requirements: [],
 			steps: {
 				[ENTRY]: { target: { viewId: VIEW_ID, variantName: 'nope' }, transitions: [{ trigger: { widgetId: 'ghost', event: 'press' }, targetStepId: SECOND }, { trigger: { widgetId: 'root', event: 'press' }, targetStepId: SECOND }] },
 				[SECOND]: { target: { viewId: GONE_VIEW_ID }, transitions: [] },
@@ -84,7 +86,7 @@ describe('Flow reads report reference diagnostics', () => {
 
 	it('reports no diagnostics for a Flow whose references exist', async () => {
 		const { app, persistence } = await seededSession()
-		await persistence.flows.create(FLOW_ID, { id: FLOW_ID, name: 'Fine', entryStepId: ENTRY, steps: { [ENTRY]: { target: { viewId: VIEW_ID }, transitions: [{ trigger: { widgetId: 'root', event: 'anything' }, targetStepId: ENTRY }] } } })
+		await persistence.flows.create(FLOW_ID, { id: FLOW_ID, name: 'Fine', entryStepId: ENTRY, requirements: [], steps: { [ENTRY]: { target: { viewId: VIEW_ID }, transitions: [{ trigger: { widgetId: 'root', event: 'anything' }, targetStepId: ENTRY }] } } })
 		expect((await app.readPointResource('flow', FLOW_ID))?.diagnostics).toEqual([])
 	})
 })
@@ -99,7 +101,7 @@ async function seededSession() {
 		name: 'Fixture',
 		ir: { type: 'RootShell', id: 'root', slots: { content: [] } },
 		variants: {},
-		spec: { intent: '', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], decisions: [] },
+		spec: { intent: '', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], requirements: [], decisions: [] },
 	}
 	await persistence.views.create(VIEW_ID, resource)
 	await persistence.locales.create('en-US', { title: 'Title' })

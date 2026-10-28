@@ -43,7 +43,7 @@ async function mount(widgets: readonly Widget[]): Promise<Readonly<{ container: 
 		name: 'Kit wrappers',
 		ir: { type: 'RootShell', id: 'root', slots: { content: widgets } } as never,
 		variants: {},
-		spec: { intent: 'Kit wrappers', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], decisions: [] },
+		spec: { intent: 'Kit wrappers', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], requirements: [], decisions: [] },
 	}
 	let status: unknown
 	const bridge = factory.mountPreviewRuntime(container, { view, context: CONTEXT, onStatusChange: (next) => { status = next } })

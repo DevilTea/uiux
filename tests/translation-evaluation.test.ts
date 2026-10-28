@@ -109,7 +109,7 @@ function view(children: readonly Record<string, unknown>[], variants: ViewResour
 		id: VIEW_ID, name: 'Evaluation fixture',
 		ir: { type: 'RootShell', id: 'root', slots: { content: children } } as never,
 		variants,
-		spec: { intent: '', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], decisions: [] },
+		spec: { intent: '', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], requirements: [], decisions: [] },
 	}
 }
 

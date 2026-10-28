@@ -117,7 +117,7 @@ function view(children: readonly Record<string, unknown>[]): ViewResource {
 		id: VIEW_ID, name: 'Observer fixture',
 		ir: { type: 'RootShell', id: 'root', slots: { content: children } } as never,
 		variants: {},
-		spec: { intent: '', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], decisions: [] },
+		spec: { intent: '', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], requirements: [], decisions: [] },
 	}
 }
 

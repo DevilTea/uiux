@@ -82,7 +82,7 @@ function badgeView(): ViewResource {
 		name: 'Reference Badge',
 		ir: { type: 'RootShell', id: 'root', slots: { content: [{ id: 'badge', type: 'Badge', config: { label: 'Active', tone: 'success' } }] } } as never,
 		variants: {},
-		spec: { intent: 'Reference styling', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], decisions: [] },
+		spec: { intent: 'Reference styling', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], requirements: [], decisions: [] },
 	}
 }
 

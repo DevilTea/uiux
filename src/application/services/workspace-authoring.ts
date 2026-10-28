@@ -4,6 +4,8 @@ import { analyzeImpact, withResource, type ImpactItem } from '../../domain/impac
 import { nextSingleFileRevision, readImpactWorkspace } from './impact-picture'
 import { validateResourceRevision } from '../dto/revisions'
 import type { Diagnostic } from '../../domain/validation'
+import { trimRequirementsSetting, REQUIREMENT_DIAGNOSTIC_CODES, type RequirementsSetting } from '../../domain/requirements/schema'
+import { noUiDiagnostics, providerUnavailableDiagnostic, readRequirementsProvider, resolveSpecProviderRoot, type RequirementsProviderOptions } from './requirements-provider'
 import {
 	validateWorkspaceManifest,
 	type ThemeEntry,
@@ -17,6 +19,11 @@ export type WorkspaceSettingsUpdate = Readonly<{
 	i18n: Readonly<{ defaultLocale: string; [key: string]: unknown }>
 	viewports: Readonly<Record<string, ViewportPreset>>
 	themes: Readonly<Record<string, ThemeEntry>>
+	/**
+	 * The requirements setting (Clause 01a18120-f49d-…): a given one replaces the whole setting, `null`
+	 * removes it and an omitted one keeps it (Clause 01a11485-f769-…).
+	 */
+	requirements?: RequirementsSetting | null
 }>
 
 export type UpdateWorkspaceSettingsCommand = Readonly<{
@@ -47,7 +54,7 @@ export type WorkspaceAuthoringService = Readonly<{
 	updateWorkspaceSettings<R = never>(command: UpdateWorkspaceSettingsCommand, guard?: WorkspaceSettingsGuard<R>): Promise<WorkspaceAuthoringResult | R>
 }>
 
-export function createWorkspaceAuthoringService(persistence: FileNativePersistence): WorkspaceAuthoringService {
+export function createWorkspaceAuthoringService(persistence: FileNativePersistence, requirementsOptions: RequirementsProviderOptions = {}): WorkspaceAuthoringService {
 	async function updateWorkspaceSettings<R = never>(command: UpdateWorkspaceSettingsCommand, guard?: WorkspaceSettingsGuard<R>): Promise<WorkspaceAuthoringResult | R> {
 		const expectedRevision = validateResourceRevision(command.expectedRevision, '/expectedRevision')
 		if (!expectedRevision.ok)
@@ -69,16 +76,25 @@ export function createWorkspaceAuthoringService(persistence: FileNativePersisten
 			}
 		}
 
+		// Clause 01a18120-f52d-…: a write trims the `noUi` IDs and reasons before checking.
+		const requirements = command.settings.requirements === undefined ? current.resource.requirements : command.settings.requirements === null ? undefined : trimRequirementsSetting(command.settings.requirements)
 		const next: WorkspaceManifest = {
 			schemaVersion: current.resource.schemaVersion,
 			i18n: { ...command.settings.i18n, defaultLocale: command.settings.i18n.defaultLocale },
 			viewports: command.settings.viewports,
 			themes: command.settings.themes,
+			...(requirements === undefined ? {} : { requirements }),
 		}
 
 		const validation = validateWorkspaceManifest(next)
 		if (!validation.ok)
 			return { status: 'invalid', key: 'workspace', diagnostics: validation.diagnostics }
+		// Clause 01a18120-f49d-…: a `spec` provider's real path lies inside the Git work tree that holds the Workspace root.
+		if (command.settings.requirements?.provider === 'spec') {
+			const resolved = await resolveSpecProviderRoot(persistence.root, command.settings.requirements, requirementsOptions)
+			if (!resolved.ok)
+				return { status: 'invalid', key: 'workspace', diagnostics: [{ code: REQUIREMENT_DIAGNOSTIC_CODES.providerInvalid, path: '/requirements/path', message: resolved.reason }] }
+		}
 
 		const refused = guard?.({ current: current.resource, next })
 		if (refused !== undefined) return refused
@@ -102,7 +118,10 @@ export function createWorkspaceAuthoringService(persistence: FileNativePersisten
 			if (!commit.ok)
 				return { status: 'conflict', key: 'workspace', currentRevision: commit.conflict.currentRevision }
 			const inspected = await persistence.workspace.readInspected()
-			return { status: 'updated', key: 'workspace', revision: commit.revision, diagnostics: inspected.diagnostics, changeSummary: summarizeChange(current.resource, next), ...(impacts.length > 0 ? { impacts } : {}) }
+			// Clause 01a18120-f5b9-…: the result reports the IDs the provider lacks (or that it cannot be read) and keeps them.
+			const provider = requirements === undefined ? undefined : await readRequirementsProvider(persistence.root, requirements, requirementsOptions)
+			const requirementDiagnostics = !provider ? [] : provider.status === 'unavailable' ? [providerUnavailableDiagnostic(provider, '/requirements')] : noUiDiagnostics(provider)
+			return { status: 'updated', key: 'workspace', revision: commit.revision, diagnostics: requirementDiagnostics.length > 0 ? [...inspected.diagnostics, ...requirementDiagnostics] : inspected.diagnostics, changeSummary: summarizeChange(current.resource, next), ...(impacts.length > 0 ? { impacts } : {}) }
 		}
 		catch (error) {
 			if (error instanceof PersistenceError) {
