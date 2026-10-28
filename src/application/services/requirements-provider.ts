@@ -9,7 +9,7 @@ import {
 	type RequirementsSetting,
 	type SpecRequirementsProvider,
 } from '../../domain/requirements/schema'
-import type { Diagnostic } from '../../domain/validation'
+import { isRecord, type Diagnostic } from '../../domain/validation'
 
 /**
  * Reads the requirement provider of the Workspace manifest's `requirements` setting (Clauses
@@ -137,7 +137,9 @@ export async function readRequirementsProvider(
 	options: RequirementsProviderOptions = {},
 ): Promise<RequirementsProviderRead> {
 	if (!setting) return { status: 'none' }
-	const { noUi = {}, ...provider } = setting
+	const { noUi: rawNoUi, ...provider } = setting
+	// A manifest edited by hand may hold anything here; the validator reports it, the read ignores it.
+	const noUi: Readonly<Record<string, string>> = isRecord(rawNoUi) ? rawNoUi as Record<string, string> : {}
 	if (provider.provider === 'url') return { status: 'url', provider, noUi }
 	const read = await readSpecProviderRules(workspaceRoot, provider, options)
 	return read.ok ? { status: 'ok', provider, noUi, rules: read.rules } : { status: 'unavailable', provider, noUi, reason: read.reason }

@@ -69,9 +69,8 @@ export function trimRequirementIds<T>(value: T): T {
 /** A write trims `noUi` IDs and reasons (Clause 01a18120-f52d-…); a non-map is returned as given. */
 export function trimNoUi<T>(value: T): T {
 	if (!isRecord(value)) return value
-	const out: Record<string, unknown> = {}
-	for (const [id, reason] of Object.entries(value)) out[id.trim()] = typeof reason === 'string' ? reason.trim() : reason
-	return out as T
+	// `Object.fromEntries` defines each key as an own property, so a key named `__proto__` is kept.
+	return Object.fromEntries(Object.entries(value).map(([id, reason]) => [id.trim(), typeof reason === 'string' ? reason.trim() : reason])) as T
 }
 
 /** A write trims the IDs of `setting` (Clause 01a18120-f49d-…), so the validator sees the stored form. */

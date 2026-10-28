@@ -163,6 +163,8 @@ The optional `requirements` setting of `workspace.json` names where the requirem
 - `{ "provider": "url", "template": "https://example.com/req/{id}" }` turns each reference into a link in the Workbench and supplies no coverage.
 - `noUi` maps requirement IDs to reasons: a requirement marked `noUi` is outside coverage, whatever references it.
 
+Reading a Spec Tool workspace takes its read lock, which creates and removes the coordination files `.spec-tool-v1.lock` and `.spec-tool-v1.readers/` beside `.spec/`. Add both to the `.gitignore` of the repository that holds the `.spec/` a `spec` provider reads (this repository already does).
+
 The Resource `uiux://requirements` (and, for the Workbench, `GET /api/requirements`) holds `{ provider, status, counts, requirements, unresolved, unverified }`. `status` is `none`, `url`, `ok` (a `spec` provider that was read) or `unavailable`; only `ok` lists each requirement as `referenced`, `unreferenced` or `noUi` with the Views, Variants and Flows that reference it, and `unverified` lists every referenced ID that is not checked against a provider read with `ok`, so an unreadable provider never looks like full coverage. With a `spec` provider the Workbench's Overview has a Requirements tab with the same coverage.
 
 ### Writing an Adapter

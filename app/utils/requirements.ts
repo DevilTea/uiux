@@ -1,5 +1,5 @@
 import type { RequirementReferrer, RequirementsCoverage } from '../../src/application/services/requirements'
-import { requirementLink } from '../../src/domain/requirements/schema'
+import { isUrlTemplate, requirementLink } from '../../src/domain/requirements/schema'
 import type { RequirementsSetting } from '../../src/domain/requirements/schema'
 import { flowPath, viewLocation } from './workbench-routes'
 
@@ -41,9 +41,21 @@ export function viewRequirementRows(view: ViewLike | undefined): readonly ViewRe
 	return [...rows.entries()].map(([id, entry]) => ({ id, fromView: entry.fromView, variants: entry.variants }))
 }
 
-/** The link of a `url` provider for `id` (Rule 01a18120-fc4e-…), or `undefined` with any other provider. */
+/**
+ * The link of a `url` provider for `id` (Rule 01a18120-fc4e-…), or `undefined` with any other provider.
+ * The template is read from a file anyone can edit, so it is checked here too: only an `http` or `https`
+ * template with one `{id}` and a link of that protocol becomes an `href`; anything else shows the ID as text.
+ */
 export function requirementHref(setting: RequirementsSetting | undefined, id: string): string | undefined {
-	return setting?.provider === 'url' ? requirementLink(setting.template, id) : undefined
+	if (setting?.provider !== 'url' || !isUrlTemplate(setting.template)) return undefined
+	const href = requirementLink(setting.template, id)
+	try {
+		const { protocol } = new URL(href)
+		return protocol === 'http:' || protocol === 'https:' ? href : undefined
+	}
+	catch {
+		return undefined
+	}
 }
 
 /** Where a referrer lives in the Workbench: its View's Spec (a Variant selected), or the Flow's page. */

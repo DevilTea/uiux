@@ -14,14 +14,18 @@ import { evaluateFlowTraceStaleness, FLOW_CHANGED_REASON, FLOW_PROVENANCE_MISSIN
 import { flowInputDigest } from '../src/domain/flows/input-digest'
 import { changeAffectsFlowEvidence, changeAffectsFormalCapture } from '../src/domain/reviews/change-domains'
 import { validateFlowResource } from '../src/domain/flows/schema'
-import { requirementLink } from '../src/domain/requirements/schema'
+import { requirementLink, trimNoUi, trimRequirementsSetting } from '../src/domain/requirements/schema'
+import { requirementHref } from '../app/utils/requirements'
+import { createRequirementsService } from '../src/application/services/requirements'
+import { readRequirementsProvider } from '../src/application/services/requirements-provider'
+import { resolveSelectedWorkspaceAdapters } from '../src/server/workspace-adapters'
 import { validateViewResource } from '../src/domain/views/schema'
 import { validateWorkspaceManifest } from '../src/domain/workspace/schema'
 import { FileNativePersistence } from '../src/persistence'
 import { inspectWorkspaceManifest } from '../src/persistence/schema-policy'
 import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { AGENT_EDITOR, connectMcp, HUMAN_OWNER, scoped } from './support/access'
-import { currentManifest, createCurrentWorkspace } from './support/workspace-layout'
+import { currentManifest, createCurrentWorkspace, writeManifest } from './support/workspace-layout'
 
 const VIEW = '11111111-1111-4111-8111-111111111111'
 const OTHER_VIEW = '22222222-2222-4222-8222-222222222222'
@@ -116,6 +120,58 @@ describe('requirement references in the canonical shapes (schemaVersion 7)', () 
 
 	it('builds a url provider link with the percent-encoded ID', () => {
 		expect(requirementLink('https://example.com/req/{id}', 'a b/ü')).toBe('https://example.com/req/a%20b%2F%C3%BC')
+	})
+})
+
+describe('hardening of what a hand-edited manifest can hold', () => {
+	// Rule 01a18120-fc4e-…: a link is built from the template only when it is an http or https URL template.
+	it('builds no href from a url template that is not an http or https URL template', () => {
+		const url = (template: string) => ({ provider: 'url', template }) as const
+		expect(requirementHref(url('https://example.com/req/{id}'), 'R 1')).toBe('https://example.com/req/R%201')
+		expect(requirementHref(url('javascript:alert(1)//{id}'), 'R-1')).toBeUndefined()
+		expect(requirementHref(url('data:text/html,{id}'), 'R-1')).toBeUndefined()
+		expect(requirementHref(url('https://example.com/none'), 'R-1')).toBeUndefined()
+		expect(requirementHref(url('https://example.com/{id}/{id}'), 'R-1')).toBeUndefined()
+		expect(requirementHref({ provider: 'spec', path: '..' }, 'R-1')).toBeUndefined()
+		expect(requirementHref(undefined, 'R-1')).toBeUndefined()
+	})
+
+	it('reads a provider whose noUi is not a map as one without noUi, and computes the coverage', async () => {
+		const url = { provider: 'url', template: 'https://example.com/req/{id}' }
+		for (const noUi of [null, 'none', 7, ['r-1']])
+			expect((await readRequirementsProvider('/nowhere', { ...url, noUi } as never) as { noUi: unknown }).noUi).toEqual({})
+		const { persistence, repo } = await workspaceInRepo()
+		await specWorkspace(repo, 1)
+		await writeManifest(persistence.root, currentManifest({ requirements: { provider: 'spec', path: '../.spec', noUi: null } }))
+		expect(await createRequirementsService(persistence).readCoverage()).toMatchObject({ status: 'ok', counts: { unreferenced: 1, noUi: 0 } })
+	})
+
+	it('keeps a noUi entry named __proto__ when a write trims the map', () => {
+		const parsed = JSON.parse('{"__proto__": " Reason. ", " r-1 ": "Other."}') as Record<string, string>
+		const trimmed = trimNoUi(parsed)
+		expect(Object.hasOwn(trimmed, '__proto__')).toBe(true)
+		expect(Object.entries(trimmed)).toEqual([['__proto__', 'Reason.'], ['r-1', 'Other.']])
+		const setting = trimRequirementsSetting({ provider: 'url', template: 'https://example.com/{id}', noUi: parsed })
+		expect(Object.hasOwn(setting.noUi, '__proto__')).toBe(true)
+	})
+
+	// Rule 01a18121-0018-7013-9c5d-16e1efbb55a0: a requirement diagnostic in workspace.json never stops the Adapters resolving.
+	it('still resolves the Adapters when workspace.json holds a requirement diagnostic, and not for another invalid setting', async () => {
+		const { persistence } = await workspaceInRepo()
+		const resolve = async (manifest: Record<string, unknown>) => {
+			await writeManifest(persistence.root, currentManifest(manifest))
+			return await resolveSelectedWorkspaceAdapters(persistence.root, persistence.layout)
+		}
+		for (const requirements of [
+			{ provider: 'spec', path: '..', noUi: { 'r-1': 'Trailing space. ' } },
+			{ provider: 'url', template: 'ftp://example.com/{id}' },
+		]) {
+			const resolution = await resolve({ requirements })
+			expect(resolution.diagnostics.map(diagnostic => diagnostic.code), JSON.stringify(requirements)).not.toContain('workspace.manifest_missing')
+			expect(resolution.state).not.toBe('invalid')
+		}
+		const broken = await resolve({ i18n: { defaultLocale: 'not a tag' } })
+		expect(broken.diagnostics.map(diagnostic => diagnostic.code)).toContain('workspace.manifest_missing')
 	})
 })
 
