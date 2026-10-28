@@ -6,6 +6,7 @@ import type { Diagnostic } from '../domain/validation'
 import { validateResolvedRenderContext, type ResolvedRenderContext } from '../domain/render-context/schema'
 import type { VariantEntry, ViewResource } from '../domain/views/schema'
 import { validateViewResource } from '../domain/views/schema'
+import { withoutRequirementDiagnostics } from '../domain/requirements/schema'
 import type { RuntimeAdapterBundle } from './adapter-runtime'
 import { buildEffectiveViewSource } from './effective-view-source'
 import type { RootShellViewport } from './root-shell'
@@ -150,8 +151,10 @@ export function buildViewRuntime(input: Readonly<{
 	context: ResolvedRenderContext
 	assets?: AssetResolutionTable
 }>): ViewRuntimeBuildResult {
+	// A requirement diagnostic never makes a View unusable for rendering (Rule 01a18121-0018-…).
 	const viewValidation = validateViewResource(input.view)
-	if (!viewValidation.ok) return { state: 'invalid', diagnostics: viewValidation.diagnostics }
+	const blockingDiagnostics = withoutRequirementDiagnostics(viewValidation.diagnostics)
+	if (blockingDiagnostics.length > 0) return { state: 'invalid', diagnostics: blockingDiagnostics }
 	const contextValidation = validateResolvedRenderContext(input.context)
 	if (!contextValidation.ok) return { state: 'invalid', diagnostics: contextValidation.diagnostics }
 	if (input.context.viewId !== input.view.id)

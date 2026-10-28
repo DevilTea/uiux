@@ -126,6 +126,15 @@ describe('UX Flow validation (Discussion #6, items 2, 5, 7 and 8)', () => {
 		expect(validateFlowDraft(checkout(), VIEWS)).toEqual([])
 	})
 
+	// Rule 01a18121-0018-7013-9c5d-16e1efbb55a0: a requirement diagnostic never blocks playback, and the draft carries the references through.
+	it('carries requirement references through and never reports them as problems', () => {
+		const canonical = { id: FLOW, ...draftToCanonical(checkout()), requirements: ['a', 'a', ''] }
+		const { draft, lossless } = toFlowDraft(canonical)
+		expect(lossless).toBe(true)
+		expect(draftToCanonical(draft).requirements).toEqual(['a', 'a', ''])
+		expect(validateFlowDraft(draft, VIEWS)).toEqual([])
+	})
+
 	it('reports unreachable, ambiguous and missing-target problems as save-blocking', () => {
 		const flow = checkout()
 		flow.steps[ORPHAN] = { target: { viewId: VIEW_A }, transitions: [] }

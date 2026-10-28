@@ -7,7 +7,7 @@ import { resolveWorkspaceAdapterSet } from '../src/adapters'
 import { productAdapterRuntimeMemberDecoder } from '../src/adapters/product-integration'
 import type { AdapterManifest, AdapterWidgetCatalogEntry } from '../src/domain/adapters/schema'
 import type { ResolvedRenderContext } from '../src/domain/render-context/schema'
-import type { ViewResource } from '../src/domain/views/schema'
+import { validateViewResource, type ViewResource } from '../src/domain/views/schema'
 import type { TranslationResult } from '../src/domain/i18n/schema'
 import {
 	createTranslationRuntime,
@@ -214,6 +214,19 @@ describe('View / RootShell / Variant runtime assembly', () => {
 		expect(controller.runtime.blueprint.root.id).toBe('root')
 		expect(controller.runtime.blueprint.root.type).toBe('RootShell')
 		controller.dispose()
+	})
+
+	// Rule 01a18121-0018-7013-9c5d-16e1efbb55a0: a requirement diagnostic never makes a View unusable for rendering.
+	it('builds a Runtime for a View whose requirement references break the limits on disk', async () => {
+		const bundle = await runtimeBundle(counterPlugin, FixtureRenderer)
+		const base = viewFixture({ Alt: { state: {}, requirements: ['x', 'x'] } })
+		const view = { ...base, spec: { ...base.spec, requirements: ['', 'a', 'a'] } }
+		expect(validateViewResource(view).diagnostics.map(diagnostic => diagnostic.code)).toEqual(expect.arrayContaining(['requirements.invalid_id', 'requirements.duplicate_id']))
+		const controller = createController(bundle, view, context())
+		expect(controller).toBeInstanceOf(LiveViewRuntimeController)
+		if (controller instanceof LiveViewRuntimeController) controller.dispose()
+		// Another violation of the View still makes it invalid.
+		expect(createController(bundle, { ...view, name: 7 as never }, context())).not.toBeInstanceOf(LiveViewRuntimeController)
 	})
 
 	it('mounts the assembled Vue renderer against the exact Runtime/System pair', async () => {

@@ -206,7 +206,8 @@ export function triggerLabel(trigger: Readonly<{ widgetId: string; event: string
  */
 export function validateFlowDraft(draft: FlowDraft, views: FlowViewIndex): FlowProblem[] {
 	const problems: FlowProblem[] = []
-	const validation = validateFlowResource({ id: draft.id, requirements: [], ...draftToCanonical(draft) })
+	// The editor shows structure; requirement references never block playback (Rule 01a18121-0018-…).
+	const validation = validateFlowResource({ ...draftToCanonical(draft), id: draft.id, requirements: [] })
 	for (const diagnostic of validation.diagnostics) {
 		const where = locate(diagnostic.path)
 		const kind = STRUCTURAL_KINDS[diagnostic.code] ?? 'structure'

@@ -30,6 +30,19 @@ export const REQUIREMENT_DIAGNOSTIC_CODES = Object.freeze({
 	providerUnavailable: 'requirements.provider_unavailable',
 } as const)
 
+/**
+ * Rule 01a18121-0018-7013-9c5d-16e1efbb55a0: a requirement diagnostic never makes a View, a Variant or a
+ * UX Flow unusable for rendering, capture or playback, so the code that decides whether one is usable
+ * sets these aside.
+ */
+export function isRequirementDiagnostic(diagnostic: Readonly<{ code: string }>): boolean {
+	return diagnostic.code.startsWith('requirements.')
+}
+
+export function withoutRequirementDiagnostics<T extends Readonly<{ code: string }>>(diagnostics: readonly T[]): readonly T[] {
+	return diagnostics.filter(diagnostic => !isRequirementDiagnostic(diagnostic))
+}
+
 export type SpecRequirementsProvider = Readonly<{ provider: 'spec'; path: string }>
 export type UrlRequirementsProvider = Readonly<{ provider: 'url'; template: string }>
 export type RequirementsProvider = SpecRequirementsProvider | UrlRequirementsProvider
