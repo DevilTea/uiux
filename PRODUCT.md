@@ -110,7 +110,7 @@ The normative domain behavior and external contracts live in `.spec/` (Stories, 
 
 ## Evidence on Hand
 
-- Dogfood Workspace `.uiux/` (`schemaVersion` 6): 4 Views ("UIUX Workbench — Workspace browser", "Overview & readiness", "Reviews inbox", "Sign-in"), 2 UX Flows, 6 Review threads, 1 Asset, locales `en-US` and `zh-TW`, themes `dark` and `light`, viewport presets `desktop` (1920×1080), `tablet` (1024×768) and `mobile` (390×844), reference adapter `.uiux/kit/adapters/reference.ts`.
+- Dogfood Workspace `.uiux/` (`schemaVersion` 7, rebuilt fresh in phase 3 of Discussion #379, with a `spec` requirement provider and a few requirement references): 4 Views ("UIUX Workbench — Workspace browser", "Overview & readiness", "Reviews inbox", "Sign-in"), 2 UX Flows, no Review threads yet, 1 Asset, locales `en-US` and `zh-TW`, themes `dark` and `light`, viewport presets `desktop` (1920×1080), `tablet` (1024×768) and `mobile` (390×844), reference adapter `.uiux/kit/adapters/reference.ts`.
 - Screenshots of an earlier Workbench: `docs/pr-48/01-workbench-overview.png` to `05-handoff-export.png`.
 - Behavioral requirements and external contracts: `.spec/` in this repository, the authority (Stories, Features and Rules, Contracts and Clauses, Scenarios). Decision rationale and history: GitHub Discussions #1–#10, frozen. Implementation workstreams: Issues #11–#29.
 - **Absent, so future work must not fabricate:** users, customers, testimonials, usage metrics, pricing or licensing claims, and a logo or wordmark.

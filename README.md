@@ -283,7 +283,7 @@ A proxy that rewrites `Host` to the loopback address makes its requests look loc
 
 ## Dogfood Workspace
 
-This repository keeps its own UIUX specification in `<repo>/.uiux/`, a Workspace that is still at `schemaVersion` 6 until its reset to the current schema (issue #382), so this UIUX refuses it. Initialize a new Workspace with `uiux init`; once a UIUX server is running against it, agents should author canonical resources through domain-specific MCP tools rather than editing files in `.uiux/` directly. The Workbench is the human inspection surface for the same canonical state.
+This repository keeps its own UIUX specification in `<repo>/.uiux/`, a `schemaVersion` 7 Workspace (rebuilt fresh at the current schema, issue #382). Initialize a new Workspace with `uiux init`; once a UIUX server is running against it, agents should author canonical resources through domain-specific MCP tools rather than editing files in `.uiux/` directly. The Workbench is the human inspection surface for the same canonical state.
 
 ## Checks
 
