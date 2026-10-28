@@ -31,7 +31,7 @@ jobs:
       - name: Dogfood guard
         if: ${{ !contains(github.event.pull_request.labels.*.name, 'dogfood-history') }}
         run: pnpm dogfood:guard --base origin/${{ github.base_ref }}
-      - name: Dogfood guard (dogfood-history label: history check skipped)
+      - name: "Dogfood guard (dogfood-history label: history check skipped)"
         if: ${{ contains(github.event.pull_request.labels.*.name, 'dogfood-history') }}
         run: pnpm dogfood:guard --base origin/${{ github.base_ref }} --allow-history
 
