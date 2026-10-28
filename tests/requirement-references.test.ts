@@ -12,6 +12,7 @@ import type { FormalEvidenceRecord } from '../src/domain/evidence/schema'
 import { renderInputDigest } from '../src/domain/evidence/render-input-digest'
 import { evaluateFlowTraceStaleness, FLOW_CHANGED_REASON, FLOW_PROVENANCE_MISSING_REASON } from '../src/domain/evidence/staleness'
 import { flowInputDigest } from '../src/domain/flows/input-digest'
+import { changeAffectsFlowEvidence, changeAffectsFormalCapture } from '../src/domain/reviews/change-domains'
 import { validateFlowResource } from '../src/domain/flows/schema'
 import { requirementLink } from '../src/domain/requirements/schema'
 import { validateViewResource } from '../src/domain/views/schema'
@@ -64,6 +65,8 @@ describe('requirement references in the canonical shapes (schemaVersion 7)', () 
 		expect(validateFlowResource(flowFixture({ requirements: ['r-1'] })).ok).toBe(true)
 		const flowWithoutRequirements = Object.fromEntries(Object.entries(flowFixture()).filter(([key]) => key !== 'requirements'))
 		expect(codes(validateFlowResource(flowWithoutRequirements))).toEqual(['schema.expected_array /requirements'])
+		// Rule 01a18120-faa6-72e1-8e56-12d44df08b52: a Flow step carries no reference; only the Flow lists them.
+		expect(validateFlowResource(flowFixture({ steps: { [STEP]: { target: { viewId: VIEW }, transitions: [], requirements: ['r-1'] } } })).ok).toBe(false)
 	})
 
 	it('limits an ID to 1 to 200 trimmed characters, unique within an array of at most 100', () => {
@@ -142,6 +145,15 @@ describe('digests leave out requirement references', () => {
 		expect(flowInputDigest(flowFixture({ requirements: ['r-1', 'r-2'] }))).toBe(flowInputDigest(flowFixture()))
 		expect(flowInputDigest(flowFixture({ name: 'Renamed' }))).not.toBe(flowInputDigest(flowFixture()))
 		expect(flowInputDigest(flowFixture())).toMatch(/^sha256:[0-9a-f]{64}$/u)
+	})
+
+	// Clause 01a14e30-2e43-75a7-aca8-c8df28915f4e: the `spec` domain, a View's or a Variant's references included, affects no Evidence.
+	it('maps a change that names the spec domain to no formal capture and no Flow Evidence', () => {
+		const scope = { domains: ['spec'], views: new Set([VIEW]), flows: new Set([FLOW]) }
+		expect(changeAffectsFormalCapture(scope, { viewId: VIEW, locale: 'en-US', viewportId: 'desktop', themeId: 'light' })).toBe(false)
+		expect(changeAffectsFlowEvidence(scope, FLOW)).toBe(false)
+		// A change that names the View's structure still does.
+		expect(changeAffectsFormalCapture({ ...scope, domains: ['variant'] }, { viewId: VIEW })).toBe(true)
 	})
 
 	it('judges a flow_trace by the recorded Flow input digest: a missing one is stale, a differing one is stale, an equal one is fresh', () => {
@@ -505,6 +517,19 @@ describe('the Resource uiux://requirements', () => {
 			expect(coverage).toMatchObject({ status: 'unavailable', requirements: [], unresolved: [] })
 			expect(coverage.counts).toEqual({ referenced: 0, unreferenced: 0, noUi: 0, unresolved: 0, unverified: 1 })
 			expect(coverage.unverified).toEqual([{ id: 'r-1', referencedBy: [{ kind: 'view', viewId: VIEW }] }])
+		}
+		finally { await close() }
+	})
+
+	it('reads a spec provider whose path names the directory that holds .spec as well as .spec itself', async () => {
+		const { app, repo } = await workspaceInRepo()
+		await specWorkspace(repo, 2)
+		const { client, close } = await connectMcp(app, AGENT_EDITOR)
+		try {
+			await setProvider(app, client, { provider: 'spec', path: '..' })
+			expect(await readCoverage(client)).toMatchObject({ status: 'ok', counts: { unreferenced: 2 } })
+			await setProvider(app, client, { provider: 'spec', path: '../.spec' })
+			expect(await readCoverage(client)).toMatchObject({ status: 'ok', counts: { unreferenced: 2 } })
 		}
 		finally { await close() }
 	})

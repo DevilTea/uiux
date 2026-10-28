@@ -77,8 +77,10 @@ export function changeAffectsFormalCapture(scope: ChangeScope, capture: FormalCa
 
 function domainAffectsFormalCapture(domain: string, scope: ChangeScope, capture: FormalCaptureFacts): boolean {
 	switch (domain) {
-		// `spec` and `metadata` (a View's `name`, `feature` and other fields outside its Spec and its
-		// render input) affect no Evidence; `flow` only Flow Evidence; `interaction` only the interaction
+		// `spec` (a change to the requirement references of a View or of one of its Variants included) and
+		// `metadata` (a View's `name`, `feature` and other fields outside its Spec and its render input)
+		// affect no Evidence, which is why a reference-only edit stales none (the render-input digest leaves
+		// out a Variant's `requirements`, Clause 01a14e30-2d4a-…); `flow` only Flow Evidence; `interaction` only the interaction
 		// replay Evidence of the submission's Views (owner ruling 2 of #89).
 		case 'spec':
 		case 'metadata':
