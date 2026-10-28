@@ -35,6 +35,39 @@ jobs:
         if: ${{ contains(github.event.pull_request.labels.*.name, 'dogfood-history') }}
         run: pnpm dogfood:guard --base origin/${{ github.base_ref }} --allow-history
 
+  # Dogfood drift check (issue #383, Discussion #379 P4, docs/dogfood-worktree.md): on a copy of .uiux/
+  # with a temporary UIUX_HOME it builds the kit, serves the copy on loopback and fails on any required
+  # render context without fresh formal Evidence, then runs the Kit import scan, `uiux components diff
+  # --check` and `design:tokens --check`, and asserts it changed nothing under the checked-out .uiux/.
+  # It recaptures nothing and writes its report to the step summary.
+  #
+  # REPORT-ONLY until 2026-11-11 (two weeks after it landed on 2026-10-28, owner ruling 8 of
+  # https://github.com/DevilTea/uiux/discussions/379#discussioncomment-19234465): `continue-on-error`
+  # keeps a failure from failing the workflow, and the cross-OS risk (the Evidence was captured on macOS,
+  # this runs on Linux, and the kit build output feeds the Adapter digest) is read off the report during
+  # that time. On 2026-11-11 remove `continue-on-error` and make `dogfood-check` a required check.
+  # It runs beside `check`, not after it: it needs nothing from `pnpm check` (it builds for itself).
+  dogfood-check:
+    # A label change reruns only the dogfood guard.
+    if: github.event_name != 'pull_request' || (github.event.action != 'labeled' && github.event.action != 'unlabeled')
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.34.4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.20.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build the packaged server
+        run: pnpm build
+      - name: "Dogfood check (report-only until 2026-11-11)"
+        run: pnpm dogfood:check
+
   check:
     # A label change reruns only the dogfood guard.
     if: github.event_name != 'pull_request' || (github.event.action != 'labeled' && github.event.action != 'unlabeled')
