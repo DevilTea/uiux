@@ -115,7 +115,8 @@ describe('Submit for review cites any Evidence kind (issue #61)', () => {
 			expect(await row(page, staleTrace).innerText()).toContain('The Flow changed after this trace.')
 			// A replay is shown as current or stale the same way.
 			expect(await row(page, passingReplay).innerText()).toContain('Current')
-			expect(await row(page, staleReplay).innerText()).toContain('IR or Variants changed after capture')
+			// The View's current render-input digest arrives with the freshness list, so this may follow the picker by a moment.
+			await expect.poll(() => row(page, staleReplay).innerText(), { timeout: 15_000 }).toContain('IR or Variants changed after capture')
 
 			await pickDomains(page, ['i18n (Locale messages)'])
 			// The ruling: i18n preselects the latest Run Checks record, point-in-time, never judged stale.
