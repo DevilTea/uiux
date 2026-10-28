@@ -61,6 +61,7 @@ const VIEW: ViewResource = {
 		constraints: [],
 		accessibility: [],
 		references: [],
+		requirements: [],
 		decisions: [{ id: DECISION_ID, question: 'Keep a single Pay button?', status: 'pending', history: [] }],
 	},
 }

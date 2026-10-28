@@ -1,3 +1,4 @@
+import { validateRequirementIds } from '../requirements/schema'
 import {
 	jsonPointer,
 	isRecord,
@@ -21,6 +22,8 @@ export type FlowResource = Readonly<{
 	scenarioRef?: JsonObject
 	entryStepId: string
 	steps: Readonly<Record<string, FlowStep>>
+	/** Requirement references (Clause 01a18120-f403-796d-9ae7-7889fa233bca); a step carries none. */
+	requirements: readonly string[]
 }>
 
 export function validateFlowResource(input: unknown, filename?: string): ValidationResult<FlowResource> {
@@ -29,7 +32,8 @@ export function validateFlowResource(input: unknown, filename?: string): Validat
 	if (!flow)
 		return v.finish<FlowResource>(input)
 	validateJsonValue(input, '', v)
-	rejectUnknownKeys(flow, ['id', 'name', 'scenarioRef', 'entryStepId', 'steps'], '', v)
+	rejectUnknownKeys(flow, ['id', 'name', 'scenarioRef', 'entryStepId', 'steps', 'requirements'], '', v)
+	validateRequirementIds(flow.requirements, '/requirements', v)
 	const idIsUuid = validateUuid(flow.id, '/id', v, 'Flow id')
 	v.string(flow.name, '/name', true)
 	if (filename !== undefined && idIsUuid) {

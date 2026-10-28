@@ -336,7 +336,7 @@ describe('Flow and interaction Evidence freshness (issue #88)', () => {
 		kind: 'flow_trace',
 		executionContext: { flowId: FLOW, locale: 'en-US', viewportId: 'desktop', themeId: 'light' },
 		coverage: { complete: true },
-		provenance: { workspaceSchemaVersion: 6, resources: [{ identity: { type: 'flow', id: FLOW }, revision: 'f1' }], versions: { uiux: '0.1.0' } },
+		provenance: { workspaceSchemaVersion: 7, resources: [{ identity: { type: 'flow', id: FLOW }, revision: 'f1' }], versions: { uiux: '0.1.0' }, flowInputDigest: 'sha256:f1' },
 		artifactRefs: [],
 		evidenceRefs: [{ kind: 'formal_capture', evidence: captureDigest }],
 		...patch,
@@ -345,20 +345,20 @@ describe('Flow and interaction Evidence freshness (issue #88)', () => {
 		allViews: [{ key: 'v1', renderInputDigest: DIGEST }],
 		workspace,
 		discoveredLocales: ['en-US'],
-		flows: [{ key: FLOW, revision: 'f1' }],
+		flows: [{ key: FLOW, flowInputDigest: 'sha256:f1' }],
 		captures: new Map([[captureDigest, capture()]]),
 		...overrides,
 	})
 
 	describe('flow_trace', () => {
-		it('is fresh while its Flow has the recorded revision and every capture it references is fresh', () => {
+		it('is fresh while its Flow has the recorded input digest and every capture it references is fresh', () => {
 			expect(evaluateFlowTraceStaleness(trace(), judged())).toEqual({ isStale: false })
 		})
 
 		it('is stale once its Flow changed or no longer exists, or the trace records no Flow', () => {
-			expect(evaluateFlowTraceStaleness(trace(), judged({ flows: [{ key: FLOW, revision: 'f2' }] }))).toEqual({ isStale: true, reason: FLOW_CHANGED_REASON })
+			expect(evaluateFlowTraceStaleness(trace(), judged({ flows: [{ key: FLOW, flowInputDigest: 'sha256:f2' }] }))).toEqual({ isStale: true, reason: FLOW_CHANGED_REASON })
 			expect(evaluateFlowTraceStaleness(trace(), judged({ flows: [] }))).toEqual({ isStale: true, reason: FLOW_REMOVED_REASON })
-			expect(evaluateFlowTraceStaleness(trace({ provenance: { workspaceSchemaVersion: 6, resources: [], versions: { uiux: '0.1.0' } } }), judged())).toEqual({ isStale: true, reason: FLOW_PROVENANCE_MISSING_REASON })
+			expect(evaluateFlowTraceStaleness(trace({ provenance: { workspaceSchemaVersion: 7, resources: [], versions: { uiux: '0.1.0' } } }), judged())).toEqual({ isStale: true, reason: FLOW_PROVENANCE_MISSING_REASON })
 			expect(evaluateFlowTraceStaleness(trace({ executionContext: {} }), judged())).toEqual({ isStale: true, reason: FLOW_TRACE_FLOW_MISSING_REASON })
 		})
 

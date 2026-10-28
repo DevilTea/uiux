@@ -63,6 +63,8 @@ const viewSpecContentSchema = z.object({
 	constraints: z.array(z.string()),
 	accessibility: z.array(z.string()),
 	references: z.array(z.unknown()),
+	// Clause 01a1814f-83f2-…: omitted keeps (update) or stores [] (create); [] clears. The domain validator reports ID shapes.
+	requirements: z.array(z.unknown()).optional(),
 }).strict()
 
 const createViewHttpSchema = z.object({
@@ -121,6 +123,8 @@ const updateWorkspaceSettingsHttpSchema = z.object({
 			}).catchall(z.unknown()),
 		}).catchall(z.unknown())),
 		themes: z.record(z.string(), z.record(z.string(), z.unknown())),
+		// Clause 01a11485-f769-…: replaces the whole setting; null removes it; omitted keeps it. The domain validator reports its shape (requirements.provider_invalid).
+		requirements: z.unknown().optional(),
 	}).strict(),
 	acknowledgeImpact: z.boolean().optional(),
 }).strict()
@@ -178,6 +182,7 @@ const createFlowHttpSchema = z.object({
 	scenarioRef: z.record(z.string(), z.unknown()).optional(),
 	entryStepId: z.string(),
 	steps: z.record(z.string(), flowStepSchema),
+	requirements: z.array(z.unknown()).optional(),
 }).strict()
 
 const updateFlowHttpSchema = z.object({
@@ -186,6 +191,7 @@ const updateFlowHttpSchema = z.object({
 	scenarioRef: z.record(z.string(), z.unknown()).optional(),
 	entryStepId: z.string(),
 	steps: z.record(z.string(), flowStepSchema),
+	requirements: z.array(z.unknown()).optional(),
 }).strict()
 
 // The closed anchor union: the Widget arm { viewId, widgetId } or the Workspace arm { scope: "workspace" }.
@@ -501,6 +507,13 @@ export async function updateWorkspaceSettingsForHttp(app: ScopedWorkspaceSession
 	return { status: mapAuthoringResultToHttpStatus(result.status, resultCode(result)), body: result }
 }
 
+/** `GET /api/requirements`: the requirement coverage (Clause 01a18120-f903-…), `workspace.read` only; the Workbench's Requirements tab reads it. */
+export async function readRequirementsForHttp(app: ScopedWorkspaceSession): Promise<AuthoringHttpResult> {
+	const denied = app.authorize('readRequirements')
+	if (denied) return { status: 403, body: { status: 'blocked', key: 'requirements', code: denied.code, requiredKeys: denied.requiredKeys, message: denied.message, diagnostics: [{ code: denied.code, path: '/', message: denied.message }] } }
+	return { status: 200, body: await app.readRequirements() }
+}
+
 /** `GET /api/product-kit`: the Product Kit Resource, `workspace.read` only; 404 without a readable Product Kit file. */
 export async function readProductKitForHttp(app: ScopedWorkspaceSession): Promise<AuthoringHttpResult> {
 	const denied = app.authorize('readProductKit')
@@ -615,6 +628,7 @@ export async function createFlowForHttp(app: ScopedWorkspaceSession, body: unkno
 		...(data.scenarioRef ? { scenarioRef: data.scenarioRef as JsonObject } : {}),
 		entryStepId: data.entryStepId,
 		steps: data.steps as Record<string, FlowStep>,
+		...(data.requirements === undefined ? {} : { requirements: data.requirements as string[] }),
 	})
 	return { status: mapAuthoringResultToHttpStatus(result.status, resultCode(result)), body: result }
 }
@@ -630,6 +644,7 @@ export async function updateFlowForHttp(app: ScopedWorkspaceSession, flowId: str
 		...(data.scenarioRef ? { scenarioRef: data.scenarioRef as JsonObject } : {}),
 		entryStepId: data.entryStepId,
 		steps: data.steps as Record<string, FlowStep>,
+		...(data.requirements === undefined ? {} : { requirements: data.requirements as string[] }),
 	})
 	return { status: mapAuthoringResultToHttpStatus(result.status, resultCode(result)), body: result }
 }

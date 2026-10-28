@@ -152,7 +152,7 @@ function buttonView(): ViewResource {
 		name: 'Kit Button View',
 		ir: { type: 'RootShell', id: 'root', slots: { content: [{ id: 'b1', type: 'KitButton' }] } } as never,
 		variants: {},
-		spec: { intent: 'Kit styling', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], decisions: [] },
+		spec: { intent: 'Kit styling', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], requirements: [], decisions: [] },
 	}
 }
 

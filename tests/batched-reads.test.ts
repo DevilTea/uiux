@@ -39,7 +39,7 @@ function view(id: string): ViewResource {
 		name: `View ${id}`,
 		feature: 'checkout',
 		ir: { type: 'RootShell', id: 'root', slots: { content: [] } },
-		spec: { intent: 'Test', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], decisions: [] },
+		spec: { intent: 'Test', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], requirements: [], decisions: [] },
 	} as unknown as ViewResource
 }
 

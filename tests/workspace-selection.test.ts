@@ -60,7 +60,7 @@ function view(name: string) {
 		name,
 		ir: { type: 'RootShell', id: 'root', slots: { content: [] } },
 		variants: {},
-		spec: { intent: 'Pay', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], decisions: [] },
+		spec: { intent: 'Pay', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], requirements: [], decisions: [] },
 	}
 }
 
@@ -112,7 +112,7 @@ describe('checkWorkspaceSelection', () => {
 	})
 
 	it('refuses a manifest at any other schemaVersion, older or newer, naming it, the current one and uiux init', async () => {
-		for (const version of [1, 2, 3, 4, 5, CURRENT_WORKSPACE_SCHEMA_VERSION + 1]) {
+		for (const version of [1, 2, 3, 4, 5, 6, CURRENT_WORKSPACE_SCHEMA_VERSION + 1]) {
 			const { root } = await workspace(version)
 			const refused = checkWorkspaceSelection(root, POLICY)
 			expect(refused, String(version)).toMatchObject({ ok: false, reason: 'unsupported_schema' })

@@ -92,7 +92,7 @@ describe('GET /api/evidence/list', () => {
 		expect(await denied.json()).toMatchObject({ code: 'auth.scope_denied', requiredKeys: ['workspace.read'] })
 		const ok = await kinds('kinds=checks_run,flow_trace,interaction_replay')
 		expect(ok.status).toBe(200)
-		expect(await ok.json()).toEqual({ items: [] })
+		expect(await ok.json()).toEqual({ items: [], flows: [] })
 		for (const query of ['kinds=formal_capture,nothing', 'kinds=', 'kinds=checks_run&kinds=flow_trace']) {
 			expect((await kinds(query)).status, query).toBe(400)
 		}
@@ -140,7 +140,7 @@ describe('GET /api/evidence/list', () => {
 	it('skips a View file that is not valid JSON and still answers the other Views and the list', async () => {
 		const good = '44444444-4444-4444-8444-444444444441'
 		const bad = '44444444-4444-4444-8444-444444444442'
-		const goodView = { id: good, name: 'Checkout', ir: { type: 'RootShell', id: 'root', slots: { content: [] } }, variants: {}, spec: { intent: '', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], decisions: [] } }
+		const goodView = { id: good, name: 'Checkout', ir: { type: 'RootShell', id: 'root', slots: { content: [] } }, variants: {}, spec: { intent: '', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], requirements: [], decisions: [] } }
 		await write(join(root, 'views', `${good}.view.json`), `${JSON.stringify(goodView)}\n`)
 		await write(join(root, 'views', `${bad}.view.json`), '{ not json')
 		try {

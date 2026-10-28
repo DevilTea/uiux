@@ -36,7 +36,7 @@ const view = {
 	name: 'Checkout',
 	ir: { type: 'RootShell', id: 'root', slots: { content: [] } },
 	variants: {},
-	spec: { intent: '', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], decisions: [] },
+	spec: { intent: '', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], requirements: [], decisions: [] },
 }
 
 async function seedWorkspace(schemaVersion: number): Promise<string> {

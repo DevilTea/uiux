@@ -5,6 +5,7 @@ import { injectFlowEditor } from '../../composables/useFlowEditor'
 import { useWorkbench } from '../../composables/useWorkbench'
 import { useDeclaredWidgetEvents } from '../../composables/useDeclaredWidgetEvents'
 import { viewLocation } from '../../utils/workbench-routes'
+import RequirementRefs from '../workbench/RequirementRefs.vue'
 import { edgeKey, orderSteps, parseEdgeKey, triggerLabel, type FlowSelection } from '../../utils/flow-graph'
 
 /**
@@ -721,6 +722,18 @@ const widgetSearch = computed(() => ({ placeholder: t('flows.inspector.searchWid
         >
           {{ t('flows.inspector.selectHint') }}
         </p>
+      </section>
+
+      <!-- Requirement references the Flow lists (Rule 01a18120-fe71-…); the Workbench only shows them. -->
+      <section
+        v-if="draft.requirements?.length"
+        class="space-y-2 border-t border-default px-3 py-4"
+        data-flow-requirements
+      >
+        <h3 class="text-sm font-semibold text-highlighted">
+          {{ t('flows.inspector.requirements') }}
+        </h3>
+        <RequirementRefs :rows="draft.requirements.map(id => ({ id, fromView: true, variants: [] }))" />
       </section>
 
       <UCollapsible class="border-t border-default px-3 py-2">

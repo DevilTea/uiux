@@ -39,6 +39,12 @@ export type EvidenceProvenance = Readonly<{
 	 * capture time; absent on a capture recorded without it, which is stale (Rule 01a115cd-c53c-…).
 	 */
 	renderInputDigest?: string
+	/**
+	 * Clause 01a1814f-81c2-7c7a-93c8-1beecd1c5740: the Flow input digest of the traced Flow at capture
+	 * time, on a `flow_trace` record; absent on one recorded without it, which is stale (Rule
+	 * 01a1814f-8256-7927-92d9-b3d2ba9e5719).
+	 */
+	flowInputDigest?: string
 	gitCommit?: string
 }>
 export type EvidenceCoverage = Readonly<{
@@ -243,6 +249,7 @@ function validateEvidenceProvenance(input: unknown, path: string, v: Validator):
 	if (Object.hasOwn(provenance, 'productKit')) validateProductKitProvenance(provenance.productKit, `${path}/productKit`, v)
 	if (Object.hasOwn(provenance, 'adapters')) validateEvidenceAdapters(provenance.adapters, `${path}/adapters`, v)
 	if (Object.hasOwn(provenance, 'renderInputDigest')) validateDigest(provenance.renderInputDigest, `${path}/renderInputDigest`, v)
+	if (Object.hasOwn(provenance, 'flowInputDigest')) validateDigest(provenance.flowInputDigest, `${path}/flowInputDigest`, v)
 	if (Object.hasOwn(provenance, 'gitCommit')) v.string(provenance.gitCommit, `${path}/gitCommit`, true)
 }
 

@@ -58,7 +58,7 @@ function view(id: string, name: string, widgets: readonly string[], variants: re
 		name,
 		ir: { type: 'RootShell', id: 'root', slots: { content: widgets.map(widget => ({ type: 'Button', id: widget, props: {}, bindings: {}, events: {} })) } },
 		variants: Object.fromEntries(variants.map(variant => [variant, { state: {} }])),
-		spec: { intent: name, entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], decisions: [] },
+		spec: { intent: name, entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], requirements: [], decisions: [] },
 	}
 }
 

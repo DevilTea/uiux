@@ -233,7 +233,7 @@ async function seededSession() {
 		name: 'Home',
 		ir: { type: 'RootShell', id: 'root', slots: { content: [] } },
 		variants: {},
-		spec: { intent: '', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], decisions: [] },
+		spec: { intent: '', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], requirements: [], decisions: [] },
 	})
 	await persistence.locales.create('en-US', { title: 'Title' })
 	return { root, persistence, app: createWorkspaceApplicationSession(persistence) }

@@ -308,6 +308,6 @@ function view(): ViewResource {
 		name: 'Pay',
 		ir: { type: 'RootShell', id: 'root', slots: { content: [{ type: 'Button', id: 'pay-button', config: { label: 'Pay' } }] } },
 		variants: { error: { state: {} } },
-		spec: { intent: '', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], decisions: [] },
+		spec: { intent: '', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], requirements: [], decisions: [] },
 	}
 }

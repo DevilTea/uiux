@@ -14,6 +14,8 @@ import type { DecisionRead, ReferenceRead } from '../../composables/workbench-ty
 import { flattenWidgetTree } from '../../../src/preview/widget-tree'
 import { viewLocation } from '../../utils/workbench-routes'
 import { decisionChangedAt, decisionSourceThread, type SpecSectionKey } from '../../utils/widget-inspection'
+import { viewRequirementRows } from '../../utils/requirements'
+import RequirementRefs from './RequirementRefs.vue'
 import SpecMentionText from './SpecMentionText.vue'
 import SpecSectionEditor from './SpecSectionEditor.vue'
 import DecisionDecideModal from './DecisionDecideModal.vue'
@@ -79,8 +81,11 @@ const widgetIds = computed<ReadonlySet<string>>(() => widgetTreeResult.value?.st
 	? new Set(flattenWidgetTree(widgetTreeResult.value.root).map(node => node.id))
 	: new Set())
 
-type SectionKey = SpecSectionKey | 'decisions'
+type SectionKey = SpecSectionKey | 'decisions' | 'requirements'
 type Section = Readonly<{ key: SectionKey; marker: number; title: string; empty: string; count?: number; editable: boolean }>
+
+// Requirement references: the Spec's own and the ones only a Variant lists (Rules 01a18120-fa17-… and fe71-…).
+const requirementRows = computed(() => viewRequirementRows(selectedView.value?.resource))
 
 const sections = computed<readonly Section[]>(() => {
 	const value = spec.value
@@ -93,6 +98,8 @@ const sections = computed<readonly Section[]>(() => {
 		// Decisions are recorded from Review threads; `update_view_spec` preserves them untouched.
 		{ key: 'decisions', marker: 6, title: t('spec.decisions'), empty: t('spec.empty.decisions'), count: value?.decisions.length, editable: false },
 		{ key: 'references', marker: 7, title: t('spec.refs'), empty: t('spec.empty.refs'), count: value?.references.length, editable: true },
+		// Read-only: an Agent authors requirement references through MCP (Feature 01a18120-f2dd-…).
+		{ key: 'requirements', marker: 8, title: t('spec.requirements'), empty: t('spec.empty.requirements'), count: requirementRows.value.length, editable: false },
 	]
 })
 
@@ -109,6 +116,7 @@ function isEmpty(key: SectionKey): boolean {
 	if (key === 'intent') return !value.intent.trim()
 	if (key === 'decisions') return !value.decisions.length
 	if (key === 'references') return !value.references.length
+	if (key === 'requirements') return !requirementRows.value.length
 	return !listOf(key).length
 }
 
@@ -128,7 +136,7 @@ function toggle(key: SectionKey): void {
 const root = ref<HTMLElement>()
 
 async function startEditing(key: SectionKey): Promise<void> {
-	if (key === 'decisions' || !canEdit.value) return
+	if (key === 'decisions' || key === 'requirements' || !canEdit.value) return
 	editor.start(key)
 }
 
@@ -146,7 +154,7 @@ function onKeydown(event: KeyboardEvent): void {
 	const target = event.target as HTMLElement | null
 	if (!target || target.closest('input, textarea, select, [contenteditable="true"]')) return
 	const key = target.closest<HTMLElement>('[data-spec-section]')?.dataset.specSection as SectionKey | undefined
-	if (!key || key === 'decisions') return
+	if (!key || key === 'decisions' || key === 'requirements') return
 	event.preventDefault()
 	void startEditing(key)
 }
@@ -402,6 +410,11 @@ function isHttp(uri: string): boolean {
               </p>
             </li>
           </ul>
+
+          <RequirementRefs
+            v-else-if="section.key === 'requirements'"
+            :rows="requirementRows"
+          />
 
           <ul
             v-else-if="section.key === 'references'"

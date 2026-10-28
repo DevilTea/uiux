@@ -91,7 +91,7 @@ describe('Workspace discovery (no --workspace)', () => {
 		for (const cwd of [nested, root, join(root, '.uiux')]) {
 			const selected = selectWorkspace({ cwd, discoveryHost: host(repository) }, POLICY)
 			expect(selected).toMatchObject({ ok: false, reason: 'unsupported_schema', message: expect.stringContaining(join(root, '.uiux', 'workspace.json')) })
-			expect(selected).toMatchObject({ message: expect.stringMatching(/workspace\.schema_unsupported.*schemaVersion 4 .*schemaVersion 6.*uiux init/u) })
+			expect(selected).toMatchObject({ message: expect.stringMatching(/workspace\.schema_unsupported.*schemaVersion 4 .*schemaVersion 7.*uiux init/u) })
 		}
 	})
 

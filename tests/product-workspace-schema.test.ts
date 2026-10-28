@@ -20,18 +20,18 @@ afterEach(async () => {
 })
 
 describe('product Workspace schema authority', () => {
-	it('defines the product format as version 6, the only version it reads (Clause 01a1144e-534c, Rule 01a1144e-5079)', () => {
-		expect(CURRENT_WORKSPACE_SCHEMA_VERSION).toBe(6)
-		expect(PRODUCT_WORKSPACE_SCHEMA_POLICY).toEqual({ currentVersion: 6 })
+	it('defines the product format as version 7, the only version it reads (Clause 01a1144e-534c, Rule 01a1144e-5079)', () => {
+		expect(CURRENT_WORKSPACE_SCHEMA_VERSION).toBe(7)
+		expect(PRODUCT_WORKSPACE_SCHEMA_POLICY).toEqual({ currentVersion: 7 })
 	})
 
-	it('inspects a manifest at 6 as current and one at any other version as unsupported (Rule 01a1144e-4fe2, Clause 01a14928-275b)', () => {
-		expect(inspectWorkspaceManifest(workspaceFixture(6), PRODUCT_WORKSPACE_SCHEMA_POLICY)).toMatchObject({ state: 'current', version: 6, diagnostics: [] })
-		for (const version of [1, 2, 3, 4, 5, 7]) {
+	it('inspects a manifest at 7 as current and one at any other version as unsupported (Rule 01a1144e-4fe2, Clause 01a14928-275b)', () => {
+		expect(inspectWorkspaceManifest(workspaceFixture(7), PRODUCT_WORKSPACE_SCHEMA_POLICY)).toMatchObject({ state: 'current', version: 7, diagnostics: [] })
+		for (const version of [1, 2, 3, 4, 5, 6, 8]) {
 			const inspection = inspectWorkspaceManifest(workspaceFixture(version), PRODUCT_WORKSPACE_SCHEMA_POLICY)
-			expect(inspection, String(version)).toMatchObject({ state: 'unsupported', version, targetVersion: 6 })
+			expect(inspection, String(version)).toMatchObject({ state: 'unsupported', version, targetVersion: 7 })
 			const diagnostic = inspection.diagnostics.find(item => item.code === 'workspace.schema_unsupported')
-			expect(diagnostic?.message, String(version)).toBe(`Workspace schemaVersion ${version} is not supported: this UIUX reads only schemaVersion 6. To start over, run uiux init in a new directory.`)
+			expect(diagnostic?.message, String(version)).toBe(`Workspace schemaVersion ${version} is not supported: this UIUX reads only schemaVersion 7. To start over, run uiux init in a new directory.`)
 		}
 	})
 

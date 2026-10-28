@@ -104,6 +104,7 @@ function viewWithCounter(): ViewResource {
 			constraints: [],
 			accessibility: [],
 			references: [],
+			requirements: [],
 			decisions: [],
 		},
 	}
@@ -128,6 +129,7 @@ function emptyRootShellView(): ViewResource {
 			constraints: [],
 			accessibility: [],
 			references: [],
+			requirements: [],
 			decisions: [],
 		},
 	}
@@ -607,6 +609,7 @@ export const manifest = {
 				constraints: [],
 				accessibility: [],
 				references: [],
+				requirements: [],
 				decisions: [],
 			},
 		}

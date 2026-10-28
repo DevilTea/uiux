@@ -39,6 +39,7 @@ function twoStepFlow(): FlowResource {
 		id: FLOW_ID,
 		name: 'Two steps',
 		entryStepId: STEP_A,
+		requirements: [],
 		steps: {
 			[STEP_A]: { target: { viewId: VIEW_A }, transitions: [{ trigger: { widgetId: 'root', event: 'press' }, targetStepId: STEP_B }] },
 			[STEP_B]: { target: { viewId: VIEW_B }, transitions: [] },
@@ -220,6 +221,22 @@ describe('validate_flow and capture_flow_evidence refusals', () => {
 			.toMatchObject({ status: 'failed', flowId: FLOW_ID, diagnostics: [{ code: 'preview.runtime_failed' }] })
 		// Only what the capture itself stored remains; no flow_trace was written.
 		expect(await persistence.artifacts.listIdentities()).toEqual([...before, first.identity].sort())
+	})
+
+	// Rule 01a18121-0018-7013-9c5d-16e1efbb55a0: a requirement diagnostic never blocks Flow capture, unlike a structural one.
+	it('does not refuse a Flow for a requirement diagnostic, but still refuses one for a structural diagnostic', async () => {
+		const { persistence } = await seededSession(twoStepFlow())
+		const service = (diagnostics: readonly { code: string; path: string; message: string }[]) => createFlowEvidenceService(persistence, {
+			readFlow: async () => ({ resource: twoStepFlow(), revision: 'r_flow', diagnostics }),
+			openReplaySession: () => { throw new Error('The replay is not reached.') },
+			captureFormal: async () => { throw new Error('No capture is reached.') },
+		})
+		// The render context is invalid, so a Flow that passes the diagnostics gate answers about it.
+		const command = { flowId: FLOW_ID, renderContext: { locale: 'en-US' } as never }
+		expect(await service([{ code: 'requirements.duplicate_id', path: '/requirements/1', message: 'Duplicate.' }]).capture(command))
+			.toMatchObject({ status: 'invalid', diagnostics: [{ code: 'flow.invalid_render_context' }] })
+		expect(await service([{ code: 'flow.unreachable_step', path: '/steps/x', message: 'Unreachable.' }]).capture(command))
+			.toMatchObject({ status: 'invalid', diagnostics: [{ code: 'flow.unreachable_step' }] })
 	})
 
 	it('writes nothing for a member without evidence.capture', async () => {
@@ -436,6 +453,6 @@ function view(id: string): ViewResource {
 		name: `View ${id.slice(0, 2)}`,
 		ir: { type: 'RootShell', id: 'root', slots: { content: [] } },
 		variants: {},
-		spec: { intent: '', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], decisions: [] },
+		spec: { intent: '', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], requirements: [], decisions: [] },
 	}
 }

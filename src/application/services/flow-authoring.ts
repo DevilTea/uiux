@@ -8,6 +8,8 @@ import { readImpactWorkspaceUnlocked } from './impact-picture'
 import { validateResourceRevision } from '../dto/revisions'
 import { isFullUuid, type Diagnostic, type JsonObject } from '../../domain/validation'
 import { validateFlowResource, type FlowResource, type FlowStep } from '../../domain/flows/schema'
+import { trimRequirementIds } from '../../domain/requirements/schema'
+import { readRequirementsProvider, requirementListDiagnostics } from './requirements-provider'
 import type { FileNativePersistence } from '../../persistence'
 import { PersistenceError } from '../../persistence/errors'
 
@@ -17,6 +19,8 @@ export type CreateFlowCommand = Readonly<{
 	scenarioRef?: JsonObject
 	entryStepId: string
 	steps: Readonly<Record<string, FlowStep>>
+	/** Requirement references (Clause 01a18120-f403-…); `create_flow` stores `[]` when omitted. */
+	requirements?: readonly string[]
 }>
 
 export type UpdateFlowCommand = Readonly<{
@@ -26,6 +30,8 @@ export type UpdateFlowCommand = Readonly<{
 	scenarioRef?: JsonObject
 	entryStepId: string
 	steps: Readonly<Record<string, FlowStep>>
+	/** Omitted, the Flow keeps its requirement references; `[]` clears them (Clause 01a1814f-83f2-…). */
+	requirements?: readonly string[]
 }>
 
 /** Deletes the whole UX Flow (Clause 01a172ce-ebcc-7a79-8103-ff5339409948). */
@@ -59,7 +65,12 @@ export function createFlowAuthoringService(persistence: FileNativePersistence): 
 	 */
 	async function withReferenceDiagnostics(flow: FlowResource, structural: readonly Diagnostic[]): Promise<readonly Diagnostic[]> {
 		const references = await flowReferenceDiagnostics(flow, viewId => readViewReferenceTarget(persistence, viewId))
-		return references.length > 0 ? [...structural, ...references] : structural
+		// Clause 01a18120-f5b9-…: an ID the `spec` provider lacks is reported, never refused.
+		const ids = flow.requirements ?? []
+		const requirements = ids.length === 0
+			? []
+			: requirementListDiagnostics(await readRequirementsProvider(persistence.root, (await persistence.workspace.readInspected()).resource?.requirements), [[ids, '/requirements']])
+		return references.length + requirements.length > 0 ? [...structural, ...references, ...requirements] : structural
 	}
 
 	async function createFlow(command: CreateFlowCommand): Promise<FlowAuthoringResult> {
@@ -70,6 +81,7 @@ export function createFlowAuthoringService(persistence: FileNativePersistence): 
 			...(command.scenarioRef ? { scenarioRef: command.scenarioRef } : {}),
 			entryStepId: command.entryStepId,
 			steps: command.steps,
+			requirements: trimRequirementIds(command.requirements ?? []),
 		}
 		const validation = validateFlowResource(resource)
 		if (!validation.ok)
@@ -110,6 +122,7 @@ export function createFlowAuthoringService(persistence: FileNativePersistence): 
 			...(command.scenarioRef ? { scenarioRef: command.scenarioRef } : {}),
 			entryStepId: command.entryStepId,
 			steps: command.steps,
+			requirements: command.requirements === undefined ? current.resource.requirements ?? [] : trimRequirementIds(command.requirements),
 		}
 		const validation = validateFlowResource(next)
 		if (!validation.ok)

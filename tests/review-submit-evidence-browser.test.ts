@@ -49,14 +49,14 @@ beforeAll(async () => {
 	newestRun = await recordRun('2026-10-26T09:00:00.000Z')
 	// The Flow changed since this trace ran, so it is stale; it can still be cited.
 	const capture = `sha256:${'c'.repeat(64)}`
-	staleTrace = await putRecordInWorkspace(server.workspaceRoot, flowTraceRecord({ flowId: FLOW_ID, flowRevision: 'r_earlier', stepId: STEP_ID, viewId: VIEW_ID }, capture))
+	staleTrace = await putRecordInWorkspace(server.workspaceRoot, flowTraceRecord({ flowId: FLOW_ID, flowRevision: 'r_earlier', flowInputDigest: `sha256:${'d'.repeat(64)}`, stepId: STEP_ID, viewId: VIEW_ID }, capture))
 	// A replay copies its capture's context and provenance, so these are current unless the View's render input changed since (Clause 01a14e30-2e43-…).
 	passingReplay = await putRecordInWorkspace(server.workspaceRoot, await currentInteractionReplayRecord(server.workspaceRoot, VIEW_ID, { capture }))
 	failingReplay = await putRecordInWorkspace(server.workspaceRoot, await currentInteractionReplayRecord(server.workspaceRoot, VIEW_ID, { result: 'fail', capture: `sha256:${'d'.repeat(64)}` }))
 	// Every assertion passed, but the View's IR or Variants changed after the capture: stale.
 	staleReplay = await putRecordInWorkspace(server.workspaceRoot, await currentInteractionReplayRecord(server.workspaceRoot, VIEW_ID, { capture: `sha256:${'f'.repeat(64)}`, staleRenderInput: true }))
 	// A trace of a Flow that does not enter this View is not offered for it.
-	otherViewTrace = await putRecordInWorkspace(server.workspaceRoot, flowTraceRecord({ flowId: FLOW_ID, flowRevision: 'r_earlier', stepId: STEP_ID, viewId: '99999999-9999-4999-8999-999999999999' }, `sha256:${'e'.repeat(64)}`))
+	otherViewTrace = await putRecordInWorkspace(server.workspaceRoot, flowTraceRecord({ flowId: FLOW_ID, flowRevision: 'r_earlier', flowInputDigest: `sha256:${'d'.repeat(64)}`, stepId: STEP_ID, viewId: '99999999-9999-4999-8999-999999999999' }, `sha256:${'e'.repeat(64)}`))
 }, 120_000)
 
 afterAll(async () => {
@@ -115,7 +115,8 @@ describe('Submit for review cites any Evidence kind (issue #61)', () => {
 			expect(await row(page, staleTrace).innerText()).toContain('The Flow changed after this trace.')
 			// A replay is shown as current or stale the same way.
 			expect(await row(page, passingReplay).innerText()).toContain('Current')
-			expect(await row(page, staleReplay).innerText()).toContain('IR or Variants changed after capture')
+			// The View's current render-input digest arrives with the freshness list, so this may follow the picker by a moment.
+			await expect.poll(() => row(page, staleReplay).innerText(), { timeout: 15_000 }).toContain('IR or Variants changed after capture')
 
 			await pickDomains(page, ['i18n (Locale messages)'])
 			// The ruling: i18n preselects the latest Run Checks record, point-in-time, never judged stale.

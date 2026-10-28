@@ -262,7 +262,7 @@ function tapView(): ViewResource {
 		name: 'Tap View',
 		ir: { type: 'RootShell', id: 'root', slots: { content: [{ id: 'tap-1', type: 'Tap' }, { id: 'tap-2', type: 'Tap' }] } } as never,
 		variants: { compact: { state: {} } },
-		spec: { intent: 'Widget Event fixture', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], decisions: [] },
+		spec: { intent: 'Widget Event fixture', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], requirements: [], decisions: [] },
 	} as ViewResource
 }
 

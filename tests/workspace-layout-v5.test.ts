@@ -57,7 +57,7 @@ function view(name = 'Checkout') {
 		name,
 		ir: { type: 'RootShell', id: 'root', slots: { content: [] } },
 		variants: {},
-		spec: { intent: 'Pay', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], decisions: [] },
+		spec: { intent: 'Pay', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], requirements: [], decisions: [] },
 	}
 }
 
@@ -129,7 +129,7 @@ describe('the schemaVersion 5 layout', () => {
 	})
 
 	it('is current: UIUX\'s own policy is schemaVersion 6, which keeps the schemaVersion 5 layout a new Workspace gets', () => {
-		expect(CURRENT_WORKSPACE_SCHEMA_VERSION).toBe(6)
+		expect(CURRENT_WORKSPACE_SCHEMA_VERSION).toBe(7)
 		expect(new FileNativePersistence({ root: tmpdir(), schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY }).layout).toBe(V5_LAYOUT)
 		// Clause 01a11c09-a855-7d7e-93ec-cd9a85fdb65e: the Access presets file is a canonical, versioned root file.
 		expect(V5_LAYOUT.accessPresetsPath).toBe('access-presets.json')

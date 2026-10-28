@@ -10,7 +10,8 @@ import type { PointResourceKind } from '../dto/point-resources'
 import type { ResourceDiscoveryOutcome } from '../dto/resource-discovery'
 import type { AssetAuthoringResult, CreateAssetCommand, DeleteAssetCommand, ReplaceAssetCommand } from '../services/asset-authoring'
 import type { CreateFlowCommand, DeleteFlowCommand, FlowAuthoringResult, UpdateFlowCommand } from '../services/flow-authoring'
-import type { CaptureFormalEvidenceCommand, CaptureFormalEvidenceResult, FormalEvidenceItem, ViewRenderInput } from '../services/formal-capture'
+import type { RequirementsCoverage } from '../services/requirements'
+import type { CaptureFormalEvidenceCommand, CaptureFormalEvidenceResult, FlowInput, FormalEvidenceItem, ViewRenderInput } from '../services/formal-capture'
 import type { ProductKitChecksResult } from '../services/product-kit-checks'
 import type { AssessHandoffReadinessCommand, AssessHandoffReadinessResult, ExportHandoffCommand, ExportHandoffResult } from '../services/handoff-export'
 import type { DiffVersionsCommand, VersionDiffOutcome } from '../services/history-diff'
@@ -148,6 +149,8 @@ export interface ScopedWorkspaceSession {
 	adapterProvenance(): Promise<CurrentAdapterProvenance>
 	/** Each View's current render-input digest that Evidence freshness is judged against; read with the Evidence, under its key. */
 	viewRenderInputs(): Promise<readonly ViewRenderInput[]>
+	/** Each Flow's current Flow input digest that Flow trace freshness is judged against; read with the Evidence, under its key. */
+	flowInputs(): Promise<readonly FlowInput[]>
 	readArtifact(identity: string): Promise<Uint8Array | undefined>
 	assessHandoffReadiness(command: AssessHandoffReadinessCommand): Promise<AssessHandoffReadinessResult | AccessRefusal>
 	diffVersions(command: DiffVersionsCommand): Promise<VersionDiffOutcome | AccessRefusal>
@@ -180,6 +183,8 @@ export interface ScopedWorkspaceSession {
 	updateWorkspaceSettings(command: UpdateWorkspaceSettingsCommand): Promise<Scoped<WorkspaceAuthoringResult>>
 	/** The Product Kit Resource; `workspace.read` only (Clause 01a11bb1-b3c2-7937-96fb-e139c5e566f5). */
 	readProductKit(): Promise<ProductKitRead | undefined>
+	/** The requirement coverage (Clause 01a18120-f903-…); `workspace.read`. */
+	readRequirements(): Promise<RequirementsCoverage>
 	/**
 	 * The Product Kit operations (Clause 01a11bb1-b35a-7e69-bba5-978e3f47c4fa): each needs its own key
 	 * and, checked in the service on the file the write replaces, the keys of what its change touches.
@@ -504,6 +509,7 @@ export function createScopedWorkspaceSession(
 		async productKitProvenance() { assert('listEvidence'); return app.productKitProvenance() },
 		async adapterProvenance() { assert('listEvidence'); return app.adapterProvenance() },
 		async viewRenderInputs() { assert('listEvidence'); return app.viewRenderInputs() },
+		async flowInputs() { assert('listEvidence'); return app.flowInputs() },
 		async readArtifact(identity) { assert('readArtifact'); return app.readArtifact(identity) },
 		async assessHandoffReadiness(command) {
 			const denied = authorizeOperation(principal, 'assessHandoffReadiness')
@@ -584,6 +590,7 @@ export function createScopedWorkspaceSession(
 		reopenDecision: command => decisionLifecycle('reopenDecision', command, stamped => app.reopenDecision(stamped)),
 		updateWorkspaceSettings: command => write('updateWorkspaceSettings', 'workspace', { kind: 'workspace', key: 'workspace' }, () => app.updateWorkspaceSettings(command)),
 		async readProductKit() { assert('readProductKit'); return app.readProductKit() },
+		async readRequirements() { assert('readRequirements'); return app.readRequirements() },
 		composeProductKit: command => write('composeProductKit', PRODUCT_KIT_KEY, PRODUCT_KIT_LEASE, () => app.composeProductKit(command, productKitGuard('composeProductKit'))),
 		updateProductKit: command => write('updateProductKit', PRODUCT_KIT_KEY, PRODUCT_KIT_LEASE, () => app.updateProductKit(command, productKitGuard('updateProductKit'))),
 		updateComponentRegistry: command => write('updateComponentRegistry', PRODUCT_KIT_KEY, PRODUCT_KIT_LEASE, () => app.updateComponentRegistry(command, productKitGuard('updateComponentRegistry'))),

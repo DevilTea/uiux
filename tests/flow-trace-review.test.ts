@@ -10,6 +10,7 @@ import { canonicalJsonBytes } from '../src/domain/canonical-json'
 import type { FormalEvidenceRecord } from '../src/domain/evidence/schema'
 import { evaluateFlowTraceStaleness, FLOW_CHANGED_REASON } from '../src/domain/evidence/staleness'
 import { changeAffectsFlowEvidence, changeScopeOfSubmission } from '../src/domain/reviews/change-domains'
+import { flowInputDigest } from '../src/domain/flows/input-digest'
 import type { FlowResource } from '../src/domain/flows/schema'
 import { FileNativePersistence } from '../src/persistence'
 import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
@@ -39,17 +40,17 @@ describe('a Review submission that names the Flow change domain and cites a Flow
 		const app = createWorkspaceApplicationSession(persistence)
 		const view = await app.createView({ id: VIEW_ID, name: 'Checkout', spec: { intent: 'Pay', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [] } })
 		if (view.status !== 'created') throw new Error('View fixture failed.')
-		const flow: FlowResource = { id: FLOW_ID, name: 'Pay', entryStepId: STEP_ID, steps: { [STEP_ID]: { target: { viewId: VIEW_ID }, transitions: [] } } }
+		const flow: FlowResource = { id: FLOW_ID, name: 'Pay', entryStepId: STEP_ID, requirements: [], steps: { [STEP_ID]: { target: { viewId: VIEW_ID }, transitions: [] } } }
 		const flowRevision = await persistence.flows.create(FLOW_ID, flow)
 
-		// A trace of the Flow as an earlier revision of it, so the trace is stale by the time it is cited.
+		// A trace of the Flow as an earlier form of it, so the trace is stale by the time it is cited.
 		const capture = `sha256:${'c'.repeat(64)}`
 		const trace: FormalEvidenceRecord = {
 			schemaVersion: 1,
 			kind: 'flow_trace',
 			executionContext: { flowId: FLOW_ID, locale: 'en-US', viewportId: 'desktop', themeId: 'light' },
 			coverage: { complete: true },
-			provenance: { workspaceSchemaVersion: 6, resources: [{ identity: { type: 'flow', id: FLOW_ID }, revision: 'r_earlier' }], versions: { uiux: '0.1.0' } },
+			provenance: { workspaceSchemaVersion: 7, resources: [{ identity: { type: 'flow', id: FLOW_ID }, revision: 'r_earlier' }], versions: { uiux: '0.1.0' }, flowInputDigest: `sha256:${'e'.repeat(64)}` },
 			artifactRefs: [],
 			evidenceRefs: [{ kind: 'formal_capture', evidence: capture }],
 			data: {
@@ -79,10 +80,10 @@ describe('a Review submission that names the Flow change domain and cites a Flow
 		expect(changeAffectsFlowEvidence(scope, FLOW_ID)).toBe(true)
 		expect(changeAffectsFlowEvidence(scope, '55555555-5555-4555-8555-555555555555')).toBe(false)
 
-		// Its freshness is judged on its own: the Flow has another revision than the trace recorded.
+		// Its freshness is judged on its own: the Flow has another input digest than the trace recorded.
 		expect(evaluateFlowTraceStaleness(trace, {
 			allViews: [],
-			flows: [{ key: FLOW_ID, revision: flowRevision as string }],
+			flows: [{ key: FLOW_ID, flowInputDigest: flowInputDigest(flow) }],
 			captures: new Map(),
 		})).toEqual({ isStale: true, reason: FLOW_CHANGED_REASON })
 	})

@@ -27,7 +27,8 @@ export default defineEventHandler(async (event) => {
 		const unknown = kinds.filter(kind => !LISTABLE_KINDS.includes(kind))
 		if (kinds.length === 0 || unknown.length > 0)
 			throw createError({ statusCode: 400, statusMessage: `The Evidence kinds to list are among ${LISTABLE_KINDS.join(', ')}.` })
-		return { items: await session.listEvidence(viewId, kinds) }
+		// `flows`: each Flow's current Flow input digest, which a listed `flow_trace` is judged by (Rule 01a1814f-8256-…).
+		return { items: await session.listEvidence(viewId, kinds), flows: await session.flowInputs() }
 	}
 	const items = await session.listEvidence(viewId)
 	// The current Product Kit provenance, so the Workbench judges each capture's freshness against it
@@ -37,8 +38,10 @@ export default defineEventHandler(async (event) => {
 	// `views`: each View's current render-input digest, with the revision it was read at, so the
 	// Workbench judges the View condition by the digest, not the revision (Rule 01a115cd-c5a5-…).
 	const views = await session.viewRenderInputs()
+	// `flows`: each Flow's current Flow input digest, which a `flow_trace` is judged by (Rule 01a1814f-8256-…).
+	const flows = await session.flowInputs()
 	// The current Adapter provenance, likewise (Rules 01a115cd-c6de-… and 01a1161b-ff68-…): `adapters`,
 	// every Adapter of the active set in Adapter-list order, or `adaptersUnavailable` when it cannot be computed.
 	const [productKit, adapters] = await Promise.all([session.productKitProvenance(), session.adapterProvenance()])
-	return { items, views, ...productKitFreshnessContext(productKit), ...adapterFreshnessContext(adapters) }
+	return { items, views, flows, ...productKitFreshnessContext(productKit), ...adapterFreshnessContext(adapters) }
 })

@@ -323,7 +323,7 @@
       "adaptersUnavailable": "The current Adapters can't be resolved in full, so this capture's freshness can't be judged.",
       "flowMissing": "The Flow no longer exists.",
       "flowChanged": "The Flow changed after this trace.",
-      "noFlowRevision": "This trace doesn't carry the Flow revision it ran against. Run it again.",
+      "noFlowRevision": "This trace doesn't carry the Flow digest it ran against. Run it again.",
       "traceCaptureMissing": "A capture this trace references no longer exists.",
       "traceCaptureStale": "A capture this trace references is stale.",
       "traceCaptureUnknown": "A capture this trace references has unknown freshness.",
@@ -434,7 +434,8 @@
       "eventPickHelp": "Events this Widget declares.",
       "eventNotDeclared": "{event} (not declared by this Widget)",
       "eventsNone": "This Widget declares no Events.",
-      "searchEvents": "Search Events"
+      "searchEvents": "Search Events",
+      "requirements": "Requirements"
     },
     "addStep": {
       "title": "Add step",
@@ -1172,7 +1173,8 @@
       "constraints": "No constraints yet.",
       "a11y": "No accessibility notes yet.",
       "decisions": "No Decisions yet. Promote a Review thread to record one.",
-      "refs": "No references yet."
+      "refs": "No references yet.",
+      "requirements": "No requirement references yet. An Agent adds them through MCP."
     },
     "editSection": "Edit {section}",
     "addSection": "Add {section}",
@@ -1211,7 +1213,8 @@
       "remove": "Remove reference {n}",
       "add": "Add reference",
       "relationPlaceholder": "design"
-    }
+    },
+    "requirements": "Requirements"
   },
   "viewHeader": {
     "edit": "Rename or change the feature tag",
@@ -1656,7 +1659,8 @@
       "views": "Views",
       "checks": "Checks",
       "decisions": "Decisions",
-      "activity": "Activity"
+      "activity": "Activity",
+      "requirements": "Requirements"
     },
     "updated": "Updated since you last looked",
     "columns": {
@@ -2856,6 +2860,15 @@
       "component_unread": "This component's source could not be read in full, so it was not checked.",
       "nondeterministic_context": "This render context doesn't capture the same way twice, so it was not compared live.",
       "product_kit_invalid": "The Product Kit file is not valid, so its components were not checked."
+    },
+    "requirements": {
+      "invalid_id": "A requirement ID must be 1 to 200 characters with no leading or trailing spaces.",
+      "duplicate_id": "A requirement ID is listed more than once.",
+      "too_many": "A list holds at most 100 requirement IDs.",
+      "provider_invalid": "The requirements source setting is not valid.",
+      "no_ui_invalid": "Each noUi entry needs a valid requirement ID and a reason of 1 to 500 characters.",
+      "unresolved": "The requirement source has no Rule with this ID.",
+      "provider_unavailable": "The requirement source can’t be read."
     }
   },
   "diagnosticFallback": {
@@ -2898,7 +2911,8 @@
     "time": "A time is not in the expected format.",
     "revision": "The revision record is not valid.",
     "copy_record": "There is a problem with the copy record, uiux-components.json.",
-    "checks": "A check could not finish."
+    "checks": "A check could not finish.",
+    "requirements": "There is a problem with a requirement reference."
   },
   "threadContext": {
     "srPrefix": "Recorded Preview context:",
@@ -3313,5 +3327,55 @@
       "denied": "Your permission keys don’t allow deleting this",
       "failed": "Couldn’t delete it"
     }
+  },
+  "requirements": {
+    "title": "Requirements",
+    "loading": "Reading requirements…",
+    "loadFailed": "Couldn’t read the requirements.",
+    "retry": "Try again",
+    "coverage": "Coverage {percent}% · {covered} of {total} requirements referenced",
+    "coverageNone": "No requirement to cover: the source has none outside noUi.",
+    "counts": {
+      "referenced": "{n} referenced",
+      "unreferenced": "{n} unreferenced",
+      "noUi": "{n} noUi",
+      "unresolved": "{n} unresolved"
+    },
+    "filter": {
+      "label": "Show requirements",
+      "all": "All"
+    },
+    "state": {
+      "referenced": "Referenced",
+      "unreferenced": "Unreferenced",
+      "noUi": "noUi"
+    },
+    "reason": "Reason: {reason}",
+    "referencedBy": "Referenced by",
+    "notReferenced": "Nothing references this requirement yet.",
+    "kind": {
+      "view": "View {name}",
+      "variant": "Variant {variant} of {name}",
+      "flow": "Flow {name}"
+    },
+    "unresolved": {
+      "title": "Unresolved IDs",
+      "hint": "The source has no Rule with these IDs. They are kept as written.",
+      "badge": "Not in the source"
+    },
+    "unverified": {
+      "title": "Unverified IDs",
+      "hint": "These IDs are not checked against a requirement source.",
+      "badge": "Unverified"
+    },
+    "unavailable": {
+      "title": "The requirement source can’t be read",
+      "body": "Referenced IDs are shown as unverified, so there is no coverage figure. Check the source path in the Workspace settings."
+    },
+    "empty": "The requirement source has no requirement.",
+    "noMatch": "No requirements in this state.",
+    "viaVariant": "via Variant {name}",
+    "open": "Open requirement {id}",
+    "listLabel": "Requirement references"
   }
 }

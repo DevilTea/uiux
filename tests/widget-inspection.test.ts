@@ -55,6 +55,7 @@ function view(overrides: Partial<{ variants: ViewRead['resource']['variants']; d
 				constraints: [],
 				accessibility: [],
 				references: [{ type: 'external', uri: 'https://example.com/prd', label: 'PRD' }],
+				requirements: [],
 				decisions: [],
 			},
 		},

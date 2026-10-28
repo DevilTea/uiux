@@ -39,7 +39,7 @@ function capture() {
 
 async function expectInitialized(root: string): Promise<void> {
 	expect(JSON.parse(await readFile(join(root, 'workspace.json'), 'utf8'))).toEqual({
-		schemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION,
+		schemaVersion: 7,
 		i18n: { defaultLocale: 'en-US' },
 		viewports: {},
 		themes: {},

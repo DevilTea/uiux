@@ -455,13 +455,13 @@ function viewFixture(id = VIEW_ID, name = 'Transport fixture', feature?: string)
 		...(feature ? { feature } : {}),
 		ir: { type: 'RootShell', id: 'root', slots: { content: [] } },
 		variants: {},
-		spec: { intent: '', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], decisions: [] },
+		spec: { intent: '', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], requirements: [], decisions: [] },
 	}
 }
 
 function flowFixture(): FlowResource {
 	const step = '44444444-4444-4444-8444-444444444444'
-	return { id: FLOW_ID, name: 'Transport flow', entryStepId: step, steps: { [step]: { target: { viewId: VIEW_ID }, transitions: [] } } }
+	return { id: FLOW_ID, name: 'Transport flow', entryStepId: step, requirements: [], steps: { [step]: { target: { viewId: VIEW_ID }, transitions: [] } } }
 }
 
 function reviewFixture(id = REVIEW_ID): ReviewThread {

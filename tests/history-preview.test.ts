@@ -221,7 +221,7 @@ describe('version reads for Preview across schema versions', () => {
 		name,
 		ir: { type: 'RootShell', id: 'root', slots: { content: [{ id: 'title', type: 'Text', config: { text: { $i18n: 'greeting' } } }] } },
 		variants: {},
-		spec: { intent: 'Pay', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], decisions: [] },
+		spec: { intent: 'Pay', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], requirements: [], decisions: [] },
 	})
 	type Context = Readonly<{ persistence: FileNativePersistence; stores: HistoryStores; app: WorkspaceApplicationSession }>
 	const cleanup: string[] = []

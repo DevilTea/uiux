@@ -39,7 +39,7 @@ function view(overrides: Json = {}, content: Json[] = [widget('title', 'Text', {
 		feature: 'billing',
 		ir: { type: 'RootShell', id: 'root', slots: { content } },
 		variants: { empty: { state: { title: { text: 'Nothing yet' } } } },
-		spec: { intent: 'Pay', entryConditions: ['Signed in'], interactionRules: [], constraints: [], accessibility: [], references: [], decisions: [] },
+		spec: { intent: 'Pay', entryConditions: ['Signed in'], interactionRules: [], constraints: [], accessibility: [], references: [], requirements: [], decisions: [] },
 		...overrides,
 	}
 }
@@ -115,13 +115,13 @@ describe('View semantic diff', () => {
 				{ section: 'references', added: [{ type: 'external', uri: 'https://example.com' }], removed: [] },
 			])
 		}],
-		['a reordered Spec section', view({ spec: { intent: '', entryConditions: ['a', 'b'], interactionRules: [], constraints: [], accessibility: [], references: [], decisions: [] } }), view({ spec: { intent: '', entryConditions: ['b', 'a'], interactionRules: [], constraints: [], accessibility: [], references: [], decisions: [] } }), (diff) => {
+		['a reordered Spec section', view({ spec: { intent: '', entryConditions: ['a', 'b'], interactionRules: [], constraints: [], accessibility: [], references: [], requirements: [], decisions: [] } }), view({ spec: { intent: '', entryConditions: ['b', 'a'], interactionRules: [], constraints: [], accessibility: [], references: [], requirements: [], decisions: [] } }), (diff) => {
 			expect(diff.spec.sections).toEqual([{ section: 'entryConditions', added: [], removed: [], reordered: true }])
 		}],
-		['Decisions by id with status and outcome changes', view({ spec: { intent: '', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], decisions: [
+		['Decisions by id with status and outcome changes', view({ spec: { intent: '', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], requirements: [], decisions: [
 			{ id: 'd1', question: 'Card or wallet?', status: 'pending', history: [] },
 			{ id: 'd2', question: 'Remove?', status: 'pending', history: [] },
-		] } }), view({ spec: { intent: '', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], decisions: [
+		] } }), view({ spec: { intent: '', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], requirements: [], decisions: [
 			{ id: 'd3', question: 'New?', status: 'pending', history: [] },
 			{ id: 'd1', question: 'Card or wallet?', status: 'decided', outcome: { summary: 'Both', rationale: 'Reach' }, history: [{ at: '2026-10-09T00:00:00.000Z', before: { status: 'pending' }, after: { status: 'decided' } }] },
 		] } }), (diff) => {

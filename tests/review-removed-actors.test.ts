@@ -45,7 +45,7 @@ const view: ViewResource = {
 	name: 'Checkout',
 	ir: { type: 'RootShell', id: 'root', slots: {} },
 	variants: {},
-	spec: { intent: 'Checkout', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], decisions: [] },
+	spec: { intent: 'Checkout', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], requirements: [], decisions: [] },
 }
 
 const thread = {

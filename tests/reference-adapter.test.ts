@@ -175,6 +175,7 @@ describe('UIUX Reference Adapter', () => {
 				constraints: [],
 				accessibility: [],
 				references: [],
+				requirements: [],
 				decisions: [],
 			},
 		}
@@ -256,7 +257,7 @@ describe('UIUX Reference Adapter', () => {
 					name: 'dummy',
 					ir: { type: 'RootShell', id: 'root', slots: { content: [] } } as never,
 					variants: {},
-					spec: { intent: '', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], decisions: [] },
+					spec: { intent: '', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], requirements: [], decisions: [] },
 				},
 				context: { viewId: 'dummy', locale: 'en-US', viewportId: 'desktop', viewport: { width: 1280, height: 800 }, themeId: 'light' },
 				onStatusChange: (s) => { reportedStatus = s as typeof reportedStatus },

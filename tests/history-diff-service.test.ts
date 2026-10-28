@@ -75,7 +75,7 @@ function view(overrides: Record<string, unknown> = {}) {
 		name: 'Checkout',
 		ir: { type: 'RootShell', id: 'root', slots: { content: [{ id: 'title', type: 'Text', config: { text: { $i18n: 'greeting' } } }] } },
 		variants: {},
-		spec: { intent: 'Pay', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], decisions: [] },
+		spec: { intent: 'Pay', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], requirements: [], decisions: [] },
 		...overrides,
 	}
 }
@@ -198,7 +198,7 @@ describe('diffVersions', () => {
 			for (const command of [{ from: other }, { from: known, to: other }, { from: { parentOf: other } }]) {
 				const refused = await ctx.app.diffVersions(command)
 				expect(refused).toMatchObject({ status: 'blocked', code: 'workspace.schema_unsupported' })
-				expect(refused.status === 'blocked' && refused.message).toMatch(/schemaVersion (5|99) .*schemaVersion 6/u)
+				expect(refused.status === 'blocked' && refused.message).toMatch(/schemaVersion (5|99) .*schemaVersion 7/u)
 			}
 		}
 

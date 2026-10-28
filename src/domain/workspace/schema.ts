@@ -1,3 +1,4 @@
+import { validateRequirementsSetting, type RequirementsSetting } from '../requirements/schema'
 import {
 	jsonPointer,
 	isCanonicalLocaleFilename,
@@ -15,6 +16,8 @@ export type WorkspaceManifest = {
 	i18n: { defaultLocale: string; [key: string]: JsonValue }
 	viewports: Record<string, ViewportPreset>
 	themes: Record<string, ThemeEntry>
+	/** The optional requirements setting (Clause 01a18120-f49d-7b42-bad5-69d727f6a33a). */
+	requirements?: RequirementsSetting
 }
 
 export type WorkspaceAdapterSelection = {
@@ -60,6 +63,9 @@ export function validateWorkspaceManifest(input: unknown): ValidationResult<Work
 	// lives in the Product Kit file.
 	if (Object.hasOwn(root, 'adapters'))
 		v.issue('schema.unknown_field', '/adapters', 'The Adapter list lives in the Product Kit file, not in the manifest.')
+
+	if (Object.hasOwn(root, 'requirements'))
+		validateRequirementsSetting(root.requirements, '/requirements', v)
 
 	validateRegistry(root.viewports, '/viewports', v, (entry, path) => {
 		const viewport = v.object(entry, path)

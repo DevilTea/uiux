@@ -162,7 +162,7 @@ const view = {
 	name: 'Checkout',
 	ir: { type: 'RootShell', id: 'root', slots: { content: [] } },
 	variants: {},
-	spec: { intent: '', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], decisions: [] },
+	spec: { intent: '', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], requirements: [], decisions: [] },
 }
 
 /** The settings of the Workspaces below: one authored viewport and one authored theme. */

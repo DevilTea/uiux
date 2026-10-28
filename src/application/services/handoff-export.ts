@@ -15,6 +15,7 @@ import {
 	type FormalEvidenceRecord,
 } from '../../domain/evidence/schema'
 import { renderInputDigest } from '../../domain/evidence/render-input-digest'
+import { flowInputDigest } from '../../domain/flows/input-digest'
 import { evaluateEvidenceStaleness, evaluateFlowTraceStaleness } from '../../domain/evidence/staleness'
 import {
 	mayClaimImplementationReady,
@@ -702,7 +703,7 @@ export function createHandoffExportService(persistence: FileNativePersistence, o
 		const capturesByIdentity = new Map(artifactCandidates.map(candidate => [candidate.identity, candidate.value]))
 		const traceContext = {
 			...stalenessContext,
-			flows: [...flowSnapshots.entries()].map(([key, snapshot]) => ({ key, revision: snapshot.revision })),
+			flows: [...flowSnapshots.entries()].map(([key, snapshot]) => ({ key, flowInputDigest: flowInputDigest(snapshot.snapshot) })),
 			captures: capturesByIdentity,
 		}
 		for (const { identity, value: trace } of traceCandidates) {

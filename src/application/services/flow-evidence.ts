@@ -1,8 +1,10 @@
 import packageJson from '../../../package.json' with { type: 'json' }
 import { canonicalJsonBytes } from '../../domain/canonical-json'
+import { flowInputDigest } from '../../domain/flows/input-digest'
 import { FLOW_TRACE_KIND, validateFormalEvidenceRecord, type FormalEvidenceRecord } from '../../domain/evidence/schema'
 import { deriveFlowRecipe, flowRecipeEntries, validateFlowRecipe, type FlowRecipe, type FlowRecipeEntry } from '../../domain/flows/recipe'
 import type { FlowResource } from '../../domain/flows/schema'
+import { withoutRequirementDiagnostics } from '../../domain/requirements/schema'
 import type { ResolvedRenderContext } from '../../domain/render-context/schema'
 import { isFullUuid, isRecord, type Diagnostic, type JsonObject, type JsonValue } from '../../domain/validation'
 import type { FileNativePersistence } from '../../persistence'
@@ -72,7 +74,9 @@ export function createFlowEvidenceService(
 		}
 		if (!flowRead) return { status: 'not_found', flowId }
 		// Rule 01a11544-62c8-7d37-933b-b991fed72e30: a remaining Flow validation error blocks formal Flow Evidence.
-		if (flowRead.diagnostics.length > 0) return invalid(flowId, flowRead.diagnostics)
+		// A requirement diagnostic never blocks capture (Rule 01a18121-0018-…).
+		const blocking = withoutRequirementDiagnostics(flowRead.diagnostics)
+		if (blocking.length > 0) return invalid(flowId, blocking)
 		const flow = flowRead.resource
 
 		const rawContext: unknown = command.renderContext
@@ -173,6 +177,8 @@ export function createFlowEvidenceService(
 				workspaceSchemaVersion: captured.results[0]!.evidence!.provenance.workspaceSchemaVersion,
 				resources: [...resources.values()].sort((a, b) => String(a.identity.type).localeCompare(String(b.identity.type)) || String(a.identity.id).localeCompare(String(b.identity.id))),
 				versions: { uiux: packageJson.version },
+				// Clause 01a1814f-81c2-…: the digest of the Flow without `requirements`, which the trace is judged by.
+				flowInputDigest: flowInputDigest(flowRead.resource),
 			},
 			artifactRefs: [],
 			evidenceRefs,

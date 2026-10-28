@@ -31,7 +31,7 @@ const DRAFT_2020_12 = 'https://json-schema.org/draft/2020-12/schema'
 const REVIEW_CONTEXT = {} as const
 
 const workspace = {
-	schemaVersion: 6,
+	schemaVersion: 7,
 	i18n: { defaultLocale: 'en-US' },
 	viewports: { desktop: { label: 'Desktop', dimensions: { width: 1280, height: 800 } } },
 	themes: { light: { label: 'Light' } },
@@ -49,6 +49,7 @@ const view = {
 		constraints: [],
 		accessibility: [],
 		references: [{ type: 'external', uri: 'urn:design:checkout', label: 'Design brief' }],
+		requirements: [],
 		decisions: [],
 	},
 }
@@ -246,7 +247,7 @@ describe('adapters, flows, reviews, and authored assets', () => {
 
 	it('validates keyed Flow steps, reachability, and the absence of alternate graph shapes', () => {
 		const flow = {
-			id: STEP_A, name: 'Checkout', entryStepId: STEP_A,
+			id: STEP_A, name: 'Checkout', entryStepId: STEP_A, requirements: [],
 			steps: { [STEP_A]: { target: { viewId: VIEW_ID }, transitions: [] } },
 		}
 		expect(validateFlowResource(flow, `${STEP_A}.flow.json`).ok).toBe(true)

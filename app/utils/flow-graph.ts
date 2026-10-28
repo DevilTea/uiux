@@ -3,7 +3,7 @@ import { validateFlowResource } from '../../src/domain/flows/schema'
 /**
  * UX Flow graph projection (Discussion #6, items 5, 7, 8, 10c and 12).
  *
- * The canonical Flow is `{ id, name, scenarioRef?, entryStepId, steps }` with steps keyed by their
+ * The canonical Flow is `{ id, name, scenarioRef?, entryStepId, steps, requirements }` with steps keyed by their
  * immutable UUID and transitions nested in their source step. Everything in this module is a
  * temporary Workbench projection of that one model: node and edge arrays, layout positions and
  * edge keys are never persisted and are not identities outside this editor.
@@ -25,6 +25,12 @@ export type FlowDraft = {
 	scenarioRef?: Record<string, unknown>
 	entryStepId: string
 	steps: Record<string, FlowStepDraft>
+	/**
+	 * The Flow's requirement references, carried through verbatim: the editor shows and writes them as
+	 * the file has them and never edits them (Workbench authoring of references is MCP, Feature
+	 * 01a18120-f2dd-…); a draft without them leaves the saved ones untouched.
+	 */
+	requirements?: string[]
 }
 
 /** What the editor knows about one target View. `widgets` is undefined when the View IR can't be read. */
@@ -129,6 +135,7 @@ export function toFlowDraft(resource: unknown): { draft: FlowDraft; lossless: bo
 		...(isRecord(source.scenarioRef) ? { scenarioRef: source.scenarioRef } : {}),
 		entryStepId: text(source.entryStepId),
 		steps,
+		...(Array.isArray(source.requirements) ? { requirements: source.requirements as string[] } : {}),
 	}
 	return { draft, lossless: stableJson(draft) === stableJson(source) }
 }
@@ -153,6 +160,7 @@ export function draftToCanonical(draft: FlowDraft) {
 		...(draft.scenarioRef ? { scenarioRef: draft.scenarioRef } : {}),
 		entryStepId: draft.entryStepId,
 		steps,
+		...(draft.requirements ? { requirements: draft.requirements } : {}),
 	}
 }
 
@@ -198,7 +206,8 @@ export function triggerLabel(trigger: Readonly<{ widgetId: string; event: string
  */
 export function validateFlowDraft(draft: FlowDraft, views: FlowViewIndex): FlowProblem[] {
 	const problems: FlowProblem[] = []
-	const validation = validateFlowResource({ id: draft.id, ...draftToCanonical(draft) })
+	// The editor shows structure; requirement references never block playback (Rule 01a18121-0018-…).
+	const validation = validateFlowResource({ ...draftToCanonical(draft), id: draft.id, requirements: [] })
 	for (const diagnostic of validation.diagnostics) {
 		const where = locate(diagnostic.path)
 		const kind = STRUCTURAL_KINDS[diagnostic.code] ?? 'structure'

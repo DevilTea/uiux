@@ -33,6 +33,7 @@ import {
 } from './preview-bundler'
 import { validateProductKit, type ProductKit } from '../domain/product-kit/schema'
 import { validateWorkspaceManifest, type WorkspaceManifest } from '../domain/workspace/schema'
+import { withoutRequirementDiagnostics } from '../domain/requirements/schema'
 import { resolveWorkspacePath, V5_LAYOUT, type WorkspaceLayout } from '../persistence/paths'
 
 /** The layout of the selected Workspace: the one given (a caller holding a persistence passes `persistence.layout`), otherwise the only one. */
@@ -45,7 +46,8 @@ export async function readRawWorkspaceManifest(workspaceRoot: string, layout: Wo
 		const content = await readFile(resolveWorkspacePath(workspaceRoot, layout.manifestPath), 'utf8')
 		const parsed = JSON.parse(content)
 		const validation = validateWorkspaceManifest(parsed)
-		return validation.ok ? validation.value : undefined
+		// A requirement diagnostic never makes the Workspace unusable for rendering (Rule 01a18121-0018-…).
+		return withoutRequirementDiagnostics(validation.diagnostics).length === 0 ? parsed as WorkspaceManifest : undefined
 	}
 	catch {
 		return undefined

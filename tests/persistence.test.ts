@@ -407,7 +407,7 @@ describe('file-native persistence', () => {
 			name: 'Checkout',
 			ir: { type: 'RootShell', id: 'root', slots: { content: [] } },
 			variants: { compact: { state: { root: { locale: 'zh-TW' } }, config: { root: { title: 'Compact' } } } },
-			spec: { intent: '', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], decisions: [] },
+			spec: { intent: '', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], requirements: [], decisions: [] },
 		}
 		await writeFile(join(root, viewRelativePath(VIEW_ID)), JSON.stringify(stored))
 		const result = await persistence.views.readInspected(VIEW_ID)
@@ -710,6 +710,7 @@ function viewFixture(): ViewResource {
 			constraints: [],
 			accessibility: [],
 			references: [],
+			requirements: [],
 			decisions: [],
 		},
 	}
@@ -721,6 +722,7 @@ function flowFixture(): FlowResource {
 		id: FLOW_ID,
 		name: 'Checkout Flow',
 		entryStepId: stepId,
+		requirements: [],
 		steps: { [stepId]: { target: { viewId: VIEW_ID }, transitions: [] } },
 	}
 }

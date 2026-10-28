@@ -1,3 +1,4 @@
+import { validateRequirementIds } from '../requirements/schema'
 import {
 	jsonPointer,
 	isRecord,
@@ -55,6 +56,8 @@ export type ViewSpec = Readonly<{
 	constraints: readonly string[]
 	accessibility: readonly string[]
 	references: readonly Reference[]
+	/** Requirement references (Clause 01a18120-f403-796d-9ae7-7889fa233bca). */
+	requirements: readonly string[]
 	decisions: readonly Decision[]
 }>
 
@@ -90,7 +93,7 @@ export function validateViewSpec(input: unknown, path = ''): ValidationResult<Vi
 	if (!spec)
 		return v.finish<ViewSpec>(input)
 	validateJsonValue(input, path, v)
-	rejectUnknownKeys(spec, ['intent', 'entryConditions', 'interactionRules', 'constraints', 'accessibility', 'references', 'decisions'], path, v)
+	rejectUnknownKeys(spec, ['intent', 'entryConditions', 'interactionRules', 'constraints', 'accessibility', 'references', 'requirements', 'decisions'], path, v)
 	v.string(spec.intent, `${path}/intent`)
 	for (const key of ['entryConditions', 'interactionRules', 'constraints', 'accessibility'] as const)
 		validateStringList(spec[key], `${path}/${key}`, v)
@@ -100,6 +103,8 @@ export function validateViewSpec(input: unknown, path = ''): ValidationResult<Vi
 		const result = validateReference(reference, jsonPointer(`${path}/references`, index))
 		v.diagnostics.push(...result.diagnostics)
 	})
+
+	validateRequirementIds(spec.requirements, `${path}/requirements`, v)
 
 	const decisions = v.array(spec.decisions, `${path}/decisions`)
 	if (decisions) {

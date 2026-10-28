@@ -81,6 +81,7 @@ const VIEW: ViewResource = {
 	variants: { empty: { state: { pay: { disabled: true } } } } as ViewResource['variants'],
 	spec: {
 		...spec('Pay for the order.'),
+		requirements: [],
 		decisions: [{ id: DECISION_ID, question: 'Keep a single Pay button?', status: 'pending', history: [] }],
 	},
 }

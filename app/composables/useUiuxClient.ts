@@ -10,6 +10,9 @@ type ResourceListPage<T> = Readonly<{ items: readonly T[]; nextCursor?: string }
 /** A View's current render-input digest (Clause 01a14e30-2d4a-…) and the revision it was read at. */
 export type EvidenceViewRenderInput = Readonly<{ key: string; revision: string; renderInputDigest: string }>
 
+/** A Flow's current Flow input digest (Clause 01a1814f-81c2-…) and the revision it was read at. */
+export type EvidenceFlowInput = Readonly<{ key: string; revision: string; flowInputDigest: string }>
+
 /** The active Adapters' Widget types with their declarations and Catalog entries (`GET /api/preview/catalog`). */
 export type PreviewCatalogResponse =
 	| Readonly<{ state: 'valid'; entries: DescribedWidgetCatalog }>
@@ -92,9 +95,8 @@ export function useUiuxClient() {
 	}
 
 	/** The Evidence records of exactly these kinds (`checks_run`, `flow_trace`, `interaction_replay`), as the Submit for review picker lists them. */
-	async function listEvidenceOfKinds<T>(kinds: readonly string[]): Promise<readonly T[]> {
-		const result = await $fetch<{ items: T[] }>('/api/evidence/list', { query: { kinds: kinds.join(',') } })
-		return result.items
+	async function listEvidenceOfKinds<T>(kinds: readonly string[]): Promise<Readonly<{ items: readonly T[]; flows?: readonly EvidenceFlowInput[] }>> {
+		return await $fetch<{ items: T[]; flows?: EvidenceFlowInput[] }>('/api/evidence/list', { query: { kinds: kinds.join(',') } })
 	}
 
 	/**
@@ -103,8 +105,8 @@ export function useUiuxClient() {
 	 * `productKitUnavailable` when it cannot be computed, and the current Adapter provenance,
 	 * `adapters`, or `adaptersUnavailable` likewise.
 	 */
-	async function listEvidenceForFreshness<T, P>(): Promise<Readonly<{ items: readonly T[]; views?: readonly EvidenceViewRenderInput[]; productKit?: P; productKitUnavailable?: boolean; adapters?: readonly EvidenceAdapterProvenance[]; adaptersUnavailable?: boolean }>> {
-		return await $fetch<{ items: T[]; views?: EvidenceViewRenderInput[]; productKit?: P; productKitUnavailable?: boolean; adapters?: EvidenceAdapterProvenance[]; adaptersUnavailable?: boolean }>('/api/evidence/list')
+	async function listEvidenceForFreshness<T, P>(): Promise<Readonly<{ items: readonly T[]; views?: readonly EvidenceViewRenderInput[]; flows?: readonly EvidenceFlowInput[]; productKit?: P; productKitUnavailable?: boolean; adapters?: readonly EvidenceAdapterProvenance[]; adaptersUnavailable?: boolean }>> {
+		return await $fetch<{ items: T[]; views?: EvidenceViewRenderInput[]; flows?: EvidenceFlowInput[]; productKit?: P; productKitUnavailable?: boolean; adapters?: EvidenceAdapterProvenance[]; adaptersUnavailable?: boolean }>('/api/evidence/list')
 	}
 
 	async function assessHandoff<T>(roots: readonly HandoffRoot[]): Promise<T> {
