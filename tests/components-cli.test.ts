@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { runComponentsCommand } from '../src/cli/components'
 import { runInitCommand } from '../src/cli/init'
 import { componentClosure } from '../src/domain/product-kit/closure'
-import { caseOnlyCollisions, driftState, hasGitSegment, validateCopyRecord } from '../src/domain/product-kit/copy-record'
+import { addedFiles, caseOnlyCollisions, driftState, hasGitSegment, validateCopyRecord } from '../src/domain/product-kit/copy-record'
 import { componentDigest, fileDigest } from '../src/domain/product-kit/digest'
 import { emptyProductKit, type ProductKit } from '../src/domain/product-kit/schema'
 import { HEAVY_SERVER_SUITE_TIMEOUT_MS } from './support/timeouts'
@@ -136,6 +136,16 @@ describe('Product Kit digests, closure and drift states', () => {
 		expect(driftState({ recorded, copy: other, original: other })).toBe('diverged')
 		expect(driftState({ recorded, copy: undefined, original: recorded })).toBe('missing')
 		expect(driftState({ recorded, copy: undefined, original: 'removed' })).toBe('removed')
+	})
+
+	it('finds the registry files that the record does not list, at their path under the target', () => {
+		const declared = ['src/ds/Button.vue', 'src/ds/Button.css', 'src/ds/icons/Check.svg']
+		expect(addedFiles({ declared, recorded: ['src/ds/Button.vue'], target: 'src/ui' })).toEqual([
+			{ source: 'src/ds/Button.css', path: 'src/ui/ds/Button.css' },
+			{ source: 'src/ds/icons/Check.svg', path: 'src/ui/ds/icons/Check.svg' },
+		])
+		expect(addedFiles({ declared, recorded: declared, target: 'src/ui' })).toEqual([])
+		expect(addedFiles({ declared: ['src/a.ts'], recorded: [], target: undefined })).toEqual([{ source: 'src/a.ts', path: undefined }])
 	})
 
 	it('refuses a copy record whose paths leave the project, the kit sources or their target', () => {
@@ -303,6 +313,55 @@ describe('uiux components', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS }, () => {
 		const result = await run(fixture, ['diff'])
 		expect(result.code).toBe(0)
 		expect(result.stdout).toContain('upstream  src/ui/ds/Button.vue (button)')
+	})
+
+	// Scenario 01a18121-7ddc-77cc-b676-c5a5ee13d5df.
+	it('reports a file that upstream added to a copied component as added, and diff --check exits 1', async () => {
+		const fixture = await makeFixture()
+		expect((await run(fixture, ['add', 'button', '--to', 'src/ui/deep'])).code).toBe(0)
+		expect((await run(fixture, ['diff', '--check'])).code).toBe(0)
+		const recordBefore = await readRecord(fixture.project)
+		await writeKitFile(fixture.kit, 'src/ds/Button.css', '.button {}\n')
+		await setRegistry(fixture.workspace, { ...REGISTRY, button: { ...REGISTRY.button!, files: ['src/ds/Button.vue', 'src/ds/Button.css'] } })
+		const check = await run(fixture, ['diff', '--check'])
+		expect(check.code, check.stderr).toBe(1)
+		expect(check.stdout).toContain('unchanged src/ui/deep/ds/Button.vue (button)')
+		expect(check.stdout).toContain('added     src/ui/deep/ds/Button.css (button)')
+		expect(check.stdout).toContain('Drift: 1 added.')
+		// Without --check it only reports; it writes nothing, neither the copy nor the record.
+		const plain = await run(fixture, ['diff'])
+		expect(plain.code).toBe(0)
+		expect(plain.stdout).toContain('added     src/ui/deep/ds/Button.css (button)')
+		expect(await readRecord(fixture.project)).toEqual(recordBefore)
+		await expect(lstat(join(fixture.project, 'src/ui/deep/ds/Button.css'))).rejects.toThrow()
+		// Adding the component again copies the file and records it, so nothing is added any more.
+		expect((await run(fixture, ['add', 'button', '--to', 'src/ui/deep'])).code).toBe(0)
+		const settled = await run(fixture, ['diff', '--check'])
+		expect(settled.code, settled.stdout).toBe(0)
+		expect(settled.stdout).not.toContain('added')
+	})
+
+	it('adds no file for a component that a recorded component newly requires', async () => {
+		const fixture = await makeFixture()
+		expect((await run(fixture, ['add', 'button', '--to', 'src/ui'])).code).toBe(0)
+		await setRegistry(fixture.workspace, { ...REGISTRY, button: { ...REGISTRY.button!, requires: ['badge'] } })
+		const result = await run(fixture, ['diff', '--check'])
+		expect(result.code, result.stdout).toBe(0)
+		expect(result.stdout).not.toContain('added')
+		expect(result.stdout).not.toContain('Badge.vue')
+	})
+
+	it('adds no file for a component that is no longer in the registry, and keeps the states of the recorded files', async () => {
+		const fixture = await makeFixture()
+		expect((await run(fixture, ['add', 'order-summary-card', '--to', 'src/ui'])).code).toBe(0)
+		await writeKitFile(fixture.kit, 'src/ds/Button.css', '.button {}\n')
+		await setRegistry(fixture.workspace, { badge: REGISTRY.badge!, button: { ...REGISTRY.button!, files: ['src/ds/Button.vue', 'src/ds/Button.css'] } })
+		const result = await run(fixture, ['diff', '--check'])
+		expect(result.code).toBe(1)
+		expect(result.stdout).toContain('removed   src/ui/product/OrderSummaryCard.vue (order-summary-card)')
+		expect(result.stdout).toContain('unchanged src/ui/ds/Button.vue (button)')
+		expect(result.stdout).toContain('added     src/ui/ds/Button.css (button)')
+		expect(result.stdout).toContain('Drift: 1 removed, 1 added.')
 	})
 
 	it('reports diverged, missing and removed files', async () => {

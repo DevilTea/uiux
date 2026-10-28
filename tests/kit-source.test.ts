@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { appendFile, mkdir, mkdtemp, readFile, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -241,6 +242,43 @@ describe('the kit source Tools and Resources over MCP', { timeout: HEAVY_SERVER_
 		})
 	})
 
+	it('reports the files that a copied component has since added, at the path under the recorded target', async () => {
+		const ctx = await fixture()
+		await addComponents(ctx.project, ctx.workspace, ['order-summary-card', '--to', 'src/components'])
+		const record = JSON.parse(await readFile(join(ctx.project, 'uiux-components.json'), 'utf8')) as { components: Record<string, { target: string; files: Record<string, unknown> }> }
+		await write(join(ctx.kit, 'src', 'ds', 'Button.css'), '.button {}\n')
+		await write(join(ctx.kit, 'src', 'ds', 'Icon.vue'), '<template><i /></template>\n')
+		await writeFile(join(ctx.workspace, 'product-kit.json'), `${JSON.stringify({
+			...emptyProductKit(),
+			components: {
+				...REGISTRY,
+				// A component that a recorded component newly requires adds no file.
+				'button': { files: ['src/ds/Button.vue', 'src/ds/Button.css'], packages: ['vue'], layer: 'design-system' },
+				'order-summary-card': { ...REGISTRY['order-summary-card']!, requires: ['button', 'icon'] },
+				'icon': { files: ['src/ds/Icon.vue'], layer: 'design-system' },
+			},
+		}, null, 2)}\n`)
+		const copies = { ...record.components, gone: { target: 'src/gone', files: {} } }
+		await withMcp(ctx.app, AGENT, async (call) => {
+			const compared = await call('compare_component_copies', { copies })
+			expect(compared.isError).toBeFalsy()
+			const body = compared.structuredContent as { files: Array<Record<string, unknown>>; added: Array<Record<string, unknown>> }
+			expect(body.files.map(file => [file.component, file.path, file.original])).toEqual([
+				['button', 'src/components/ds/Button.vue', 'matches'],
+				['order-summary-card', 'src/components/product/OrderSummaryCard.vue', 'matches'],
+				['order-summary-card', 'src/components/product/logo.png', 'matches'],
+			])
+			expect(body.added).toEqual([
+				{ component: 'button', path: 'src/components/ds/Button.css', source: 'src/ds/Button.css', originalDigest: `sha256:${createHash('sha256').update('.button {}\n').digest('hex')}` },
+			])
+			// A copy that gives no target has no path to report an added file at.
+			const untargeted = await call('compare_component_copies', { copies: { button: { files: record.components.button!.files } } })
+			expect((untargeted.structuredContent as { added: unknown[] }).added).toEqual([
+				{ component: 'button', path: null, source: 'src/ds/Button.css', originalDigest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u) },
+			])
+		})
+	})
+
 	it('refuses every kit source Tool and the file Resource without product-kit.source.read', async () => {
 		const ctx = await fixture()
 		await withMcp(ctx.app, NO_SOURCE_AGENT, async (call, read) => {
@@ -277,7 +315,7 @@ describe('the kit source Workbench mirrors (HTTP)', () => {
 		expect(await getComponentSourceForHttp(allowed, { name: 'button' })).toMatchObject({ status: 200, body: { status: 'found' } })
 		expect((await getComponentSourceForHttp(allowed, { name: 'nope' })).status).toBe(404)
 		expect((await getComponentSourceForHttp(allowed, { name: 1 })).status).toBe(400)
-		expect(await compareComponentCopiesForHttp(allowed, { copies: {} })).toMatchObject({ status: 200, body: { status: 'compared', files: [] } })
+		expect(await compareComponentCopiesForHttp(allowed, { copies: {} })).toMatchObject({ status: 200, body: { status: 'compared', files: [], added: [] } })
 
 		const denied = scoped(ctx.app, NO_SOURCE_HUMAN)
 		for (const result of [
