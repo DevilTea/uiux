@@ -1,6 +1,8 @@
 Feature: Requirement references
   # Source: Discussion #379 (closed loop) [#379 body: P3: Coverage](https://github.com/DevilTea/uiux/discussions/379); owner acceptance 2026-10-28 https://github.com/DevilTea/uiux/discussions/379#discussioncomment-19234465; scenario chosen in its `.spec/` PR.
-  # Status: not built; tracked in issue #382 (https://github.com/DevilTea/uiux/issues/382).
+  # Test: code@ad0fc2e `tests/requirement-references.test.ts#L453` "counts a requirement that only a Variant references, with referencedBy naming the Variant". https://github.com/DevilTea/uiux/blob/ad0fc2e54bc67c53d74b3b94becbf0caeec92ee4/tests/requirement-references.test.ts#L453
+  # Test: code@ad0fc2e `tests/requirements-browser.test.ts#L92` "lists each requirement as referenced, unreferenced or noUi, the unresolved IDs and the coverage, linked to what references them". https://github.com/DevilTea/uiux/blob/ad0fc2e54bc67c53d74b3b94becbf0caeec92ee4/tests/requirements-browser.test.ts#L92
+  # Status: built as of ad0fc2e.
   @spec:id:01a18121-7c11-7a8a-8952-45198dd8ee7f
   @spec:demonstrates:01a18120-f903-7f8d-9b44-d581ab520c0d
   @spec:demonstrates:01a18120-fa17-7184-be86-43753e4614af

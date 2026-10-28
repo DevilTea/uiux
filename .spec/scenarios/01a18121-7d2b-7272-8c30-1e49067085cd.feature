@@ -1,6 +1,8 @@
 Feature: Requirement references
   # Source: Discussion #379 (closed loop) [#379 body: P3: Where](https://github.com/DevilTea/uiux/discussions/379) and [#379 body: Risks: A Kit change stales all Evidence](https://github.com/DevilTea/uiux/discussions/379); owner acceptance 2026-10-28 https://github.com/DevilTea/uiux/discussions/379#discussioncomment-19234465; scenario chosen in its `.spec/` PR.
-  # Status: not built; tracked in issue #382 (https://github.com/DevilTea/uiux/issues/382).
+  # Test: code@ad0fc2e `tests/requirement-references.test.ts#L134` "keeps the render-input digest when only a Variant's requirements change, and changes it with its State". https://github.com/DevilTea/uiux/blob/ad0fc2e54bc67c53d74b3b94becbf0caeec92ee4/tests/requirement-references.test.ts#L134
+  # Test: code@ad0fc2e `tests/requirement-references.test.ts#L569` "keeps the View render-input digest and the Flow input digest unchanged when only requirements are written". https://github.com/DevilTea/uiux/blob/ad0fc2e54bc67c53d74b3b94becbf0caeec92ee4/tests/requirement-references.test.ts#L569
+  # Status: built as of ad0fc2e.
   @spec:id:01a18121-7d2b-70b0-8ff5-579948a687a1
   @spec:demonstrates:01a14e30-2d4a-7ce9-ad68-58db56f36f47
   @spec:demonstrates:01a18121-00a2-7263-a1e6-3729863eb0f6
