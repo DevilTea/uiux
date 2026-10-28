@@ -89,9 +89,11 @@ defineProps<{
 .kit-btn.kit-btn--ghost { background-color: transparent; color: var(--kit-text-muted); }
 .kit-btn.kit-btn--ghost:hover:not(:disabled) { background-color: var(--kit-bg-surface-elevated); color: var(--kit-text-highlighted); }
 .kit-btn.kit-btn--annotation { background-color: var(--kit-annotation-subtle); color: var(--kit-annotation); border-color: var(--kit-annotation-border); }
+.kit-btn.kit-btn--annotation:hover:not(:disabled) { background-color: var(--kit-annotation-hover); }
 .kit-btn.kit-btn--danger { background-color: var(--kit-danger-subtle); color: var(--kit-danger); border-color: var(--kit-danger-border); }
+.kit-btn.kit-btn--danger:hover:not(:disabled) { background-color: var(--kit-danger-hover); }
 .kit-btn.kit-btn--link { background: none; border-color: transparent; color: var(--kit-primary); padding-inline: 0; text-decoration: underline; text-underline-offset: 3px; }
-.kit-btn.kit-btn--brand:not(:disabled) { background-color: var(--kit-brand); color: var(--color-graphite-0); border-color: var(--kit-brand); }
+.kit-btn.kit-btn--brand:not(:disabled) { background-color: var(--kit-brand); color: var(--kit-on-brand); border-color: var(--kit-brand); }
 .kit-btn.kit-btn--brand:hover:not(:disabled) { background-color: var(--kit-brand-hover); }
 .kit-btn.kit-btn--display { background: transparent; border-color: transparent; height: auto; min-height: 40px; padding: 0 4px; font-size: 24px; line-height: 32px; font-weight: 600; letter-spacing: -0.012em; color: var(--kit-text-highlighted); white-space: normal; text-align: left; }
 .kit-btn.kit-btn--display:hover:not(:disabled) { text-decoration: underline; text-underline-offset: 4px; text-decoration-thickness: 1px; }

@@ -235,7 +235,7 @@ const isMuted = computed(() => props.muted || props.context !== undefined)
 .kit-comment-pin:focus-visible { outline: 2px solid var(--kit-primary); outline-offset: 3px; }
 .kit-comment-pin.is-open { box-shadow: 0 0 0 2px var(--kit-bg-surface), 0 0 0 4px var(--kit-primary), var(--kit-shadow-pin-drop); }
 .kit-comment-pin.is-lift { translate: 0 -2px; box-shadow: 0 0 0 2px var(--kit-bg-surface), 0 0 0 4px var(--kit-pin), var(--kit-shadow-pin-lift); }
-.kit-comment-pin.is-resolved { width: 24px; height: 24px; background: var(--kit-pin-resolved); color: var(--color-graphite-0); }
+.kit-comment-pin.is-resolved { width: 24px; height: 24px; background: var(--kit-pin-resolved); color: var(--kit-on-pin-resolved); }
 .kit-comment-pin.is-pending { background: var(--kit-bg-surface); color: var(--kit-annotation); border: 1.5px dashed var(--kit-pin); box-shadow: var(--kit-shadow-pin-drop); cursor: default; }
 .kit-comment-pin.is-cluster { min-width: 28px; width: auto; padding-inline: 6px; font-variant-numeric: tabular-nums; }
 /*

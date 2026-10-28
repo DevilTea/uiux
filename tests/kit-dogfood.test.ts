@@ -75,6 +75,10 @@ describe('Kit components', () => {
 		}
 	})
 
+	it('read only `--kit-*` tokens: no palette `--color-*` variable, which belongs to tokens.css', async () => {
+		for (const name of await uiFiles()) expect(await readFile(join(KIT, 'src', 'ui', name), 'utf8'), name).not.toMatch(/var\(--color-/)
+	})
+
 	it('read only tokens that tokens.css declares, or declare them themselves', async () => {
 		const tokens = await readFile(join(KIT, 'src', 'tokens', 'tokens.css'), 'utf8')
 		const declared = new Set([...tokens.matchAll(/(--[a-z0-9-]+)\s*:/g)].map(match => match[1]))
@@ -127,6 +131,28 @@ describe('the kit build (kit/build.mjs)', () => {
 			}
 			for (const selector of ['.kit-btn', '.kit-badge', '.kit-comment-pin', '.kit-field', '--color-iris-600', '--kit-primary'])
 				expect(css, selector).toContain(selector)
+		}
+		finally {
+			await rm(directory, { recursive: true, force: true })
+		}
+	}, 60_000)
+
+	const SCRIPT = `<script setup lang="ts">\nconst color = 'red'\ndefineProps<{ label?: string }>()\n</script>\n<template><div>{{ color }}</div></template>\n`
+	it.each([
+		['a scoped style', '<style scoped>.a { color: red; }</style>', '<style scoped> is not supported'],
+		['a CSS module', '<style module>.a { color: red; }</style>', '<style module> is not supported'],
+		['a preprocessor style', '<style lang="scss">.a { color: red; }</style>', '<style lang="scss"> is not supported'],
+		['an external style', '<style src="./x.css"></style>', '<style src> is not supported'],
+		['CSS v-bind()', '<style>.a { color: v-bind(color); }</style>', 'CSS v-bind() (color) is not supported'],
+	])('fails the build, naming the file and the problem, for %s', async (_name, style, message) => {
+		const directory = await copyKit()
+		try {
+			await writeFile(join(directory, 'src', 'ui', 'Unsupported.vue'), `${SCRIPT}${style}\n`)
+			await writeFile(join(directory, 'adapters', 'reference.ts'), `import Unsupported from '../src/ui/Unsupported.vue'\nexport default Unsupported\n`)
+			const result = build(directory)
+			expect(result.status).not.toBe(0)
+			expect(`${result.stdout}${result.stderr}`).toContain('src/ui/Unsupported.vue')
+			expect(`${result.stdout}${result.stderr}`).toContain(message)
 		}
 		finally {
 			await rm(directory, { recursive: true, force: true })

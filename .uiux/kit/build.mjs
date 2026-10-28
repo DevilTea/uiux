@@ -37,6 +37,16 @@ const vueSfc = {
       const label = labelOf(path)
       const { descriptor, errors } = parse(await readFile(path, 'utf8'), { filename: label })
       if (errors.length > 0) return { errors: errors.map(error => ({ text: error.message, location: { file: label, line: error.loc?.start.line ?? 1, column: 0 } })) }
+      // A Kit component's styles are plain global CSS over `--kit-*` tokens, so the same file copies into a product
+      // unchanged: scoped, module, preprocessor and external styles and CSS `v-bind()` are not supported, and fail here
+      // instead of compiling into something a product's own build would treat differently.
+      const unsupported = []
+      for (const style of descriptor.styles) {
+        const kind = style.scoped ? 'scoped' : style.module ? 'module' : style.lang ? `lang="${style.lang}"` : style.src ? 'src' : undefined
+        if (kind) unsupported.push({ text: `<style ${kind}> is not supported in a Kit component: write plain global CSS in a <style> block.`, location: { file: label, line: style.loc.start.line, column: 0 } })
+      }
+      if (descriptor.cssVars.length > 0) unsupported.push({ text: `CSS v-bind() (${descriptor.cssVars.join(', ')}) is not supported in a Kit component: pass values through props and classes.`, location: { file: label, line: descriptor.styles[0]?.loc.start.line ?? 1, column: 0 } })
+      if (unsupported.length > 0) return { errors: unsupported }
       descriptors.set(label, descriptor)
       const id = createHash('sha256').update(label).digest('hex').slice(0, 8)
       const script = compileScript(descriptor, { id, inlineTemplate: true, templateOptions: { compilerOptions: { comments: false } } })

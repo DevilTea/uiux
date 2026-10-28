@@ -296,9 +296,11 @@ Generated from `.uiux/kit/src/tokens/tokens.css` by `pnpm design:tokens`; change
 | `--kit-annotation` | `marker-700` #ae276b | `marker-400` #f17eae |
 | `--kit-annotation-subtle` | `color-mix(in oklch, marker-700 10%, transparent)` | `color-mix(in oklch, marker-400 14%, transparent)` |
 | `--kit-annotation-border` | `color-mix(in oklch, marker-700 35%, transparent)` | `color-mix(in oklch, marker-400 35%, transparent)` |
+| `--kit-annotation-hover` | `color-mix(in oklch, marker-700 18%, transparent)` | `color-mix(in oklch, marker-400 24%, transparent)` |
 | `--kit-pin` | `marker-600` #cb317f | `marker-400` #f17eae |
 | `--kit-on-pin` | `graphite-0` #ffffff | `graphite-950` #0d0d10 |
 | `--kit-pin-resolved` | `graphite-500` #72727a | `graphite-500` #72727a |
+| `--kit-on-pin-resolved` | `graphite-0` #ffffff | `graphite-0` #ffffff |
 | `--kit-success` | `leaf-700` #247341 | `leaf-400` #63ca84 |
 | `--kit-success-subtle` | `color-mix(in oklch, leaf-700 10%, transparent)` | `color-mix(in oklch, leaf-400 14%, transparent)` |
 | `--kit-success-border` | `color-mix(in oklch, leaf-700 35%, transparent)` | `color-mix(in oklch, leaf-400 35%, transparent)` |
@@ -308,11 +310,13 @@ Generated from `.uiux/kit/src/tokens/tokens.css` by `pnpm design:tokens`; change
 | `--kit-danger` | `fault-red-700` #c10007 | `fault-red-400` #ff6467 |
 | `--kit-danger-subtle` | `color-mix(in oklch, fault-red-700 10%, transparent)` | `color-mix(in oklch, fault-red-400 14%, transparent)` |
 | `--kit-danger-border` | `color-mix(in oklch, fault-red-700 35%, transparent)` | `color-mix(in oklch, fault-red-400 35%, transparent)` |
+| `--kit-danger-hover` | `color-mix(in oklch, fault-red-700 18%, transparent)` | `color-mix(in oklch, fault-red-400 24%, transparent)` |
 | `--kit-info` | `notice-blue-700` #1447e6 | `notice-blue-400` #51a2ff |
 | `--kit-info-subtle` | `color-mix(in oklch, notice-blue-700 10%, transparent)` | `color-mix(in oklch, notice-blue-400 14%, transparent)` |
 | `--kit-info-border` | `color-mix(in oklch, notice-blue-700 35%, transparent)` | `color-mix(in oklch, notice-blue-400 35%, transparent)` |
 | `--kit-brand` | `brand-600` #06776a | `brand-600` #06776a |
 | `--kit-brand-hover` | `brand-700` #006459 | `brand-700` #006459 |
+| `--kit-on-brand` | `graphite-0` #ffffff | `graphite-0` #ffffff |
 | `--kit-ring` | `iris-600` #7545d3 | `iris-400` #a78bfa |
 | `--kit-input-bg` | `graphite-0` #ffffff | `graphite-900` #18181c |
 | `--kit-hover-bg` | `graphite-50` #fafafb | `graphite-850` #202024 |

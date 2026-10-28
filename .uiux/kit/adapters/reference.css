@@ -117,7 +117,7 @@
 
 /* Pin: the teardrop is the Kit CommentPin (kit/src/ui/CommentPin.vue, tip at the bottom-left of its parent).
    This Widget places the tip at its x and y instead. */
-.uiux-ref-pin { z-index: 3; bottom: auto; transform: translate(0, -100%); }
+.uiux-ref-scope.uiux-ref-pin { z-index: 3; bottom: auto; transform: translate(0, -100%); }
 
 /* Bubble (thread / composer popover; docks to a bottom sheet on compact viewports) */
 .uiux-ref-bubble {

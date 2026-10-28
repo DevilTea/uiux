@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, useId } from 'vue'
+import { computed, useAttrs, useId } from 'vue'
 import Icon from './Icon.vue'
 import Kbd from './Kbd.vue'
 
@@ -8,7 +8,13 @@ import Kbd from './Kbd.vue'
  * and error text. It is controlled: `modelValue` is the text, and a change leaves it as
  * `update:modelValue`. The error text shows only while `invalid` is true, and then replaces the help
  * text. All text arrives as props, so a product's own i18n decides it.
+ *
+ * Attributes: `class`, `style` and `data-*` stay on the root element (a host that identifies the
+ * field, such as a Widget id, finds it there); every other attribute (`autocomplete`, `maxlength`,
+ * `aria-*`, ...) goes to the input or textarea. The control is described by the error text while it
+ * shows, else by the help text.
  */
+defineOptions({ inheritAttrs: false })
 const props = defineProps<{
   /** The text; default empty. */
   modelValue?: string
@@ -42,8 +48,24 @@ const emit = defineEmits<{
   (e: 'update:modelValue', value: string): void
 }>()
 
+const attrs = useAttrs()
 const generatedId = useId()
 const fieldId = computed(() => props.id ?? `kit-field-${generatedId}`)
+const helpId = computed(() => `${fieldId.value}-help`)
+const errorId = computed(() => `${fieldId.value}-error`)
+const showsError = computed(() => Boolean(props.invalid && props.error))
+
+const isRootAttribute = (name: string): boolean => name === 'class' || name === 'style' || name.startsWith('data-')
+/** The attributes that stay on the root. Read at render, since `useAttrs()` is not reactive. */
+function rootAttrs(): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(attrs).filter(([name]) => isRootAttribute(name)))
+}
+/** The attributes for the control, with the ids of the text that describes it added to a given `aria-describedby`. */
+function controlAttrs(): Record<string, unknown> {
+  const own = Object.fromEntries(Object.entries(attrs).filter(([name]) => !isRootAttribute(name)))
+  const describedBy = [own['aria-describedby'], showsError.value ? errorId.value : props.help ? helpId.value : undefined].filter(Boolean).join(' ')
+  return describedBy ? { ...own, 'aria-describedby': describedBy } : own
+}
 
 function onInput(event: Event): void {
   emit('update:modelValue', (event.target as HTMLInputElement | HTMLTextAreaElement).value)
@@ -51,7 +73,10 @@ function onInput(event: Event): void {
 </script>
 
 <template>
-  <div class="kit-field">
+  <div
+    class="kit-field"
+    v-bind="rootAttrs()"
+  >
     <label
       v-if="label"
       class="kit-field__label"
@@ -78,6 +103,7 @@ function onInput(event: Event): void {
         :aria-label="label ? undefined : (placeholder || undefined)"
         :aria-invalid="invalid ? 'true' : undefined"
         :aria-required="required ? 'true' : undefined"
+        v-bind="controlAttrs()"
         @input="onInput"
       />
       <input
@@ -94,6 +120,7 @@ function onInput(event: Event): void {
         :aria-label="label ? undefined : (placeholder || undefined)"
         :aria-invalid="invalid ? 'true' : undefined"
         :aria-required="required ? 'true' : undefined"
+        v-bind="controlAttrs()"
         @input="onInput"
       >
       <Kbd
@@ -103,7 +130,8 @@ function onInput(event: Event): void {
       />
     </div>
     <p
-      v-if="invalid && error"
+      v-if="showsError"
+      :id="errorId"
       class="kit-field__error"
       role="alert"
     >
@@ -114,6 +142,7 @@ function onInput(event: Event): void {
     </p>
     <p
       v-else-if="help"
+      :id="helpId"
       class="kit-field__help"
     >
       {{ help }}
