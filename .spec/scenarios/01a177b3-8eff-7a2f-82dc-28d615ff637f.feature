@@ -2,7 +2,7 @@ Feature: A Flow trace is stale once its Flow changed
   # Source: Discussion #241 owner confirmations on PR #243 (B1), the change domain `flow` https://github.com/DevilTea/uiux/discussions/241#discussioncomment-19015368; issue #88.
   # Test: code@82de28b `tests/evidence-staleness.test.ts#L358` "is stale once its Flow changed or no longer exists, or the trace records no Flow". https://github.com/DevilTea/uiux/blob/82de28b/tests/evidence-staleness.test.ts#L358
   # Test: code@82de28b `tests/handoff-closure.test.ts#L1979` "leaves out a trace once its Flow changed". https://github.com/DevilTea/uiux/blob/82de28b/tests/handoff-closure.test.ts#L1979
-  # Status: built as of a33ec00.
+  # Status: built as of a33ec00; built as of a33ec00 for what it shows; Rule 01a1814f-8256-7927-92d9-b3d2ba9e5719 amends the staleness test to the Flow input digest, so a change to `requirements` alone no longer stales a trace, which is not built (issue #382 (https://github.com/DevilTea/uiux/issues/382)).
   @spec:id:01a177b3-8eff-74a2-8011-80a1f2f24bf3
   @spec:demonstrates:01a14e30-2e43-75a7-aca8-c8df28915f4e
   Scenario: A Flow trace is stale once its Flow changed
