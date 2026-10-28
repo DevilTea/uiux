@@ -7,6 +7,25 @@ on:
   workflow_dispatch:
 
 jobs:
+  # Dogfood guards (docs/dogfood-worktree.md): a PR adds no .uiux/history/** file and no Evidence
+  # blob that `uiux artifacts gc --dry-run` (empty UIUX_HOME) would collect.
+  dogfood-guard:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.34.4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.20.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm dogfood:guard --base origin/${{ github.base_ref }}
+
   check:
     runs-on: ubuntu-latest
     steps:
