@@ -1,6 +1,6 @@
 Feature: Workspace schema versioning
   # Source: Discussion #231 (Part 17, one current format) https://github.com/DevilTea/uiux/discussions/231; owner acceptance 2026-10-17 https://github.com/DevilTea/uiux/discussions/231#discussioncomment-18992111: Changes 1.2, 1.3 and 3.1, the `.spec/` units New table, owner question Q4.
-  # Status: built as of 483b6ab.
+  # Status: built as of 483b6ab; the refusal is built for a manifest that is not `schemaVersion` 6, and Clause 01a1144e-534c-7087-a504-76075f73df0d states 7 ([#379 owner rulings 2026-10-28 (review of #384): ruling 4](https://github.com/DevilTea/uiux/discussions/379#discussioncomment-19236211), reads 6; 7 in issue #382 (https://github.com/DevilTea/uiux/issues/382)).
   # Test: code@1c86869 `tests/workspace-selection.test.ts#L249` "uiux dev, with --workspace and by discovery from inside the old directory". https://github.com/DevilTea/uiux/blob/1c86869155a214252d7be32951d3a07fa6d52421/tests/workspace-selection.test.ts#L249
   # Test: code@1c86869 `tests/workspace-selection.test.ts#L222` "every roster command, and both sides of access copy". https://github.com/DevilTea/uiux/blob/1c86869155a214252d7be32951d3a07fa6d52421/tests/workspace-selection.test.ts#L222
   # Test: code@1c86869 `tests/workspace-selection.test.ts#L267` "the packaged server". https://github.com/DevilTea/uiux/blob/1c86869155a214252d7be32951d3a07fa6d52421/tests/workspace-selection.test.ts#L267
