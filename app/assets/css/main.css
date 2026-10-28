@@ -1,5 +1,8 @@
 @import "tailwindcss";
 @import "@nuxt/ui";
+/* Palette and semantic tokens: the Kit's one token source, copied here by `uiux components add`
+   (uiux-components.json). `--ui-*` below map Nuxt UI onto its `--kit-*` tokens. */
+@import "../../components/kit/tokens/tokens.css";
 
 /*
  * Workbench design tokens ("The Quiet Canvas", DESIGN.md).
@@ -11,9 +14,8 @@
 
 /* ---------- Primitives (Tailwind theme) ---------- */
 @theme static {
-  --font-sans: "Inter Variable", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
-    "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", "Noto Sans CJK TC", sans-serif;
-  --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, "PingFang TC", monospace;
+  --font-sans: var(--kit-font-sans);
+  --font-mono: var(--kit-font-mono);
   --font-mono--font-feature-settings: "zero" 1;
 
   /* Type scale: 12px floor; text-sm is retuned to the 13px UI size. */
@@ -29,58 +31,6 @@
   --text-headline--line-height: 1.625rem;
   --text-display: 1.5rem;
   --text-display--line-height: 2rem;
-
-  --color-graphite-50: oklch(98.5% 0.002 286);
-  --color-graphite-100: oklch(96.7% 0.003 286);
-  --color-graphite-150: oklch(94.6% 0.004 286);
-  --color-graphite-200: oklch(92.4% 0.005 286);
-  --color-graphite-300: oklch(86.8% 0.007 286);
-  --color-graphite-400: oklch(71% 0.01 286);
-  --color-graphite-450: oklch(65% 0.011 286);
-  --color-graphite-500: oklch(55.4% 0.012 286);
-  --color-graphite-600: oklch(45% 0.012 286);
-  --color-graphite-700: oklch(37% 0.011 286);
-  --color-graphite-750: oklch(32% 0.01 286);
-  --color-graphite-800: oklch(27.6% 0.009 286);
-  --color-graphite-850: oklch(24.4% 0.008 286);
-  --color-graphite-900: oklch(21.2% 0.007 286);
-  --color-graphite-950: oklch(16% 0.006 286);
-
-  --color-iris-50: oklch(97.2% 0.014 293.6);
-  --color-iris-100: oklch(94.4% 0.028 293.6);
-  --color-iris-200: oklch(89.6% 0.052 293.6);
-  --color-iris-300: oklch(81.6% 0.098 293.6);
-  --color-iris-400: oklch(70.9% 0.159 293.6); /* = favicon #a78bfa */
-  --color-iris-500: oklch(61.2% 0.2 293.6);
-  --color-iris-600: oklch(52.6% 0.205 293.6);
-  --color-iris-700: oklch(46.6% 0.185 293.6);
-  --color-iris-800: oklch(40.6% 0.158 293.6);
-  --color-iris-900: oklch(34.6% 0.128 293.6);
-  --color-iris-950: oklch(26.2% 0.095 293.6);
-
-  --color-marker-50: oklch(97.2% 0.014 355);
-  --color-marker-100: oklch(94.4% 0.03 355);
-  --color-marker-200: oklch(89.6% 0.058 355);
-  --color-marker-300: oklch(82.4% 0.1 355);
-  --color-marker-400: oklch(73.5% 0.15 355);
-  --color-marker-500: oklch(65.5% 0.19 355);
-  --color-marker-600: oklch(57.5% 0.2 355);
-  --color-marker-700: oklch(51% 0.18 355);
-  --color-marker-800: oklch(44.5% 0.152 355);
-  --color-marker-900: oklch(38.5% 0.122 355);
-  --color-marker-950: oklch(28% 0.088 355);
-
-  --color-leaf-50: oklch(97.6% 0.022 152);
-  --color-leaf-100: oklch(95% 0.045 152);
-  --color-leaf-200: oklch(90.5% 0.08 152);
-  --color-leaf-300: oklch(84% 0.115 152);
-  --color-leaf-400: oklch(76% 0.14 152);
-  --color-leaf-500: oklch(66% 0.145 152);
-  --color-leaf-600: oklch(56.5% 0.13 152);
-  --color-leaf-700: oklch(49.5% 0.11 152);
-  --color-leaf-800: oklch(44% 0.095 152);
-  --color-leaf-900: oklch(37.5% 0.078 152);
-  --color-leaf-950: oklch(26.5% 0.055 152);
 
   --ease-out-quiet: cubic-bezier(0.2, 0, 0, 1);
   --ease-in-quiet: cubic-bezier(0.4, 0, 1, 1);
@@ -98,34 +48,35 @@
   --ui-radius: 0.25rem;
   --ui-header-height: 3rem;
 
-  --ui-primary: var(--ui-color-primary-600);
+  --ui-primary: var(--kit-primary);
   --ui-secondary: var(--ui-color-secondary-700);
-  --ui-annotation: var(--ui-color-annotation-700);
-  --ui-success: var(--ui-color-success-700);
-  --ui-info: var(--ui-color-info-700);
-  --ui-warning: var(--ui-color-warning-800);
-  --ui-error: var(--ui-color-error-700);
+  --ui-annotation: var(--kit-annotation);
+  --ui-success: var(--kit-success);
+  --ui-info: var(--kit-info);
+  --ui-warning: var(--kit-warning);
+  --ui-error: var(--kit-danger);
 
-  --ui-text-dimmed: var(--ui-color-neutral-500);
-  --ui-text-muted: var(--ui-color-neutral-600);
+  --ui-text-dimmed: var(--kit-text-subtle);
+  --ui-text-muted: var(--kit-text-muted);
   --ui-text-toned: var(--ui-color-neutral-700);
-  --ui-text: var(--ui-color-neutral-800);
-  --ui-text-highlighted: var(--ui-color-neutral-950);
-  --ui-text-inverted: #fff;
+  --ui-text: var(--kit-text);
+  --ui-text-highlighted: var(--kit-text-highlighted);
+  --ui-text-inverted: var(--kit-text-inverted);
 
-  --ui-bg: #fff;
-  --ui-bg-muted: var(--ui-color-neutral-50);
-  --ui-bg-elevated: var(--ui-color-neutral-100);
-  --ui-bg-accented: var(--ui-color-neutral-200);
+  --ui-bg: var(--kit-bg-surface);
+  --ui-bg-muted: var(--kit-bg-muted);
+  --ui-bg-elevated: var(--kit-bg-surface-elevated);
+  --ui-bg-accented: var(--kit-bg-accented);
   --ui-bg-inverted: var(--ui-color-neutral-900);
-  --ui-border: var(--ui-color-neutral-200);
-  --ui-border-muted: var(--color-graphite-150);
-  --ui-border-accented: var(--color-graphite-450);
+  --ui-border: var(--kit-border);
+  --ui-border-muted: var(--kit-border-subtle);
+  --ui-border-accented: var(--kit-border-control);
   --ui-border-inverted: var(--ui-color-neutral-900);
 
   /* Workbench tokens (chrome only; never the Preview render context) */
   --wb-target: 1.5rem; /* 24px WCAG 2.5.8 minimum */
-  --wb-canvas: var(--ui-color-neutral-100);
+  --kit-target-min: var(--wb-target); /* Kit components (Button, Field) take their minimum target from here */
+  --wb-canvas: var(--kit-bg-canvas);
   --wb-canvas-dot: var(--ui-color-neutral-300);
   --wb-selection: var(--ui-primary);
   --wb-selection-subtle: color-mix(in oklab, var(--ui-primary) 10%, var(--ui-bg));
@@ -134,60 +85,60 @@
   --wb-highlight: var(--wb-selection);
   --wb-comment: var(--ui-annotation);
   --wb-comment-subtle: color-mix(in oklab, var(--ui-annotation) 10%, var(--ui-bg));
-  --wb-pin: var(--ui-color-annotation-600);
-  --wb-pin-text: #fff;
-  --wb-pin-resolved: var(--ui-color-neutral-500);
+  --wb-pin: var(--kit-pin);
+  --wb-pin-text: var(--kit-on-pin);
+  --wb-pin-resolved: var(--kit-pin-resolved);
   --wb-pin-stale: var(--ui-warning);
   --wb-pin-invalid: var(--ui-error);
-  --wb-frame: #fff;
-  --wb-shadow-frame: 0 0 0 1px oklch(16% 0.006 286 / 0.08), 0 2px 6px oklch(16% 0.006 286 / 0.06), 0 12px 32px -8px oklch(16% 0.006 286 / 0.12);
-  --wb-shadow-pin-drop: 0 1px 3px oklch(0% 0 0 / 0.28);
+  --wb-frame: var(--kit-bg-surface);
+  --wb-shadow-frame: var(--kit-shadow-frame);
+  --wb-shadow-pin-drop: var(--kit-shadow-pin-drop);
   --wb-shadow-pin: 0 0 0 2px var(--ui-bg), var(--wb-shadow-pin-drop);
-  --wb-shadow-overlay: 0 1px 2px oklch(16% 0.006 286 / 0.06), 0 8px 24px -4px oklch(16% 0.006 286 / 0.14);
-  --wb-shadow-modal: 0 24px 64px -12px oklch(16% 0.006 286 / 0.25);
+  --wb-shadow-overlay: var(--kit-shadow-overlay);
+  --wb-shadow-modal: var(--kit-shadow-modal);
 }
 
 /* ---------- Nuxt UI semantic variables: dark ---------- */
 .dark {
   color-scheme: dark;
 
-  --ui-primary: var(--ui-color-primary-400);
+  --ui-primary: var(--kit-primary);
   --ui-secondary: var(--ui-color-secondary-300);
-  --ui-annotation: var(--ui-color-annotation-400);
-  --ui-success: var(--ui-color-success-400);
-  --ui-info: var(--ui-color-info-400);
-  --ui-warning: var(--ui-color-warning-400);
-  --ui-error: var(--ui-color-error-400);
+  --ui-annotation: var(--kit-annotation);
+  --ui-success: var(--kit-success);
+  --ui-info: var(--kit-info);
+  --ui-warning: var(--kit-warning);
+  --ui-error: var(--kit-danger);
 
-  --ui-text-dimmed: var(--color-graphite-450);
-  --ui-text-muted: var(--ui-color-neutral-400);
+  --ui-text-dimmed: var(--kit-text-subtle);
+  --ui-text-muted: var(--kit-text-muted);
   --ui-text-toned: var(--ui-color-neutral-300);
-  --ui-text: var(--ui-color-neutral-200);
-  --ui-text-highlighted: #fff;
-  --ui-text-inverted: var(--ui-color-neutral-900);
+  --ui-text: var(--kit-text);
+  --ui-text-highlighted: var(--kit-text-highlighted);
+  --ui-text-inverted: var(--kit-text-inverted);
 
-  --ui-bg: var(--ui-color-neutral-900);
-  --ui-bg-muted: var(--color-graphite-850);
-  --ui-bg-elevated: var(--ui-color-neutral-800);
-  --ui-bg-accented: var(--color-graphite-750);
-  --ui-bg-inverted: #fff;
-  --ui-border: var(--color-graphite-750);
-  --ui-border-muted: var(--ui-color-neutral-800);
-  --ui-border-accented: var(--ui-color-neutral-500);
-  --ui-border-inverted: #fff;
+  --ui-bg: var(--kit-bg-surface);
+  --ui-bg-muted: var(--kit-bg-muted);
+  --ui-bg-elevated: var(--kit-bg-surface-elevated);
+  --ui-bg-accented: var(--kit-bg-accented);
+  --ui-bg-inverted: var(--color-graphite-0);
+  --ui-border: var(--kit-border);
+  --ui-border-muted: var(--kit-border-subtle);
+  --ui-border-accented: var(--kit-border-control);
+  --ui-border-inverted: var(--color-graphite-0);
 
-  --wb-canvas: var(--ui-color-neutral-950);
+  --wb-canvas: var(--kit-bg-canvas);
   --wb-canvas-dot: var(--ui-color-neutral-800);
   --wb-selection-subtle: color-mix(in oklab, var(--ui-primary) 14%, var(--ui-bg));
   --wb-selection-text: var(--ui-color-primary-300);
   --wb-comment-subtle: color-mix(in oklab, var(--ui-annotation) 14%, var(--ui-bg));
-  --wb-pin: var(--ui-color-annotation-400);
-  --wb-pin-text: var(--ui-color-neutral-950);
-  --wb-pin-resolved: var(--ui-color-neutral-500);
-  --wb-frame: var(--ui-color-neutral-900);
-  --wb-shadow-frame: 0 0 0 1px var(--color-graphite-750), 0 16px 40px -8px oklch(0% 0 0 / 0.55);
-  --wb-shadow-overlay: 0 0 0 1px var(--color-graphite-750), 0 12px 32px -4px oklch(0% 0 0 / 0.6);
-  --wb-shadow-modal: 0 0 0 1px var(--color-graphite-750), 0 24px 64px -12px oklch(0% 0 0 / 0.7);
+  --wb-pin: var(--kit-pin);
+  --wb-pin-text: var(--kit-on-pin);
+  --wb-pin-resolved: var(--kit-pin-resolved);
+  --wb-frame: var(--kit-bg-surface);
+  --wb-shadow-frame: var(--kit-shadow-frame);
+  --wb-shadow-overlay: var(--kit-shadow-overlay);
+  --wb-shadow-modal: var(--kit-shadow-modal);
 }
 
 @media (pointer: coarse) {

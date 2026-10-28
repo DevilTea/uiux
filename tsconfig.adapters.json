@@ -12,7 +12,11 @@
 		"verbatimModuleSyntax": true,
 		"allowImportingTsExtensions": true,
 		"resolveJsonModule": true,
-		"types": []
+		"types": [],
+		// `kit/package.json` makes the kit its own package scope, so the Adapter's self-reference to
+		// `@deviltea/uiux/adapter` no longer resolves through this repository's `exports` map.
+		"paths": { "@deviltea/uiux/adapter": ["./src/adapter-entry/index.d.ts"] }
 	},
-	"include": [".uiux/kit/**/*.ts", "types/css.d.ts"]
+	"include": [".uiux/kit/**/*.ts", ".uiux/kit/**/*.vue", "types/css.d.ts"],
+	"exclude": [".uiux/kit/dist", ".uiux/kit/node_modules"]
 }

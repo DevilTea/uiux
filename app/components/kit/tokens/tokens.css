@@ -1,0 +1,253 @@
+/*
+ * Kit tokens: the one source of palette and semantic tokens (Discussion #379 D1, owner answer 5).
+ *
+ * - Palette: `--color-<name>-<step>`, defined once on every scope that shows Kit components.
+ * - Semantic tokens: `--kit-*`, one set per theme: light (also the `:root` default), dark, and an
+ *   OS-following `uiux-theme-auto` for a Preview whose theme id cannot be read.
+ * - Components read `--kit-*` only. The app maps Nuxt UI `--ui-*` onto them (app/assets/css/main.css),
+ *   the reference Adapter styles use them directly, and `pnpm design:tokens` generates the color and
+ *   token sections of DESIGN.md from this file (scripts/design-tokens.mjs).
+ *
+ * - Layout hook: `--kit-target-min` is not declared here. A product may set it (the Workbench sets its 24px /
+ *   44px touch target); Button and Field read it as `var(--kit-target-min, 0px)` for their minimum height.
+ *
+ * Structure the generator relies on: the four `@tokens` sections below, in order. The dark and the
+ * dark-auto sections must declare the same tokens with the same values (the generator checks it).
+ */
+
+/* @tokens palette */
+:root, .uiux-theme-light, .uiux-theme-dark, .uiux-theme-auto {
+  --color-graphite-0: oklch(100% 0 286);
+  --color-graphite-50: oklch(98.5% 0.002 286);
+  --color-graphite-100: oklch(96.7% 0.003 286);
+  --color-graphite-150: oklch(94.6% 0.004 286);
+  --color-graphite-200: oklch(92.4% 0.005 286);
+  --color-graphite-300: oklch(86.8% 0.007 286);
+  --color-graphite-400: oklch(71% 0.01 286);
+  --color-graphite-450: oklch(65% 0.011 286);
+  --color-graphite-500: oklch(55.4% 0.012 286);
+  --color-graphite-600: oklch(45% 0.012 286);
+  --color-graphite-700: oklch(37% 0.011 286);
+  --color-graphite-750: oklch(32% 0.01 286);
+  --color-graphite-800: oklch(27.6% 0.009 286);
+  --color-graphite-850: oklch(24.4% 0.008 286);
+  --color-graphite-900: oklch(21.2% 0.007 286);
+  --color-graphite-950: oklch(16% 0.006 286);
+  --color-iris-50: oklch(97.2% 0.014 293.6);
+  --color-iris-100: oklch(94.4% 0.028 293.6);
+  --color-iris-200: oklch(89.6% 0.052 293.6);
+  --color-iris-300: oklch(81.6% 0.098 293.6);
+  --color-iris-400: oklch(70.9% 0.159 293.6);
+  --color-iris-500: oklch(61.2% 0.2 293.6);
+  --color-iris-600: oklch(52.6% 0.205 293.6);
+  --color-iris-700: oklch(46.6% 0.185 293.6);
+  --color-iris-800: oklch(40.6% 0.158 293.6);
+  --color-iris-900: oklch(34.6% 0.128 293.6);
+  --color-iris-950: oklch(26.2% 0.095 293.6);
+  --color-marker-50: oklch(97.2% 0.014 355);
+  --color-marker-100: oklch(94.4% 0.03 355);
+  --color-marker-200: oklch(89.6% 0.058 355);
+  --color-marker-300: oklch(82.4% 0.1 355);
+  --color-marker-400: oklch(73.5% 0.15 355);
+  --color-marker-500: oklch(65.5% 0.19 355);
+  --color-marker-600: oklch(57.5% 0.2 355);
+  --color-marker-700: oklch(51% 0.18 355);
+  --color-marker-800: oklch(44.5% 0.152 355);
+  --color-marker-900: oklch(38.5% 0.122 355);
+  --color-marker-950: oklch(28% 0.088 355);
+  --color-leaf-50: oklch(97.6% 0.022 152);
+  --color-leaf-100: oklch(95% 0.045 152);
+  --color-leaf-200: oklch(90.5% 0.08 152);
+  --color-leaf-300: oklch(84% 0.115 152);
+  --color-leaf-400: oklch(76% 0.14 152);
+  --color-leaf-500: oklch(66% 0.145 152);
+  --color-leaf-600: oklch(56.5% 0.13 152);
+  --color-leaf-700: oklch(49.5% 0.11 152);
+  --color-leaf-800: oklch(44% 0.095 152);
+  --color-leaf-900: oklch(37.5% 0.078 152);
+  --color-leaf-950: oklch(26.5% 0.055 152);
+  --color-fault-red-400: oklch(70.4% 0.191 22.216);
+  --color-fault-red-700: oklch(50.5% 0.213 27.518);
+  --color-caution-yellow-400: oklch(85.2% 0.199 91.936);
+  --color-caution-yellow-800: oklch(47.6% 0.114 61.907);
+  --color-notice-blue-400: oklch(70.7% 0.165 254.624);
+  --color-notice-blue-700: oklch(48.8% 0.243 264.376);
+  /* Sample product brand of the reference Adapter's `brand` Button variant; not Workbench chrome. */
+  --color-brand-600: oklch(51% 0.09 182);
+  --color-brand-700: oklch(45% 0.085 182);
+
+  --kit-font-sans: "Inter Variable", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", "PingFang TC", "Noto Sans TC", "Microsoft JhengHei", "Noto Sans CJK TC", sans-serif;
+  --kit-shadow-pin-drop: 0 1px 3px oklch(0% 0 0 / 0.28);
+  --kit-shadow-pin-lift: 0 2px 6px oklch(0% 0 0 / 0.3);
+  --kit-font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, "PingFang TC", monospace;
+}
+
+/* @tokens light */
+:root, .light, .uiux-theme-light, .uiux-theme-auto {
+  --kit-bg-app: var(--color-graphite-0);
+  --kit-bg-surface: var(--color-graphite-0);
+  --kit-bg-muted: var(--color-graphite-50);
+  --kit-bg-surface-elevated: var(--color-graphite-100);
+  --kit-bg-accented: var(--color-graphite-200);
+  --kit-bg-canvas: var(--color-graphite-100);
+  --kit-canvas-dot: oklch(16% 0.006 286 / 0.12);
+  --kit-border: var(--color-graphite-200);
+  --kit-border-subtle: var(--color-graphite-150);
+  --kit-border-control: var(--color-graphite-450);
+  --kit-text: var(--color-graphite-800);
+  --kit-text-highlighted: var(--color-graphite-950);
+  --kit-text-muted: var(--color-graphite-600);
+  --kit-text-subtle: var(--color-graphite-500);
+  --kit-primary: var(--color-iris-600);
+  --kit-primary-hover: var(--color-iris-700);
+  --kit-primary-subtle: color-mix(in oklch, var(--color-iris-600) 10%, transparent);
+  --kit-primary-border: color-mix(in oklch, var(--color-iris-600) 35%, transparent);
+  --kit-on-primary: var(--color-graphite-0);
+  --kit-text-inverted: var(--color-graphite-0);
+  --kit-annotation: var(--color-marker-700);
+  --kit-annotation-subtle: color-mix(in oklch, var(--color-marker-700) 10%, transparent);
+  --kit-annotation-border: color-mix(in oklch, var(--color-marker-700) 35%, transparent);
+  --kit-annotation-hover: color-mix(in oklch, var(--color-marker-700) 18%, transparent);
+  --kit-pin: var(--color-marker-600);
+  --kit-on-pin: var(--color-graphite-0);
+  --kit-pin-resolved: var(--color-graphite-500);
+  --kit-on-pin-resolved: var(--color-graphite-0);
+  --kit-success: var(--color-leaf-700);
+  --kit-success-subtle: color-mix(in oklch, var(--color-leaf-700) 10%, transparent);
+  --kit-success-border: color-mix(in oklch, var(--color-leaf-700) 35%, transparent);
+  --kit-warning: var(--color-caution-yellow-800);
+  --kit-warning-subtle: color-mix(in oklch, var(--color-caution-yellow-800) 10%, transparent);
+  --kit-warning-border: color-mix(in oklch, var(--color-caution-yellow-800) 35%, transparent);
+  --kit-danger: var(--color-fault-red-700);
+  --kit-danger-subtle: color-mix(in oklch, var(--color-fault-red-700) 10%, transparent);
+  --kit-danger-border: color-mix(in oklch, var(--color-fault-red-700) 35%, transparent);
+  --kit-danger-hover: color-mix(in oklch, var(--color-fault-red-700) 18%, transparent);
+  --kit-info: var(--color-notice-blue-700);
+  --kit-info-subtle: color-mix(in oklch, var(--color-notice-blue-700) 10%, transparent);
+  --kit-info-border: color-mix(in oklch, var(--color-notice-blue-700) 35%, transparent);
+  --kit-brand: var(--color-brand-600);
+  --kit-brand-hover: var(--color-brand-700);
+  --kit-on-brand: var(--color-graphite-0);
+  --kit-ring: var(--color-iris-600);
+  --kit-input-bg: var(--color-graphite-0);
+  --kit-hover-bg: var(--color-graphite-50);
+  --kit-shadow: none;
+  --kit-shadow-frame: 0 0 0 1px oklch(16% 0.006 286 / 0.08), 0 2px 6px oklch(16% 0.006 286 / 0.06), 0 12px 32px -8px oklch(16% 0.006 286 / 0.12);
+  --kit-shadow-overlay: 0 1px 2px oklch(16% 0.006 286 / 0.06), 0 8px 24px -4px oklch(16% 0.006 286 / 0.14);
+  --kit-shadow-modal: 0 24px 64px -12px oklch(16% 0.006 286 / 0.25);
+  color-scheme: light;
+}
+
+/* @tokens dark */
+.dark, .uiux-theme-dark {
+  --kit-bg-app: var(--color-graphite-900);
+  --kit-bg-surface: var(--color-graphite-900);
+  --kit-bg-muted: var(--color-graphite-850);
+  --kit-bg-surface-elevated: var(--color-graphite-800);
+  --kit-bg-accented: var(--color-graphite-750);
+  --kit-bg-canvas: var(--color-graphite-950);
+  --kit-canvas-dot: oklch(100% 0 0 / 0.08);
+  --kit-border: var(--color-graphite-750);
+  --kit-border-subtle: var(--color-graphite-800);
+  --kit-border-control: var(--color-graphite-500);
+  --kit-text: var(--color-graphite-200);
+  --kit-text-highlighted: var(--color-graphite-0);
+  --kit-text-muted: var(--color-graphite-400);
+  --kit-text-subtle: var(--color-graphite-450);
+  --kit-primary: var(--color-iris-400);
+  --kit-primary-hover: var(--color-iris-300);
+  --kit-primary-subtle: color-mix(in oklch, var(--color-iris-400) 14%, transparent);
+  --kit-primary-border: color-mix(in oklch, var(--color-iris-400) 35%, transparent);
+  --kit-on-primary: var(--color-graphite-900);
+  --kit-text-inverted: var(--color-graphite-900);
+  --kit-annotation: var(--color-marker-400);
+  --kit-annotation-subtle: color-mix(in oklch, var(--color-marker-400) 14%, transparent);
+  --kit-annotation-border: color-mix(in oklch, var(--color-marker-400) 35%, transparent);
+  --kit-annotation-hover: color-mix(in oklch, var(--color-marker-400) 24%, transparent);
+  --kit-pin: var(--color-marker-400);
+  --kit-on-pin: var(--color-graphite-950);
+  --kit-pin-resolved: var(--color-graphite-500);
+  --kit-on-pin-resolved: var(--color-graphite-0);
+  --kit-success: var(--color-leaf-400);
+  --kit-success-subtle: color-mix(in oklch, var(--color-leaf-400) 14%, transparent);
+  --kit-success-border: color-mix(in oklch, var(--color-leaf-400) 35%, transparent);
+  --kit-warning: var(--color-caution-yellow-400);
+  --kit-warning-subtle: color-mix(in oklch, var(--color-caution-yellow-400) 14%, transparent);
+  --kit-warning-border: color-mix(in oklch, var(--color-caution-yellow-400) 35%, transparent);
+  --kit-danger: var(--color-fault-red-400);
+  --kit-danger-subtle: color-mix(in oklch, var(--color-fault-red-400) 14%, transparent);
+  --kit-danger-border: color-mix(in oklch, var(--color-fault-red-400) 35%, transparent);
+  --kit-danger-hover: color-mix(in oklch, var(--color-fault-red-400) 24%, transparent);
+  --kit-info: var(--color-notice-blue-400);
+  --kit-info-subtle: color-mix(in oklch, var(--color-notice-blue-400) 14%, transparent);
+  --kit-info-border: color-mix(in oklch, var(--color-notice-blue-400) 35%, transparent);
+  --kit-brand: var(--color-brand-600);
+  --kit-brand-hover: var(--color-brand-700);
+  --kit-on-brand: var(--color-graphite-0);
+  --kit-ring: var(--color-iris-400);
+  --kit-input-bg: var(--color-graphite-900);
+  --kit-hover-bg: var(--color-graphite-850);
+  --kit-shadow: none;
+  --kit-shadow-frame: 0 0 0 1px var(--color-graphite-750), 0 16px 40px -8px oklch(0% 0 0 / 0.55);
+  --kit-shadow-overlay: 0 0 0 1px var(--color-graphite-750), 0 12px 32px -4px oklch(0% 0 0 / 0.6);
+  --kit-shadow-modal: 0 0 0 1px var(--color-graphite-750), 0 24px 64px -12px oklch(0% 0 0 / 0.7);
+  color-scheme: dark;
+}
+
+/* @tokens dark-auto */
+@media (prefers-color-scheme: dark) {
+  .uiux-theme-auto {
+    --kit-bg-app: var(--color-graphite-900);
+    --kit-bg-surface: var(--color-graphite-900);
+    --kit-bg-muted: var(--color-graphite-850);
+    --kit-bg-surface-elevated: var(--color-graphite-800);
+    --kit-bg-accented: var(--color-graphite-750);
+    --kit-bg-canvas: var(--color-graphite-950);
+    --kit-canvas-dot: oklch(100% 0 0 / 0.08);
+    --kit-border: var(--color-graphite-750);
+    --kit-border-subtle: var(--color-graphite-800);
+    --kit-border-control: var(--color-graphite-500);
+    --kit-text: var(--color-graphite-200);
+    --kit-text-highlighted: var(--color-graphite-0);
+    --kit-text-muted: var(--color-graphite-400);
+    --kit-text-subtle: var(--color-graphite-450);
+    --kit-primary: var(--color-iris-400);
+    --kit-primary-hover: var(--color-iris-300);
+    --kit-primary-subtle: color-mix(in oklch, var(--color-iris-400) 14%, transparent);
+    --kit-primary-border: color-mix(in oklch, var(--color-iris-400) 35%, transparent);
+    --kit-on-primary: var(--color-graphite-900);
+    --kit-text-inverted: var(--color-graphite-900);
+    --kit-annotation: var(--color-marker-400);
+    --kit-annotation-subtle: color-mix(in oklch, var(--color-marker-400) 14%, transparent);
+    --kit-annotation-border: color-mix(in oklch, var(--color-marker-400) 35%, transparent);
+    --kit-annotation-hover: color-mix(in oklch, var(--color-marker-400) 24%, transparent);
+    --kit-pin: var(--color-marker-400);
+    --kit-on-pin: var(--color-graphite-950);
+    --kit-pin-resolved: var(--color-graphite-500);
+    --kit-on-pin-resolved: var(--color-graphite-0);
+    --kit-success: var(--color-leaf-400);
+    --kit-success-subtle: color-mix(in oklch, var(--color-leaf-400) 14%, transparent);
+    --kit-success-border: color-mix(in oklch, var(--color-leaf-400) 35%, transparent);
+    --kit-warning: var(--color-caution-yellow-400);
+    --kit-warning-subtle: color-mix(in oklch, var(--color-caution-yellow-400) 14%, transparent);
+    --kit-warning-border: color-mix(in oklch, var(--color-caution-yellow-400) 35%, transparent);
+    --kit-danger: var(--color-fault-red-400);
+    --kit-danger-subtle: color-mix(in oklch, var(--color-fault-red-400) 14%, transparent);
+    --kit-danger-border: color-mix(in oklch, var(--color-fault-red-400) 35%, transparent);
+    --kit-danger-hover: color-mix(in oklch, var(--color-fault-red-400) 24%, transparent);
+    --kit-info: var(--color-notice-blue-400);
+    --kit-info-subtle: color-mix(in oklch, var(--color-notice-blue-400) 14%, transparent);
+    --kit-info-border: color-mix(in oklch, var(--color-notice-blue-400) 35%, transparent);
+    --kit-brand: var(--color-brand-600);
+    --kit-brand-hover: var(--color-brand-700);
+    --kit-on-brand: var(--color-graphite-0);
+    --kit-ring: var(--color-iris-400);
+    --kit-input-bg: var(--color-graphite-900);
+    --kit-hover-bg: var(--color-graphite-850);
+    --kit-shadow: none;
+    --kit-shadow-frame: 0 0 0 1px var(--color-graphite-750), 0 16px 40px -8px oklch(0% 0 0 / 0.55);
+    --kit-shadow-overlay: 0 0 0 1px var(--color-graphite-750), 0 12px 32px -4px oklch(0% 0 0 / 0.6);
+    --kit-shadow-modal: 0 0 0 1px var(--color-graphite-750), 0 24px 64px -12px oklch(0% 0 0 / 0.7);
+    color-scheme: dark;
+  }
+}

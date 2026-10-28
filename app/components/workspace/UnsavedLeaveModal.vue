@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useI18n } from '#imports'
+import KitButton from '~/components/kit/ui/Button.vue'
 
 /** "Leave without saving?" for the Workspace authoring pages (brief g, section 7). */
 const open = defineModel<boolean>('open', { required: true })
@@ -18,20 +19,18 @@ const { t } = useI18n()
   >
     <template #footer>
       <div class="flex w-full justify-end gap-2">
-        <UButton
-          color="neutral"
+        <KitButton
           variant="outline"
           @click="emit('stay')"
         >
           {{ t('authoring.leave.stay') }}
-        </UButton>
-        <UButton
-          color="error"
-          variant="soft"
+        </KitButton>
+        <KitButton
+          variant="danger"
           @click="emit('leave')"
         >
           {{ t('authoring.leave.discard') }}
-        </UButton>
+        </KitButton>
       </div>
     </template>
   </UModal>

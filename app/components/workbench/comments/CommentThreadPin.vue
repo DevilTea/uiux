@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import { useI18n } from '#imports'
 import { useWorkbench } from '../../../composables/useWorkbench'
 import { useCanvasComments } from '../../../composables/useCanvasComments'
-import CommentPin from './CommentPin.vue'
+import CommentPin from '~/components/kit/ui/CommentPin.vue'
 
 /**
  * One thread's pin on the canvas. It derives its own look from the thread (each flag is its own
@@ -44,7 +44,7 @@ const draggable = computed(() => props.draggableOnCanvas && comments.canComment.
     :variant="meta?.resolved ? 'resolved' : 'default'"
     :badge="meta?.badge"
     :initials="meta?.initials"
-    :agent="meta?.agent"
+    :actor="meta?.agent ? 'agent' : undefined"
     :open="open"
     :lift="lift"
     :fresh="fresh"

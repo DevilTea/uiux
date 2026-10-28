@@ -1,0 +1,17 @@
+{
+	"name": "@deviltea/uiux-dogfood-kit",
+	"private": true,
+	"type": "module",
+	"description": "The dogfood Product Kit: Kit components (src/ui), the one token source (src/tokens) and the reference Adapter that wraps them.",
+	"peerDependencies": {
+		"vue": "^3.5.0"
+	},
+	"uiux": {
+		"output": "dist",
+		"build": {
+			"command": ["node", "build.mjs"],
+			"watch": ["node", "build.mjs", "--watch"],
+			"timeoutSeconds": 120
+		}
+	}
+}

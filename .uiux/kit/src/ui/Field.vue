@@ -1,0 +1,179 @@
+<script setup lang="ts">
+import { computed, useAttrs, useId } from 'vue'
+import Icon from './Icon.vue'
+import Kbd from './Kbd.vue'
+
+/**
+ * The Kit field (DESIGN.md "Inputs / Fields"): a text input or textarea with its label, help text
+ * and error text. It is controlled: `modelValue` is the text, and a change leaves it as
+ * `update:modelValue`. The error text shows only while `invalid` is true, and then replaces the help
+ * text. All text arrives as props, so a product's own i18n decides it.
+ *
+ * Attributes: `class`, `style` and `data-*` stay on the root element (a host that identifies the
+ * field, such as a Widget id, finds it there); every other attribute (`autocomplete`, `maxlength`,
+ * `aria-*`, ...) goes to the input or textarea. The control is described by the error text while it
+ * shows, else by the help text.
+ */
+defineOptions({ inheritAttrs: false })
+const props = defineProps<{
+  /** The text; default empty. */
+  modelValue?: string
+  label?: string
+  placeholder?: string
+  help?: string
+  error?: string
+  invalid?: boolean
+  /** Marks the label with `*` and the control as required. */
+  required?: boolean
+  readonly?: boolean
+  disabled?: boolean
+  /** Leading Lucide icon name (icons.ts). */
+  icon?: string
+  /** A keyboard shortcut hint at the end of the field. */
+  kbd?: string
+  /** Mono text, for identities and codes. */
+  mono?: boolean
+  /** Renders a textarea with this many rows. */
+  rows?: number
+  /** 44px target and 16px text, for a touch render context. */
+  touch?: boolean
+  /** The `type` of a single-line input; default `text`. */
+  type?: string
+  name?: string
+  /** The control's id; generated when omitted. */
+  id?: string
+}>()
+
+const emit = defineEmits<{
+  (e: 'update:modelValue', value: string): void
+}>()
+
+const attrs = useAttrs()
+const generatedId = useId()
+const fieldId = computed(() => props.id ?? `kit-field-${generatedId}`)
+const helpId = computed(() => `${fieldId.value}-help`)
+const errorId = computed(() => `${fieldId.value}-error`)
+const showsError = computed(() => Boolean(props.invalid && props.error))
+
+const isRootAttribute = (name: string): boolean => name === 'class' || name === 'style' || name.startsWith('data-')
+/** The attributes that stay on the root. Read at render, since `useAttrs()` is not reactive. */
+function rootAttrs(): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(attrs).filter(([name]) => isRootAttribute(name)))
+}
+/** The attributes for the control, with the ids of the text that describes it added to a given `aria-describedby`. */
+function controlAttrs(): Record<string, unknown> {
+  const own = Object.fromEntries(Object.entries(attrs).filter(([name]) => !isRootAttribute(name)))
+  const describedBy = [own['aria-describedby'], showsError.value ? errorId.value : props.help ? helpId.value : undefined].filter(Boolean).join(' ')
+  return describedBy ? { ...own, 'aria-describedby': describedBy } : own
+}
+
+function onInput(event: Event): void {
+  emit('update:modelValue', (event.target as HTMLInputElement | HTMLTextAreaElement).value)
+}
+</script>
+
+<template>
+  <div
+    class="kit-field"
+    v-bind="rootAttrs()"
+  >
+    <label
+      v-if="label"
+      class="kit-field__label"
+      :class="{ 'is-required': required }"
+      :for="fieldId"
+    >{{ label }}</label>
+    <div class="kit-field__shell">
+      <Icon
+        v-if="icon"
+        :name="icon"
+        :size="16"
+      />
+      <textarea
+        v-if="rows"
+        :id="fieldId"
+        class="kit-field__control"
+        :class="{ 'has-icon': icon, 'has-kbd': kbd, 'is-mono': mono, 'is-invalid': invalid }"
+        :name="name"
+        :rows="rows"
+        :value="modelValue ?? ''"
+        :placeholder="placeholder"
+        :readonly="readonly"
+        :disabled="disabled"
+        :aria-label="label ? undefined : (placeholder || undefined)"
+        :aria-invalid="invalid ? 'true' : undefined"
+        :aria-required="required ? 'true' : undefined"
+        v-bind="controlAttrs()"
+        @input="onInput"
+      />
+      <input
+        v-else
+        :id="fieldId"
+        class="kit-field__control"
+        :class="{ 'has-icon': icon, 'has-kbd': kbd, 'is-mono': mono, 'is-touch': touch, 'is-invalid': invalid }"
+        :type="type ?? 'text'"
+        :name="name"
+        :value="modelValue ?? ''"
+        :placeholder="placeholder"
+        :readonly="readonly"
+        :disabled="disabled"
+        :aria-label="label ? undefined : (placeholder || undefined)"
+        :aria-invalid="invalid ? 'true' : undefined"
+        :aria-required="required ? 'true' : undefined"
+        v-bind="controlAttrs()"
+        @input="onInput"
+      >
+      <Kbd
+        v-if="kbd"
+        :keys="kbd"
+        class="kit-field__kbd"
+      />
+    </div>
+    <p
+      v-if="showsError"
+      :id="errorId"
+      class="kit-field__error"
+      role="alert"
+    >
+      <Icon
+        name="circle-alert"
+        :size="14"
+      /><span>{{ error }}</span>
+    </p>
+    <p
+      v-else-if="help"
+      :id="helpId"
+      class="kit-field__help"
+    >
+      {{ help }}
+    </p>
+  </div>
+</template>
+
+<style>
+.kit-field { display: flex; flex-direction: column; gap: 6px; width: 100%; box-sizing: border-box; min-width: 0; }
+.kit-field__label { font-size: 12px; line-height: 16px; font-weight: 500; color: var(--kit-text); }
+.kit-field__label.is-required::after { content: "*"; margin-inline-start: 2px; color: var(--kit-danger); }
+.kit-field__shell { position: relative; display: flex; align-items: center; width: 100%; }
+.kit-field__shell > .kit-icon { position: absolute; left: 10px; color: var(--kit-text-subtle); pointer-events: none; }
+.kit-field__shell > .kit-field__kbd { position: absolute; right: 6px; }
+.kit-field__control {
+  width: 100%; height: 32px; padding: 5px 10px; font-size: 13px; line-height: 20px; box-sizing: border-box;
+  background-color: var(--kit-input-bg); color: var(--kit-text);
+  border: 1px solid var(--kit-border-control); border-radius: 6px; outline: none; font-family: inherit;
+  min-height: var(--kit-target-min, 0px);
+  transition: border-color 120ms ease;
+}
+textarea.kit-field__control { height: auto; min-height: 64px; resize: none; }
+.kit-field__control.has-icon { padding-left: 32px; }
+.kit-field__control.has-kbd { padding-right: 44px; }
+.kit-field__control.is-mono { font-family: var(--kit-font-mono); font-size: 12px; }
+.kit-field__control.is-touch { height: 44px; font-size: 16px; }
+.kit-field__control:focus { border-color: var(--kit-primary); box-shadow: 0 0 0 1px var(--kit-primary); }
+.kit-field__control::placeholder { color: var(--kit-text-subtle); }
+.kit-field__control[readonly] { background-color: var(--kit-bg-muted); }
+.kit-field__control:disabled { cursor: not-allowed; color: var(--kit-text-subtle); background-color: var(--kit-bg-surface-elevated); }
+.kit-field__control.is-invalid { border-color: var(--kit-danger); }
+.kit-field__help { font-size: 12px; line-height: 18px; color: var(--kit-text-muted); margin: 0; }
+.kit-field__error { display: flex; gap: 6px; align-items: flex-start; font-size: 12px; line-height: 18px; color: var(--kit-danger); margin: 0; }
+</style>

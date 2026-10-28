@@ -4,7 +4,7 @@ import { useI18n } from '#imports'
 import type { DropdownMenuItem } from '@nuxt/ui'
 import { useCanvasComments } from '../../../composables/useCanvasComments'
 import type { PinEdgeSide } from '../../../../src/preview/pin-visibility'
-import CommentPin from './CommentPin.vue'
+import CommentPin from '~/components/kit/ui/CommentPin.vue'
 
 /**
  * A count cluster (pins within 24 px, decision 7) or an edge indicator (pins whose Widget is

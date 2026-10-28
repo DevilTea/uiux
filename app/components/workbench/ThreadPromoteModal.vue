@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { useI18n } from '#imports'
+import KitField from '~/components/kit/ui/Field.vue'
 import type { FetchErrorDetails } from '../../utils/fetch-error'
 import type { PromoteForm } from '../../composables/useThreadActions'
 import { promoteConflictTitleKey, type PromoteMoved } from '../../utils/promote-conflict'
@@ -75,34 +76,24 @@ async function onSubmit(): Promise<void> {
           :data-promote-moved="conflict && moved?.length ? moved.join(' ') : undefined"
           data-promote-error
         />
-        <UFormField
+        <KitField
+          v-model="form.question"
           :label="t('reviews.promote.questionLabel')"
+          :placeholder="t('reviews.promote.questionPlaceholder')"
           required
-        >
-          <UInput
-            v-model="form.question"
-            class="w-full"
-            :placeholder="t('reviews.promote.questionPlaceholder')"
-          />
-        </UFormField>
-        <UFormField
+        />
+        <KitField
+          v-model="form.summary"
           :label="t('reviews.promote.summaryLabel')"
+          :placeholder="t('reviews.promote.summaryPlaceholder')"
           required
-        >
-          <UInput
-            v-model="form.summary"
-            class="w-full"
-            :placeholder="t('reviews.promote.summaryPlaceholder')"
-          />
-        </UFormField>
-        <UFormField :label="t('reviews.promote.rationaleLabel')">
-          <UTextarea
-            v-model="form.rationale"
-            class="w-full"
-            :rows="2"
-            :placeholder="t('reviews.promote.rationalePlaceholder')"
-          />
-        </UFormField>
+        />
+        <KitField
+          v-model="form.rationale"
+          :label="t('reviews.promote.rationaleLabel')"
+          :placeholder="t('reviews.promote.rationalePlaceholder')"
+          :rows="2"
+        />
         <div class="flex justify-end gap-2">
           <UButton
             color="neutral"

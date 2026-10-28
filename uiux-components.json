@@ -1,0 +1,86 @@
+{
+  "components": {
+    "badge": {
+      "componentDigest": "sha256:83f20e9d62f078dc2ff06e456f8d59b5b21ced1072ea92ab1e3f07ea86091c73",
+      "exportedAt": "2026-10-28T07:53:05.092Z",
+      "files": {
+        "app/components/kit/ui/Badge.vue": {
+          "digest": "sha256:6596538e5fbd1ce386bbe9380dce89bb779575936becdf1a51191181d00ad4e3",
+          "source": "src/ui/Badge.vue"
+        }
+      },
+      "target": "app/components/kit"
+    },
+    "button": {
+      "componentDigest": "sha256:c03e934608fcf19bb3b7d3d350a5c93251f1f425dabe39c60294367035a2757c",
+      "exportedAt": "2026-10-28T08:56:36.568Z",
+      "files": {
+        "app/components/kit/ui/Button.vue": {
+          "digest": "sha256:6ed2597f7227e8774695b2f6dfcb8bfcbd5880ed5a164065df2243571abb3278",
+          "source": "src/ui/Button.vue"
+        }
+      },
+      "target": "app/components/kit"
+    },
+    "comment-pin": {
+      "componentDigest": "sha256:de445551a4b079ddebd619888520e495c28a86aa2d119928c5e86601493c27b2",
+      "exportedAt": "2026-10-28T08:56:36.568Z",
+      "files": {
+        "app/components/kit/ui/CommentPin.vue": {
+          "digest": "sha256:b9c6beec80473306bb8da721d4c0694a6a18137d8a29db2d2537f51422ad44b3",
+          "source": "src/ui/CommentPin.vue"
+        }
+      },
+      "target": "app/components/kit"
+    },
+    "field": {
+      "componentDigest": "sha256:2976027104e88a15ce4165947cc079acdf170c705f00bae8ecec9a267e18a44a",
+      "exportedAt": "2026-10-28T08:56:36.568Z",
+      "files": {
+        "app/components/kit/ui/Field.vue": {
+          "digest": "sha256:aaa1ddff20f3e28d9ad4e6ce20fbf542e355bf94929eb7b8612b9017fa04102f",
+          "source": "src/ui/Field.vue"
+        }
+      },
+      "target": "app/components/kit"
+    },
+    "icon": {
+      "componentDigest": "sha256:060071323dc4d9cbfe2a11c9c4b8c7bf395fa3f790bb7d429a190cdcfe93c0f1",
+      "exportedAt": "2026-10-28T07:53:05.092Z",
+      "files": {
+        "app/components/kit/ui/Icon.vue": {
+          "digest": "sha256:d4bb0289b546a97391181a97b9e209ca82aae324ad89eb760ca30f3c91c649d2",
+          "source": "src/ui/Icon.vue"
+        },
+        "app/components/kit/ui/icons.ts": {
+          "digest": "sha256:416ea01de30d403330baa00e3ceaa8b829a4ebc71abfa856f62205d4abe46c5d",
+          "source": "src/ui/icons.ts"
+        }
+      },
+      "target": "app/components/kit"
+    },
+    "kbd": {
+      "componentDigest": "sha256:7d8fff91c5a31a93b194ff947b0696257b3dce0f89087358a054468a8554eaf7",
+      "exportedAt": "2026-10-28T07:47:56.259Z",
+      "files": {
+        "app/components/kit/ui/Kbd.vue": {
+          "digest": "sha256:3dec47657347599ab7c3cf6edd1f2c069b2f7f5f55e3f4ed2f60f5e161d50844",
+          "source": "src/ui/Kbd.vue"
+        }
+      },
+      "target": "app/components/kit"
+    },
+    "tokens": {
+      "componentDigest": "sha256:2e9e0f87ff3789e5ef6fb306b47ffaae2651b1dac69bf06f0b93bff23c1a5420",
+      "exportedAt": "2026-10-28T08:56:36.568Z",
+      "files": {
+        "app/components/kit/tokens/tokens.css": {
+          "digest": "sha256:c583ec5e189a04bac93970b3ebafcc2fcbd943fa5e0b0cab9f38a207f6d338ab",
+          "source": "src/tokens/tokens.css"
+        }
+      },
+      "target": "app/components/kit"
+    }
+  },
+  "formatVersion": 1
+}
