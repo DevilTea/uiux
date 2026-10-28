@@ -49,6 +49,8 @@
 		"check": "pnpm run spec:validate && pnpm run design:tokens --check && pnpm run lint && pnpm run typecheck && pnpm run test && pnpm run kit:diff && pnpm run smoke:package && pnpm run smoke:server",
 		"design:tokens": "node scripts/design-tokens.mjs",
 		"dev": "nuxt dev --host 127.0.0.1",
+		"dogfood:guard": "node ./scripts/dogfood-guard.mjs",
+		"dogfood:worktree": "node ./scripts/dogfood-worktree.mjs",
 		"kit:build": "node .uiux/kit/build.mjs",
 		"kit:diff": "node bin/uiux.mjs components diff --check --workspace .uiux",
 		"lint": "eslint . --max-warnings=0",

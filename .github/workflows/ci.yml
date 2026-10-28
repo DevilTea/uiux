@@ -4,10 +4,40 @@ on:
   push:
     branches: [main]
   pull_request:
+    # labeled and unlabeled rerun the dogfood guard, whose history check depends on the dogfood-history label.
+    types: [opened, synchronize, reopened, labeled, unlabeled]
   workflow_dispatch:
 
 jobs:
+  # Dogfood guards (docs/dogfood-worktree.md): a PR adds no .uiux/history/** file and no Evidence
+  # blob that `uiux artifacts gc --dry-run` (empty UIUX_HOME) would collect. A PR labeled
+  # dogfood-history (applied only by the owner, whose host commits Baseline Checkpoints) skips the
+  # history check, read from the event payload; the blob check has no escape hatch.
+  dogfood-guard:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.34.4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.20.0
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Dogfood guard
+        if: ${{ !contains(github.event.pull_request.labels.*.name, 'dogfood-history') }}
+        run: pnpm dogfood:guard --base origin/${{ github.base_ref }}
+      - name: "Dogfood guard (dogfood-history label: history check skipped)"
+        if: ${{ contains(github.event.pull_request.labels.*.name, 'dogfood-history') }}
+        run: pnpm dogfood:guard --base origin/${{ github.base_ref }} --allow-history
+
   check:
+    # A label change reruns only the dogfood guard.
+    if: github.event_name != 'pull_request' || (github.event.action != 'labeled' && github.event.action != 'unlabeled')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

@@ -136,13 +136,40 @@ function sortKeys(value: unknown): unknown {
 	return Object.fromEntries(Object.keys(value).sort().map(key => [key, sortKeys((value as Record<string, unknown>)[key])]))
 }
 
-/** The drift states of a copied file (Clause 01a11bb1-8c9b-78a8-b359-c083412d9789). */
-export const DRIFT_STATES = Object.freeze(['unchanged', 'modified', 'upstream', 'diverged', 'missing', 'removed'] as const)
+/** The drift states of a file (Clause 01a11bb1-8c9b-78a8-b359-c083412d9789). */
+export const DRIFT_STATES = Object.freeze(['unchanged', 'modified', 'upstream', 'diverged', 'missing', 'removed', 'added'] as const)
 export type DriftState = typeof DRIFT_STATES[number]
+
+/** The drift states of a recorded file: every state but `added`, which belongs to a file the record does not list. */
+export type RecordedDriftState = Exclude<DriftState, 'added'>
+
+/**
+ * The files that a recorded component's registry entry lists and its copy record entry does not
+ * (state `added`, Clause 01a11bb1-8c9b-78a8-b359-c083412d9789), sorted by path. `declared` is the
+ * entry's `files` (sources relative to `kit/`) and `recorded` the `source` of each recorded file. An
+ * added file lies where `uiux components add` would copy it, under the recorded `target`
+ * (`copyDestination`); a component the entry newly requires adds no file, since only the
+ * component's own `files` are read. `target` is `undefined` when the caller holds none, and `path`
+ * then is `undefined` too.
+ */
+export function addedFiles(input: Readonly<{
+	declared: readonly string[]
+	recorded: Iterable<string>
+	target: string | undefined
+}>): Array<Readonly<{ source: string; path: string | undefined }>> {
+	const recorded = new Set(input.recorded)
+	const result = new Map<string, Readonly<{ source: string; path: string | undefined }>>()
+	for (const source of input.declared) {
+		if (recorded.has(source) || result.has(source)) continue
+		result.set(source, { source, path: input.target === undefined ? undefined : copyDestination(input.target, source) })
+	}
+	const key = (file: Readonly<{ source: string; path: string | undefined }>) => file.path ?? file.source
+	return [...result.values()].sort((a, b) => key(a) < key(b) ? -1 : key(a) > key(b) ? 1 : 0)
+}
 
 /**
  * The drift state of a copied file (Clause 01a11bb1-8c9b-78a8-b359-c083412d9789, Rule
- * 01a11bb1-a630-7c7c-8dd3-5e0a11e4e919): `removed` when its component is no longer in the registry,
+ * 01a11bb1-a630-7c7c-8dd3-5e0a11e4e919), for a file the copy record lists (`addedFiles` finds the `added` ones): `removed` when its component is no longer in the registry,
  * else `missing` when the copy is gone, else the comparison of the copy and of the Workspace original
  * with the recorded digest. An original that is gone, or that the component no longer declares,
  * differs from the record.
@@ -153,7 +180,7 @@ export function driftState(input: Readonly<{
 	copy: string | undefined
 	/** The Workspace original's digest, `undefined` when it is gone, or `removed` when its component is. */
 	original: string | undefined | 'removed'
-}>): DriftState {
+}>): RecordedDriftState {
 	if (input.original === 'removed') return 'removed'
 	if (input.copy === undefined) return 'missing'
 	const modified = input.copy !== input.recorded

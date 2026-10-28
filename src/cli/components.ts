@@ -10,6 +10,7 @@ import { locateKitProject, type KitProject } from '../adapters/kit-registry'
 import { readKitSourceFile, type KitFileReadOptions } from '../adapters/kit-source-files'
 import { componentClosure, componentPackages, componentsRequiring } from '../domain/product-kit/closure'
 import {
+	addedFiles,
 	caseOnlyCollisions,
 	COPY_RECORD_FILENAME,
 	copyDestination,
@@ -754,6 +755,8 @@ async function diffCommand(parsed: ParsedArguments, context: Context): Promise<n
 	// Rule 01a11bb1-a630-…: each recorded file's digest against its copy and its Workspace original.
 	// A copy reached through a symbolic link has no drift state of Clause 01a11bb1-8c9b-…, so it
 	// refuses the whole report, naming the link; the report is printed only once every file has one.
+	// Files that a recorded component's registry entry has since added (state `added`) are not in the
+	// record: they come from the registry, at the path where `add` would copy them under the target.
 	const lines: string[] = []
 	const counts = new Map<DriftState, number>(DRIFT_STATES.map(state => [state, 0]))
 	for (const name of Object.keys(record.components).sort()) {
@@ -770,6 +773,10 @@ async function diffCommand(parsed: ParsedArguments, context: Context): Promise<n
 			const state = driftState({ recorded: digest, copy: copyBytes === undefined ? undefined : await fileDigest(copyBytes), original })
 			counts.set(state, counts.get(state)! + 1)
 			lines.push(`${state.padEnd(9)} ${file} (${name})`)
+		}
+		for (const added of component === undefined ? [] : addedFiles({ declared: component.files, recorded: Object.values(entry.files).map(recorded => recorded.source), target: entry.target })) {
+			counts.set('added', counts.get('added')! + 1)
+			lines.push(`${'added'.padEnd(9)} ${added.path} (${name})`)
 		}
 	}
 	for (const line of lines) context.out(line)
