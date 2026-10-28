@@ -13,7 +13,10 @@
  *    `.uiux/` with an empty `UIUX_HOME`, lists none of the blobs the PR adds (an added blob that
  *    gc would collect is unreferenced, so nothing in the PR needs it).
  *
- * Usage: node scripts/dogfood-guard.mjs [--base <ref>] [--head <ref>]
+ * Usage: node scripts/dogfood-guard.mjs [--base <ref>] [--head <ref>] [--allow-history]
+ * `--allow-history` skips the history guard only (the owner's host legitimately commits Baseline
+ * Checkpoints and history; CI passes it for a PR labeled `dogfood-history`, which only the owner applies).
+ * The blob guard has no escape hatch.
  * `--head` defaults to HEAD. `--base` defaults to `origin/$GITHUB_BASE_REF` in a CI pull request,
  * else `origin/main`, else `main`. The PR's changes are `merge-base(base, head)..head`. Both guards
  * read the committed state of the head, so commit before running them locally. Exit 0 when both
@@ -163,15 +166,18 @@ export function checkBlobs(repo, { from, to, head, uiuxBin }) {
 }
 
 /** Runs both guards; returns `{ ok, lines }` for the caller to print. */
-/** @param {string} repo @param {{ base?: string, head?: string, env?: Record<string, string | undefined>, uiuxBin?: string }} [options] */
-export function runGuard(repo, { base, head = 'HEAD', env, uiuxBin } = {}) {
+/** @param {string} repo @param {{ base?: string, head?: string, env?: Record<string, string | undefined>, uiuxBin?: string, allowHistory?: boolean }} [options] */
+export function runGuard(repo, { base, head = 'HEAD', env, uiuxBin, allowHistory = false } = {}) {
 	const baseRef = resolveBase(repo, { base, env })
 	const from = mergeBase(repo, baseRef, head)
 	const lines = [`dogfood guard: ${baseRef} (merge base ${from.slice(0, 9)}) .. ${head}`]
 	let ok = true
 
 	const history = checkHistory(repo, { from, to: head })
-	if (history.length === 0) {
+	if (allowHistory) {
+		lines.push(`SKIP  history: skipped because --allow-history was given (CI: the PR carries the dogfood-history label, applied only by the owner); the PR adds or changes ${history.length} ${HISTORY_DIR}/ file(s). The blob guard still runs.`)
+	}
+	else if (history.length === 0) {
 		lines.push(`ok    history: the PR adds or changes no ${HISTORY_DIR}/ file`)
 	}
 	else {
@@ -197,14 +203,14 @@ export function runGuard(repo, { base, head = 'HEAD', env, uiuxBin } = {}) {
 async function main() {
 	let values
 	try {
-		values = parseArgs({ options: { base: { type: 'string' }, head: { type: 'string' } }, allowPositionals: false, strict: true }).values
+		values = parseArgs({ options: { base: { type: 'string' }, head: { type: 'string' }, 'allow-history': { type: 'boolean' } }, allowPositionals: false, strict: true }).values
 	}
 	catch (error) {
-		console.error(`dogfood guard: ${error.message}\nUsage: node scripts/dogfood-guard.mjs [--base <ref>] [--head <ref>]`)
+		console.error(`dogfood guard: ${error.message}\nUsage: node scripts/dogfood-guard.mjs [--base <ref>] [--head <ref>] [--allow-history]`)
 		return 2
 	}
 	try {
-		const { ok, lines } = runGuard(git(resolve('.'), ['rev-parse', '--show-toplevel']).trim(), { ...(values.base ? { base: values.base } : {}), ...(values.head ? { head: values.head } : {}) })
+		const { ok, lines } = runGuard(git(resolve('.'), ['rev-parse', '--show-toplevel']).trim(), { ...(values.base ? { base: values.base } : {}), ...(values.head ? { head: values.head } : {}), ...(values['allow-history'] ? { allowHistory: true } : {}) })
 		console.log(lines.join('\n'))
 		return ok ? 0 : 1
 	}

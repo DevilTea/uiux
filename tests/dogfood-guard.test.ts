@@ -135,6 +135,27 @@ describe('dogfood guard: history', () => {
 		expect(checkHistory(repo, { from: 'main', to: 'HEAD' })).toEqual(['.uiux/history/checkpoints/owner.json'])
 	})
 
+	it('skips only the history guard with allowHistory / --allow-history, and says so; the blob guard still fails', async () => {
+		const { repo, persistence } = await repositoryWithBase()
+		await new CheckpointStore(persistence).create(checkpoint(), new Map())
+		commitAll(repo, 'owner commits history')
+		const skipped = runGuard(repo, { base: 'main', allowHistory: true })
+		expect(skipped.ok).toBe(true)
+		expect(skipped.lines.join('\n')).toContain('SKIP  history: skipped because --allow-history was given')
+		expect(skipped.lines.join('\n')).toContain('1 .uiux/history/ file(s)')
+		const cli = guardCli(repo, '--base', 'main', '--allow-history')
+		expect(cli.status, cli.stdout + cli.stderr).toBe(0)
+		expect(cli.stdout).toContain('SKIP  history')
+		expect(guardCli(repo, '--base', 'main').status).toBe(1)
+		// No escape hatch for the blob guard: a collectable blob still fails with the flag.
+		await garbageBlob(persistence, 'unreferenced with history allowed')
+		commitAll(repo, 'adds garbage')
+		const run = runGuard(repo, { base: 'main', allowHistory: true })
+		expect(run.ok).toBe(false)
+		expect(run.lines.join('\n')).toContain('SKIP  history')
+		expect(run.lines.join('\n')).toContain('FAIL  blobs')
+	}, HEAVY_SERVER_SUITE_TIMEOUT_MS)
+
 	it('passes a PR that changes only canonical resources, and one that deletes history', async () => {
 		const { repo } = await repositoryWithBase(async ({ repo: root }) => {
 			mkdirSync(join(root, '.uiux', 'history', 'checkpoints'), { recursive: true })

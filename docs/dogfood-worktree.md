@@ -47,10 +47,12 @@ If another PR changed the same `.uiux/` file first, the merge conflicts at file 
 
 ## CI guards
 
-`pnpm dogfood:guard [--base <ref>] [--head <ref>]` (`scripts/dogfood-guard.mjs`) compares `merge-base(base, head)..head`; `--head` defaults to `HEAD`, `--base` to `origin/$GITHUB_BASE_REF`, else `origin/main`, else `main`. It reads the committed head, so commit first. CI runs it as the `dogfood-guard` job of `.github/workflows/ci.yml` on every pull request (full history checkout).
+`pnpm dogfood:guard [--base <ref>] [--head <ref>] [--allow-history]` (`scripts/dogfood-guard.mjs`) compares `merge-base(base, head)..head`; `--head` defaults to `HEAD`, `--base` to `origin/$GITHUB_BASE_REF`, else `origin/main`, else `main`. It reads the committed head, so commit first. CI runs it as the `dogfood-guard` job of `.github/workflows/ci.yml` on every pull request (full history checkout).
 
 1. History guard: the PR adds or changes no `.uiux/history/**` file. A deletion is allowed.
 2. Blob guard: `uiux artifacts gc --dry-run`, run with an empty `UIUX_HOME` against an export of the head's committed `.uiux/`, lists none of the Evidence blobs the PR adds. A blob the base already holds is not the PR's. When the PR adds no blob, gc is not run.
+
+History escape hatch (history guard only): the owner's host legitimately writes Baseline Checkpoints and history under `.uiux/history/`, and the owner commits them. A PR carrying the `dogfood-history` label skips the history guard in CI (the `dogfood-guard` job also runs on `labeled` and `unlabeled`, and reads the labels from the event payload, so adding or removing the label reruns it); locally the same is `pnpm dogfood:guard --allow-history`. The output then prints `SKIP  history: skipped because --allow-history was given ...` with the number of history files the PR changes. Only the owner applies the `dogfood-history` label; an Agent never does, and an Agent's worktree-authored PR never carries history. The blob guard has no escape hatch. Modified history files are flagged as well as added ones.
 
 Exit codes: 0 both pass, 1 a guard failed (the paths are listed), 2 usage or environment (no base ref, gc refused). The tests are `tests/dogfood-guard.test.ts`; `main` passes both guards (an empty PR, and the last dogfood Evidence commit `9084c39`, whose 48 added blobs are all reached).
 
