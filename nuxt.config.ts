@@ -39,8 +39,15 @@ export default defineNuxtConfig({
 		],
 	},
 	icon: {
-		// Icons the server-unreachable state needs while the icon API is down with the server.
-		clientBundle: { icons: ['lucide:unplug', 'lucide:refresh-cw', 'lucide:loader-circle', 'lucide:circle-alert'] },
+		// Icons never come from the public Iconify API: with `ssr: false` the module defaults to it, and a Workbench that
+		// fetches icons from a third party is not local-first, does not work offline and, when that API is slow or
+		// unreachable, never goes idle (#263). The scan bundles every icon the app names in its sources into the client;
+		// an icon it does not find comes from this server's `/api/_nuxt_icon/:collection` (a public route, Clause
+		// 01a11485-f958-7a99-9970-07cefeb5a51b). The listed icons are the ones the server-unreachable state needs while
+		// that route is down with the server.
+		provider: 'server',
+		fallbackToApi: false,
+		clientBundle: { scan: true, icons: ['lucide:unplug', 'lucide:refresh-cw', 'lucide:loader-circle', 'lucide:circle-alert'] },
 	},
 	css: [
 		'@fontsource-variable/inter/wght.css',

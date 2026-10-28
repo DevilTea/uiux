@@ -96,20 +96,34 @@ export function provideWorkbench(): Workbench {
 		if (state.selectedViewId.value) void state.loadSelectedView(undefined, { quiet: true })
 	})
 
-	/** What the Preview document of the open View renders from, as one comparable string. */
-	function renderSignature(): string {
+	/**
+	 * What the Preview document of the open View renders from, one entry per input. An input the Workbench has not
+	 * read yet (the manifest, a Locale's revision) has no entry.
+	 */
+	function renderInputs(): Readonly<Record<string, string>> | undefined {
 		const view = state.selectedView.value
-		if (!view) return ''
+		if (!view) return undefined
 		const manifest = state.workspace.value?.resource as Record<string, unknown> | undefined
 		const options = state.contextOptions.value
 		const locales = new Set([options.locales.selected, manifest && (manifest.i18n as { defaultLocale?: string } | undefined)?.defaultLocale].filter((code): code is string => !!code))
-		return JSON.stringify([
-			view.key,
-			(view.resource as { ir?: unknown }).ir,
-			(view.resource as { variants?: unknown }).variants,
-			manifest ? [manifest.i18n, manifest.viewports, manifest.themes, manifest.adapters] : null,
-			[...locales].sort().map(code => [code, state.localeRevisions.value[code] ?? null]),
-		])
+		const inputs: Record<string, string> = {
+			view: JSON.stringify([view.key, (view.resource as { ir?: unknown }).ir, (view.resource as { variants?: unknown }).variants]),
+		}
+		if (manifest) inputs.manifest = JSON.stringify([manifest.i18n, manifest.viewports, manifest.themes, manifest.adapters])
+		for (const code of locales) {
+			const revision = state.localeRevisions.value[code]
+			if (revision !== undefined) inputs[`locale:${code}`] = revision
+		}
+		return inputs
+	}
+
+	/**
+	 * Whether an input the Workbench already had changed or went away. An input read for the first time is not a
+	 * change: the first `hello` of a session resyncs every read, and when that resync lands before the page's own
+	 * first reads it would otherwise replace a Preview document that rendered from the same inputs (#263).
+	 */
+	function renderInputsMoved(before: Readonly<Record<string, string>>, after: Readonly<Record<string, string>>): boolean {
+		return Object.entries(before).some(([key, value]) => after[key] !== value)
 	}
 
 	/** Only while a View is open does the Product Kit file matter: only the Preview renders from it. */
@@ -118,13 +132,13 @@ export function provideWorkbench(): Workbench {
 
 	async function applyLiveChanges(batch: LiveBatch): Promise<void> {
 		const viewId = state.selectedView.value?.key
-		const before = renderSignature()
+		const before = renderInputs()
 		const [kitMoved] = await Promise.all([productKitMoved(batch), state.applyLiveChanges(batch)])
-		const after = renderSignature()
+		const after = renderInputs()
 		// A replaced or deleted Asset the View binds is resolved again by a new generation (Rule 01a167f4-48f2-7460-8c12-dfc4cda35cd0).
 		const assetMoved = bindsChangedAsset((state.selectedView.value?.resource as { ir?: unknown } | undefined)?.ir, batch)
 		// Selecting another View meanwhile starts its own generation.
-		if (before && after && (before !== after || kitMoved || assetMoved) && state.selectedView.value?.key === viewId) preview.replaceGeneration()
+		if (before && after && (renderInputsMoved(before, after) || kitMoved || assetMoved) && state.selectedView.value?.key === viewId) preview.replaceGeneration()
 	}
 
 	const workbench: Workbench = {
