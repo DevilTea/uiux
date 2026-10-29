@@ -9,7 +9,7 @@
  *   token sections of DESIGN.md from this file (scripts/design-tokens.mjs).
  *
  * - Layout hook: `--kit-target-min` is not declared here. A product may set it (the Workbench sets its 24px /
- *   44px touch target); Button and Field read it as `var(--kit-target-min, 0px)` for their minimum height.
+ *   44px touch target); Button, Field, Select and Disclosure read it as `var(--kit-target-min, …)` for their minimum height.
  *
  * Structure the generator relies on: the four `@tokens` sections below, in order. The dark and the
  * dark-auto sections must declare the same tokens with the same values (the generator checks it).

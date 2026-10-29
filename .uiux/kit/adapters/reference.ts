@@ -10,6 +10,7 @@ import {
 	STRING_VALUE_CONTRACT_ID,
 	TRANSLATION_RESULT_VALUE_CONTRACT_ID,
 	WIDGET_ID_ATTRIBUTE,
+	type AdapterAssetValue,
 	type AdapterManifest,
 	type AdapterWidgetCatalogEntry,
 	type I18nFieldMapping,
@@ -22,11 +23,23 @@ import './reference.css'
 // The Kit components this Adapter wraps as Widgets (kit/src/ui/). Their styles come after reference.css
 // on purpose: a component's own rules follow the scope rules the wrappers add.
 import KitBadge from '../src/ui/Badge.vue'
+import KitBreadcrumb from '../src/ui/Breadcrumb.vue'
+import KitBreadcrumbItem from '../src/ui/BreadcrumbItem.vue'
 import KitButton from '../src/ui/Button.vue'
+import KitCheckbox from '../src/ui/Checkbox.vue'
+import KitCodeBlock from '../src/ui/CodeBlock.vue'
 import KitCommentPin from '../src/ui/CommentPin.vue'
+import KitDiffItem from '../src/ui/DiffItem.vue'
+import KitDisclosure from '../src/ui/Disclosure.vue'
 import KitField from '../src/ui/Field.vue'
 import KitIcon from '../src/ui/Icon.vue'
 import KitKbd from '../src/ui/Kbd.vue'
+import KitListItem from '../src/ui/ListItem.vue'
+import KitSelect from '../src/ui/Select.vue'
+import KitSelectOption from '../src/ui/SelectOption.vue'
+import KitSkeleton from '../src/ui/Skeleton.vue'
+import KitTable from '../src/ui/Table.vue'
+import KitTableRow from '../src/ui/TableRow.vue'
 
 // ---------------------------------------------------------------------------
 // Render-context helpers (theme, viewport tier, locale) shared by every Widget
@@ -122,6 +135,12 @@ function optionalString(value: unknown): string | null {
 
 function stringOr(value: unknown, fallback: string): string {
 	return typeof value === 'string' ? value : fallback
+}
+
+/** A length as authored: a positive number (px) or a non-empty string (any CSS length); anything else is unset. */
+function lengthOr(value: unknown): number | string | undefined {
+	if (typeof value === 'number') return Number.isFinite(value) && value > 0 ? value : undefined
+	return typeof value === 'string' && value.trim() !== '' ? value : undefined
 }
 
 function stringFromResult(result: DepResult): string {
@@ -276,6 +295,8 @@ export interface StackLayout {
 	/** Literal fill for content inside a previewed View (product swatches, brand marks); chrome uses `surface`. */
 	background?: string
 	radius?: number | string
+	/** Outlines the region as a changed region of a diff: added, removed, modified or moved (chrome, not content). */
+	outline?: 'added' | 'removed' | 'modified' | 'moved'
 }
 
 export interface StackInterfaces {
@@ -286,7 +307,7 @@ export interface StackInterfaces {
 	slots: 'content'
 	state: { visible: boolean }
 	properties: {
-		layout: { style: CssStyle; surface: string; hidden: boolean; overlay: boolean; card: boolean }
+		layout: { style: CssStyle; surface: string; hidden: boolean; overlay: boolean; card: boolean; outline: string }
 		theme: string
 	}
 }
@@ -331,6 +352,7 @@ export const stackPlugin = createWidgetPlugin('Stack')
 			visible: { type: 'boolean' },
 			background: { type: 'string' },
 			radius: { type: ['number', 'string'] },
+			outline: { enum: ['added', 'removed', 'modified', 'moved'] },
 		}),
 		validate: (c): c is StackInterfaces['config']['raw'] => isConfigOrOmitted(c),
 		resolve: raw => splitResponsive<StackLayout>(raw),
@@ -379,6 +401,7 @@ export const stackPlugin = createWidgetPlugin('Stack')
 					hidden: Boolean(layout.hidden),
 					overlay: Boolean(layout.overlay),
 					card: Boolean(layout.card),
+					outline: layout.outline ?? '',
 				}
 			},
 		})
@@ -404,6 +427,7 @@ export const StackRenderer = defineComponent({
 					`surface-${layout?.surface ?? 'none'}`,
 					layout?.overlay ? 'is-overlay' : '',
 					layout?.card ? 'is-card' : '',
+					layout?.outline ? `is-outline-${layout.outline}` : '',
 					layout?.hidden || !state.visible.value ? 'uiux-ref-hidden' : '',
 				],
 				style: layout?.style,
@@ -903,6 +927,8 @@ export interface BadgeInterfaces {
 			tone?: BadgeTone
 			variant?: 'subtle' | 'soft' | 'solid' | 'outline' | 'mono' | 'count'
 			icon?: string
+			/** Spins the icon, for work in progress. */
+			spin?: boolean
 			responsive?: Responsive<BadgePresentation>
 		}) | null
 		resolved: {
@@ -912,6 +938,7 @@ export interface BadgeInterfaces {
 			tone: string
 			variant: string
 			icon: string
+			spin: boolean
 			base: BadgePresentation
 			responsive?: Responsive<BadgePresentation>
 		}
@@ -927,6 +954,7 @@ export interface BadgeInterfaces {
 		tone: string
 		variant: string
 		icon: string
+		spin: boolean
 		hidden: boolean
 		theme: string
 	}
@@ -944,11 +972,12 @@ export const badgePlugin = createWidgetPlugin('Badge')
 			tone: { enum: ['neutral', 'primary', 'annotation', 'success', 'warning', 'danger', 'info'] },
 			variant: { enum: ['subtle', 'soft', 'solid', 'outline', 'mono', 'count'] },
 			icon: { type: 'string' },
+			spin: { type: 'boolean' },
 			hidden: { type: 'boolean' },
 		}),
 		validate: (c): c is BadgeInterfaces['config']['raw'] => isConfigOrOmitted(c),
 		resolve: (raw) => {
-			const { label, labelKey, value, tone, variant, icon, ...presentation } = raw ?? {}
+			const { label, labelKey, value, tone, variant, icon, spin, ...presentation } = raw ?? {}
 			return {
 				label: typeof label === 'string' ? label : '',
 				labelKey: optionalString(labelKey),
@@ -956,6 +985,7 @@ export const badgePlugin = createWidgetPlugin('Badge')
 				tone: tone ?? 'neutral',
 				variant: variant ?? 'subtle',
 				icon: typeof icon === 'string' ? icon : '',
+				spin: Boolean(spin),
 				...splitResponsive<BadgePresentation>(presentation),
 			}
 		},
@@ -1011,6 +1041,7 @@ export const badgePlugin = createWidgetPlugin('Badge')
 		.tone({ compute: ({ config }) => config.tone })
 		.variant({ compute: ({ config }) => config.variant })
 		.icon({ compute: ({ config }) => config.icon })
+		.spin({ compute: ({ config }) => config.spin })
 		.hidden({
 			registerDeps: viewportDeps,
 			compute: ({ config, deps }) => Boolean(cascade(config.base, config.responsive, tierOf(readViewport(deps.viewport()))).hidden),
@@ -1031,6 +1062,7 @@ export const BadgeRenderer = defineComponent({
 			tone: props.tone.value as BadgeTone,
 			variant: props.variant.value as BadgeVariant,
 			icon: props.icon.value || undefined,
+			spin: Boolean(props.spin.value),
 			class: [
 				'uiux-ref-scope',
 				props.theme.value,
@@ -1062,6 +1094,8 @@ export interface TextInputInterfaces {
 			error?: string
 			errorKey?: string
 			invalid?: boolean
+			/** Marks the label with `*` and the control as required. */
+			required?: boolean
 			icon?: string
 			kbd?: string
 			mono?: boolean
@@ -1081,6 +1115,7 @@ export interface TextInputInterfaces {
 			error: string
 			errorKey: string | null
 			invalid: boolean
+			required: boolean
 			icon: string
 			kbd: string
 			mono: boolean
@@ -1103,7 +1138,7 @@ export interface TextInputInterfaces {
 		errorResult: TranslationResult
 		error: string
 		readOnly: boolean
-		presentation: { hidden: boolean; touch: boolean; kbd: string; icon: string; mono: boolean; rows: number }
+		presentation: { hidden: boolean; touch: boolean; kbd: string; icon: string; mono: boolean; rows: number; required: boolean }
 		theme: string
 	}
 }
@@ -1125,6 +1160,7 @@ export const textInputPlugin = createWidgetPlugin('TextInput')
 			error: { type: 'string' },
 			errorKey: { type: 'string' },
 			invalid: { type: 'boolean' },
+			required: { type: 'boolean' },
 			icon: { type: 'string' },
 			kbd: { type: 'string' },
 			mono: { type: 'boolean' },
@@ -1134,7 +1170,7 @@ export const textInputPlugin = createWidgetPlugin('TextInput')
 		}),
 		validate: (c): c is TextInputInterfaces['config']['raw'] => isConfigOrOmitted(c),
 		resolve: (raw) => {
-			const { value, placeholder, placeholderKey, readOnly, label, labelKey, help, helpKey, error, errorKey, invalid, icon, kbd, mono, rows, ...presentation } = raw ?? {}
+			const { value, placeholder, placeholderKey, readOnly, label, labelKey, help, helpKey, error, errorKey, invalid, required, icon, kbd, mono, rows, ...presentation } = raw ?? {}
 			return {
 				value: typeof value === 'string' ? value : '',
 				placeholder: typeof placeholder === 'string' ? placeholder : '',
@@ -1147,6 +1183,7 @@ export const textInputPlugin = createWidgetPlugin('TextInput')
 				error: typeof error === 'string' ? error : '',
 				errorKey: optionalString(errorKey),
 				invalid: Boolean(invalid),
+				required: Boolean(required),
 				icon: typeof icon === 'string' ? icon : '',
 				kbd: typeof kbd === 'string' ? kbd : '',
 				mono: Boolean(mono),
@@ -1188,6 +1225,7 @@ export const textInputPlugin = createWidgetPlugin('TextInput')
 					icon: config.icon,
 					mono: config.mono,
 					rows: config.rows,
+					required: config.required,
 				}
 			},
 		})
@@ -1213,6 +1251,7 @@ export const TextInputRenderer = defineComponent({
 				help: props.help.value ?? '',
 				error: props.error.value ?? '',
 				invalid: Boolean(state.invalid.value),
+				required: Boolean(presentation?.required),
 				readonly: Boolean(props.readOnly.value),
 				icon: presentation?.icon || undefined,
 				kbd: presentation?.kbd || undefined,
@@ -2953,26 +2992,29 @@ const ALERT_ICON: Record<AlertTone, string> = { info: 'info', success: 'circle-c
 
 export interface AlertInterfaces {
 	config: {
-		raw: ({ tone?: AlertTone; icon?: string; title?: string; titleKey?: string; description?: string; descriptionKey?: string; toast?: boolean; visible?: boolean }) | null
-		resolved: { tone: AlertTone; icon: string; title: string; titleKey: string | null; description: string; descriptionKey: string | null; toast: boolean; visible: boolean }
+		raw: ({ tone?: AlertTone; icon?: string; title?: string; titleKey?: string; description?: string; descriptionKey?: string; toast?: boolean; visible?: boolean; dismissible?: boolean; dismissLabel?: string; dismissLabelKey?: string }) | null
+		resolved: { tone: AlertTone; icon: string; title: string; titleKey: string | null; description: string; descriptionKey: string | null; toast: boolean; visible: boolean; dismissible: boolean; dismissLabel: string; dismissLabelKey: string | null }
 	}
 	slots: 'actions'
 	state: { visible: boolean }
+	events: { dismiss: readonly [] }
 	properties: {
 		titleResult: TranslationResult
 		title: string
 		descriptionResult: TranslationResult
 		description: string
-		look: { tone: AlertTone; icon: string; toast: boolean }
+		dismissLabelResult: TranslationResult
+		dismissLabel: string
+		look: { tone: AlertTone; icon: string; toast: boolean; dismissible: boolean }
 		theme: string
 	}
 }
 
 export const alertPlugin = createWidgetPlugin('Alert')
-	.description('Subtle inline alert with a status icon, title, description and an actions slot; `toast: true` renders the floating toast surface. Author-writable `visible` state drives Variants.')
+	.description('Subtle inline alert with a status icon, title, description and an actions slot; `toast: true` renders the floating toast surface, and `dismissible: true` adds a close button that hides the alert and fires `dismiss`. Author-writable `visible` state drives Variants.')
 	.interfaces<AlertInterfaces>()
 	.config({
-		description: 'Alert configuration. `title` and `description` accept `$i18n` bindings (lowered to `titleKey`, `descriptionKey`).',
+		description: 'Alert configuration. `title`, `description` and `dismissLabel` accept `$i18n` bindings (lowered to `titleKey`, `descriptionKey`, `dismissLabelKey`).',
 		schema: configSchema({
 			tone: { enum: ['info', 'success', 'warning', 'danger', 'annotation'] },
 			icon: { type: 'string' },
@@ -2980,6 +3022,8 @@ export const alertPlugin = createWidgetPlugin('Alert')
 			description: { type: 'string' }, descriptionKey: { type: 'string' },
 			toast: { type: 'boolean' },
 			visible: { type: 'boolean' },
+			dismissible: { type: 'boolean' },
+			dismissLabel: { type: 'string' }, dismissLabelKey: { type: 'string' },
 		}),
 		validate: (c): c is AlertInterfaces['config']['raw'] => isConfigOrOmitted(c),
 		resolve: raw => ({
@@ -2991,6 +3035,9 @@ export const alertPlugin = createWidgetPlugin('Alert')
 			descriptionKey: optionalString(raw?.descriptionKey),
 			toast: Boolean(raw?.toast),
 			visible: raw?.visible === undefined ? true : Boolean(raw.visible),
+			dismissible: Boolean(raw?.dismissible),
+			dismissLabel: stringOr(raw?.dismissLabel, 'Dismiss'),
+			dismissLabelKey: optionalString(raw?.dismissLabelKey),
 		}),
 	})
 	.slots({ actions: { description: 'Recovery actions and identity chips' } })
@@ -3000,15 +3047,18 @@ export const alertPlugin = createWidgetPlugin('Alert')
 		.title(translatedText<AlertInterfaces['config']['resolved']>(c => ({ key: c.titleKey, literal: c.title })))
 		.descriptionResult(translatedResult<AlertInterfaces['config']['resolved']>(c => ({ key: c.descriptionKey, literal: c.description })))
 		.description(translatedText<AlertInterfaces['config']['resolved']>(c => ({ key: c.descriptionKey, literal: c.description })))
-		.look({ compute: ({ config }) => ({ tone: config.tone, icon: config.icon || ALERT_ICON[config.tone], toast: config.toast }) })
+		.dismissLabelResult(translatedResult<AlertInterfaces['config']['resolved']>(c => ({ key: c.dismissLabelKey, literal: c.dismissLabel })))
+		.dismissLabel(translatedText<AlertInterfaces['config']['resolved']>(c => ({ key: c.dismissLabelKey, literal: c.dismissLabel })))
+		.look({ compute: ({ config }) => ({ tone: config.tone, icon: config.icon || ALERT_ICON[config.tone], toast: config.toast, dismissible: config.dismissible }) })
 		.theme(themeProperty()),
 	)
+	.events(events => events.dismiss({ description: 'Fired when the dismiss button is pressed; the alert hides itself' }))
 	.done()
 
 export const AlertRenderer = defineComponent({
 	name: 'AlertRenderer',
 	setup() {
-		const { widgetId, WidgetSlot, useState, useProperties } = useWidget(alertPlugin)
+		const { widgetId, WidgetSlot, useState, useProperties, emit } = useWidget(alertPlugin)
 		const state = useState()
 		const props = useProperties()
 		return (): VNode => {
@@ -3024,6 +3074,20 @@ export const AlertRenderer = defineComponent({
 					props.description.value ? h('p', { class: 'uiux-ref-alert-desc' }, props.description.value) : null,
 					h('div', { class: 'uiux-ref-alert-actions' }, [h(WidgetSlot, { name: 'actions' })]),
 				]),
+				look?.dismissible
+					? h(KitButton, {
+							class: 'uiux-ref-alert-dismiss',
+							variant: 'ghost',
+							size: 'sm',
+							iconOnly: true,
+							icon: 'x',
+							label: props.dismissLabel.value ?? '',
+							onClick: () => {
+								state.visible.value = false
+								emit.dismiss()
+							},
+						})
+					: null,
 			])
 		}
 	},
@@ -3106,6 +3170,1552 @@ export const EmptyStateRenderer = defineComponent({
 })
 
 // ---------------------------------------------------------------------------
+// 22. Icon — a Lucide icon from the Kit's curated set (kit/src/ui/Icon.vue)
+// ---------------------------------------------------------------------------
+type IconTone = 'default' | 'muted' | 'subtle' | 'primary' | 'annotation' | 'success' | 'warning' | 'danger' | 'info'
+const ICON_TONES: readonly IconTone[] = ['default', 'muted', 'subtle', 'primary', 'annotation', 'success', 'warning', 'danger', 'info']
+
+export interface IconInterfaces {
+	config: {
+		raw: ({ name?: string; size?: number; tone?: IconTone; label?: string; labelKey?: string }) | null
+		resolved: { name: string; size: number; tone: IconTone; label: string; labelKey: string | null }
+	}
+	properties: {
+		labelResult: TranslationResult
+		label: string
+		look: { name: string; size: number; tone: IconTone }
+		theme: string
+	}
+}
+
+export const iconPlugin = createWidgetPlugin('Icon')
+	.description('A Lucide icon by name from the Kit icon set, with a size and a tone. It is decorative unless it has a `label`, which becomes its accessible name (`role="img"`).')
+	.interfaces<IconInterfaces>()
+	.config({
+		description: 'Icon configuration. `name` is a Lucide icon name without a prefix; an unknown name renders as literal text. `label` accepts an `$i18n` binding (lowered to `labelKey`).',
+		schema: configSchema({
+			name: { type: 'string' },
+			size: { type: 'number' },
+			tone: { enum: [...ICON_TONES] },
+			label: { type: 'string' }, labelKey: { type: 'string' },
+		}),
+		validate: (c): c is IconInterfaces['config']['raw'] => isConfigOrOmitted(c),
+		resolve: raw => ({
+			name: stringOr(raw?.name, ''),
+			size: typeof raw?.size === 'number' && raw.size > 0 ? raw.size : 16,
+			tone: oneOf(raw?.tone, ICON_TONES, 'default'),
+			label: stringOr(raw?.label, ''),
+			labelKey: optionalString(raw?.labelKey),
+		}),
+	})
+	.properties(p => p
+		.labelResult(translatedResult<IconInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
+		.label(translatedText<IconInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
+		.look({ compute: ({ config }) => ({ name: config.name, size: config.size, tone: config.tone }) })
+		.theme(themeProperty()),
+	)
+	.done()
+
+export const IconRenderer = defineComponent({
+	name: 'IconRenderer',
+	setup() {
+		const { widgetId, useProperties } = useWidget(iconPlugin)
+		const props = useProperties()
+		return (): VNode => {
+			const look = props.look.value
+			const label = props.label.value ?? ''
+			return h('span', {
+				[WIDGET_ID_ATTRIBUTE]: widgetId,
+				role: label ? 'img' : undefined,
+				'aria-label': label || undefined,
+				'aria-hidden': label ? undefined : 'true',
+				class: ['uiux-ref-scope', 'uiux-ref-icon', props.theme.value, `tone-${look?.tone ?? 'default'}`],
+			}, [h(KitIcon, { name: look?.name ?? '', size: look?.size ?? 16 })])
+		}
+	},
+})
+
+// ---------------------------------------------------------------------------
+// 23. Skeleton — loading placeholder (kit/src/ui/Skeleton.vue)
+// ---------------------------------------------------------------------------
+export interface SkeletonInterfaces {
+	config: {
+		raw: ({ width?: number | string; height?: number | string; radius?: number | string; label?: string; labelKey?: string }) | null
+		resolved: { width: number | string | undefined; height: number | string | undefined; radius: number | string | undefined; label: string; labelKey: string | null }
+	}
+	properties: {
+		labelResult: TranslationResult
+		label: string
+		size: { width: number | string | undefined; height: number | string | undefined; radius: number | string | undefined }
+		theme: string
+	}
+}
+
+export const skeletonPlugin = createWidgetPlugin('Skeleton')
+	.description('Loading placeholder block with a width, a height and a corner radius. With a `label` it is a named `status` region (`aria-busy`); without one it is hidden from assistive technology. The pulse stops under reduced motion.')
+	.interfaces<SkeletonInterfaces>()
+	.config({
+		description: 'Skeleton configuration. A number is px and a string any CSS length. `label` accepts an `$i18n` binding (lowered to `labelKey`).',
+		schema: configSchema({
+			width: { type: ['number', 'string'] },
+			height: { type: ['number', 'string'] },
+			radius: { type: ['number', 'string'] },
+			label: { type: 'string' }, labelKey: { type: 'string' },
+		}),
+		validate: (c): c is SkeletonInterfaces['config']['raw'] => isConfigOrOmitted(c),
+		resolve: raw => ({
+			width: lengthOr(raw?.width),
+			height: lengthOr(raw?.height),
+			radius: lengthOr(raw?.radius),
+			label: stringOr(raw?.label, ''),
+			labelKey: optionalString(raw?.labelKey),
+		}),
+	})
+	.properties(p => p
+		.labelResult(translatedResult<SkeletonInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
+		.label(translatedText<SkeletonInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
+		.size({ compute: ({ config }) => ({ width: config.width, height: config.height, radius: config.radius }) })
+		.theme(themeProperty()),
+	)
+	.done()
+
+export const SkeletonRenderer = defineComponent({
+	name: 'SkeletonRenderer',
+	setup() {
+		const { widgetId, useProperties } = useWidget(skeletonPlugin)
+		const props = useProperties()
+		return (): VNode => h(KitSkeleton, {
+			[WIDGET_ID_ATTRIBUTE]: widgetId,
+			width: props.size.value?.width,
+			height: props.size.value?.height,
+			radius: props.size.value?.radius,
+			label: props.label.value || undefined,
+			class: ['uiux-ref-scope', props.theme.value],
+		})
+	},
+})
+
+// ---------------------------------------------------------------------------
+// 24. ListItem — one generic row: leading, content, trailing (kit/src/ui/ListItem.vue)
+// ---------------------------------------------------------------------------
+export interface ListItemInterfaces {
+	config: {
+		raw: ({ selected?: boolean; dimmed?: boolean; level?: number; divided?: boolean; interactive?: boolean }) | null
+		resolved: { selected: boolean; dimmed: boolean; level: number; divided: boolean; interactive: boolean }
+	}
+	slots: 'leading' | 'content' | 'trailing'
+	state: { selected: boolean; dimmed: boolean }
+	events: { click: readonly [] }
+	properties: {
+		look: { level: number; divided: boolean; interactive: boolean }
+		theme: string
+	}
+}
+
+export const listItemPlugin = createWidgetPlugin('ListItem')
+	.description('One generic row for lists, timelines, step lists and trees: `leading`, `content` and `trailing` slots, an indent `level`, a `divided` hairline, and author-writable `selected` and `dimmed` states. `interactive` makes the row one focusable, pressable target that fires `click`.')
+	.interfaces<ListItemInterfaces>()
+	.config({
+		description: 'ListItem configuration. `level` is the indent depth (16px per level).',
+		schema: configSchema({
+			selected: { type: 'boolean' },
+			dimmed: { type: 'boolean' },
+			level: { type: 'number' },
+			divided: { type: 'boolean' },
+			interactive: { type: 'boolean' },
+		}),
+		validate: (c): c is ListItemInterfaces['config']['raw'] => isConfigOrOmitted(c),
+		resolve: raw => ({
+			selected: Boolean(raw?.selected),
+			dimmed: Boolean(raw?.dimmed),
+			level: typeof raw?.level === 'number' && raw.level > 0 ? Math.floor(raw.level) : 0,
+			divided: Boolean(raw?.divided),
+			interactive: Boolean(raw?.interactive),
+		}),
+	})
+	.slots({
+		leading: { description: 'An icon, marker or number before the content' },
+		content: { description: 'The row text and any secondary lines' },
+		trailing: { description: 'A badge, time or note after the content' },
+	})
+	.state(state => state
+		.selected({ authorWritable: true, validate: isBoolean, default: ({ config }) => config.selected })
+		.dimmed({ authorWritable: true, validate: isBoolean, default: ({ config }) => config.dimmed }))
+	.properties(p => p
+		.look({ compute: ({ config }) => ({ level: config.level, divided: config.divided, interactive: config.interactive }) })
+		.theme(themeProperty()),
+	)
+	.events(events => events.click({ description: 'Fired when an interactive row is pressed' }))
+	.done()
+
+export const ListItemRenderer = defineComponent({
+	name: 'ListItemRenderer',
+	setup() {
+		const { widgetId, WidgetSlot, useState, useProperties, emit } = useWidget(listItemPlugin)
+		const state = useState()
+		const props = useProperties()
+		return (): VNode => {
+			const look = props.look.value
+			return h(KitListItem, {
+				[WIDGET_ID_ATTRIBUTE]: widgetId,
+				selected: Boolean(state.selected.value),
+				dimmed: Boolean(state.dimmed.value),
+				level: look?.level || undefined,
+				divided: Boolean(look?.divided),
+				interactive: Boolean(look?.interactive),
+				class: ['uiux-ref-scope', props.theme.value],
+				onClick: () => {
+					if (look?.interactive) emit.click()
+				},
+			}, {
+				leading: () => h(WidgetSlot, { name: 'leading' }),
+				content: () => h(WidgetSlot, { name: 'content' }),
+				trailing: () => h(WidgetSlot, { name: 'trailing' }),
+			})
+		}
+	},
+})
+
+// ---------------------------------------------------------------------------
+// 25. Checkbox — native checkbox with a label, a description and a mono meta (kit/src/ui/Checkbox.vue)
+// ---------------------------------------------------------------------------
+export interface CheckboxInterfaces {
+	config: {
+		raw: ({
+			label?: string
+			labelKey?: string
+			description?: string
+			descriptionKey?: string
+			descriptionTone?: 'muted' | 'warning'
+			checked?: boolean
+			indeterminate?: boolean
+			disabled?: boolean
+			meta?: string
+		}) | null
+		resolved: {
+			label: string
+			labelKey: string | null
+			description: string
+			descriptionKey: string | null
+			descriptionTone: 'muted' | 'warning'
+			checked: boolean
+			indeterminate: boolean
+			disabled: boolean
+			meta: string
+		}
+	}
+	state: { checked: boolean; indeterminate: boolean; disabled: boolean }
+	events: { toggle: readonly [] }
+	properties: {
+		labelResult: TranslationResult
+		label: string
+		descriptionResult: TranslationResult
+		description: string
+		look: { descriptionTone: 'muted' | 'warning'; meta: string }
+		theme: string
+	}
+}
+
+export const checkboxPlugin = createWidgetPlugin('Checkbox')
+	.description('Native checkbox with a translatable label and description, a literal mono `meta` at the end, a `warning` description tone, and author-writable `checked`, `indeterminate` and `disabled` states. A press writes `checked` and fires `toggle`.')
+	.interfaces<CheckboxInterfaces>()
+	.config({
+		description: 'Checkbox configuration. `label` and `description` accept `$i18n` bindings (lowered to `labelKey`, `descriptionKey`). `meta` is literal mono text such as an id or a count.',
+		schema: configSchema({
+			label: { type: 'string' }, labelKey: { type: 'string' },
+			description: { type: 'string' }, descriptionKey: { type: 'string' },
+			descriptionTone: { enum: ['muted', 'warning'] },
+			checked: { type: 'boolean' },
+			indeterminate: { type: 'boolean' },
+			disabled: { type: 'boolean' },
+			meta: { type: 'string' },
+		}),
+		validate: (c): c is CheckboxInterfaces['config']['raw'] => isConfigOrOmitted(c),
+		resolve: raw => ({
+			label: stringOr(raw?.label, ''),
+			labelKey: optionalString(raw?.labelKey),
+			description: stringOr(raw?.description, ''),
+			descriptionKey: optionalString(raw?.descriptionKey),
+			descriptionTone: oneOf(raw?.descriptionTone, ['muted', 'warning'] as const, 'muted'),
+			checked: Boolean(raw?.checked),
+			indeterminate: Boolean(raw?.indeterminate),
+			disabled: Boolean(raw?.disabled),
+			meta: stringOr(raw?.meta, ''),
+		}),
+	})
+	.state(state => state
+		.checked({ authorWritable: true, validate: isBoolean, default: ({ config }) => config.checked })
+		.indeterminate({ authorWritable: true, validate: isBoolean, default: ({ config }) => config.indeterminate })
+		.disabled({ authorWritable: true, validate: isBoolean, default: ({ config }) => config.disabled }))
+	.properties(p => p
+		.labelResult(translatedResult<CheckboxInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
+		.label(translatedText<CheckboxInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
+		.descriptionResult(translatedResult<CheckboxInterfaces['config']['resolved']>(c => ({ key: c.descriptionKey, literal: c.description })))
+		.description(translatedText<CheckboxInterfaces['config']['resolved']>(c => ({ key: c.descriptionKey, literal: c.description })))
+		.look({ compute: ({ config }) => ({ descriptionTone: config.descriptionTone, meta: config.meta }) })
+		.theme(themeProperty()),
+	)
+	.events(events => events.toggle({ description: 'Fired when the user toggles the checkbox' }))
+	.done()
+
+export const CheckboxRenderer = defineComponent({
+	name: 'CheckboxRenderer',
+	setup() {
+		const { widgetId, useState, useProperties, emit } = useWidget(checkboxPlugin)
+		const state = useState()
+		const props = useProperties()
+		return (): VNode => {
+			const look = props.look.value
+			return h(KitCheckbox, {
+				[WIDGET_ID_ATTRIBUTE]: widgetId,
+				id: `${widgetId}-checkbox`,
+				label: props.label.value || undefined,
+				description: props.description.value || undefined,
+				descriptionTone: look?.descriptionTone,
+				checked: Boolean(state.checked.value),
+				indeterminate: Boolean(state.indeterminate.value),
+				disabled: Boolean(state.disabled.value),
+				meta: look?.meta || undefined,
+				class: ['uiux-ref-scope', props.theme.value],
+				onToggle: (checked: boolean) => {
+					if (state.disabled.value) return
+					state.checked.value = checked
+					state.indeterminate.value = false
+					emit.toggle()
+				},
+			})
+		}
+	},
+})
+
+// ---------------------------------------------------------------------------
+// 26. Select & SelectOption — select trigger and its open listbox (kit/src/ui/Select.vue, SelectOption.vue)
+// ---------------------------------------------------------------------------
+/** What a `multiple` select shows for its chosen values: the Workbench's own select joins them with a comma and a space. */
+function selectedText(value: unknown): string {
+	if (Array.isArray(value)) return value.filter((entry): entry is string | number => typeof entry === 'string' || typeof entry === 'number').map(String).join(', ')
+	return typeof value === 'string' || typeof value === 'number' ? String(value) : ''
+}
+
+export interface SelectInterfaces {
+	config: {
+		raw: ({
+			label?: string
+			labelKey?: string
+			help?: string
+			helpKey?: string
+			placeholder?: string
+			placeholderKey?: string
+			required?: boolean
+			multiple?: boolean
+			value?: string | number | ReadonlyArray<string | number>
+			invalid?: boolean
+			disabled?: boolean
+			open?: boolean
+		}) | null
+		resolved: {
+			label: string
+			labelKey: string | null
+			help: string
+			helpKey: string | null
+			placeholder: string
+			placeholderKey: string | null
+			required: boolean
+			multiple: boolean
+			value: string
+			invalid: boolean
+			disabled: boolean
+			open: boolean
+		}
+	}
+	slots: 'options'
+	state: { open: boolean; value: string; invalid: boolean }
+	events: { toggle: readonly [] }
+	properties: {
+		labelResult: TranslationResult
+		label: string
+		helpResult: TranslationResult
+		help: string
+		placeholderResult: TranslationResult
+		placeholder: string
+		look: { required: boolean; multiple: boolean; disabled: boolean }
+		theme: string
+	}
+}
+
+export const selectPlugin = createWidgetPlugin('Select')
+	.description('Select trigger with a translatable label, help and placeholder, the chosen value as literal text (a multiple select joins its values with a comma and a space), required, invalid and disabled flags, and an author-writable `open` state that shows its SelectOption children as a listbox panel. The trigger fires `toggle`.')
+	.interfaces<SelectInterfaces>()
+	.config({
+		description: 'Select configuration. `label`, `help` and `placeholder` accept `$i18n` bindings (lowered to `labelKey`, `helpKey`, `placeholderKey`). `value` is the chosen value as shown: a string, or a list of strings for `multiple`.',
+		schema: configSchema({
+			label: { type: 'string' }, labelKey: { type: 'string' },
+			help: { type: 'string' }, helpKey: { type: 'string' },
+			placeholder: { type: 'string' }, placeholderKey: { type: 'string' },
+			required: { type: 'boolean' },
+			multiple: { type: 'boolean' },
+			value: { type: ['string', 'number', 'array'], items: { type: ['string', 'number'] } },
+			invalid: { type: 'boolean' },
+			disabled: { type: 'boolean' },
+			open: { type: 'boolean' },
+		}),
+		validate: (c): c is SelectInterfaces['config']['raw'] => isConfigOrOmitted(c),
+		resolve: raw => ({
+			label: stringOr(raw?.label, ''),
+			labelKey: optionalString(raw?.labelKey),
+			help: stringOr(raw?.help, ''),
+			helpKey: optionalString(raw?.helpKey),
+			placeholder: stringOr(raw?.placeholder, ''),
+			placeholderKey: optionalString(raw?.placeholderKey),
+			required: Boolean(raw?.required),
+			multiple: Boolean(raw?.multiple),
+			value: selectedText(raw?.value),
+			invalid: Boolean(raw?.invalid),
+			disabled: Boolean(raw?.disabled),
+			open: Boolean(raw?.open),
+		}),
+	})
+	.slots({ options: { description: 'SelectOption widgets, shown as the listbox panel while `open`' } })
+	.state(state => state
+		.open({ authorWritable: true, validate: isBoolean, default: ({ config }) => config.open })
+		.value({ authorWritable: true, validate: (v): v is string => typeof v === 'string', default: ({ config }) => config.value })
+		.invalid({ authorWritable: true, validate: isBoolean, default: ({ config }) => config.invalid }))
+	.properties(p => p
+		.labelResult(translatedResult<SelectInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
+		.label(translatedText<SelectInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
+		.helpResult(translatedResult<SelectInterfaces['config']['resolved']>(c => ({ key: c.helpKey, literal: c.help })))
+		.help(translatedText<SelectInterfaces['config']['resolved']>(c => ({ key: c.helpKey, literal: c.help })))
+		.placeholderResult(translatedResult<SelectInterfaces['config']['resolved']>(c => ({ key: c.placeholderKey, literal: c.placeholder })))
+		.placeholder(translatedText<SelectInterfaces['config']['resolved']>(c => ({ key: c.placeholderKey, literal: c.placeholder })))
+		.look({ compute: ({ config }) => ({ required: config.required, multiple: config.multiple, disabled: config.disabled }) })
+		.theme(themeProperty()),
+	)
+	.events(events => events.toggle({ description: 'Fired when the user presses the trigger to open or close the panel' }))
+	.done()
+
+export const SelectRenderer = defineComponent({
+	name: 'SelectRenderer',
+	setup() {
+		const { widgetId, WidgetSlot, useState, useProperties, emit } = useWidget(selectPlugin)
+		const state = useState()
+		const props = useProperties()
+		return (): VNode => {
+			const look = props.look.value
+			return h(KitSelect, {
+				[WIDGET_ID_ATTRIBUTE]: widgetId,
+				id: `${widgetId}-select`,
+				label: props.label.value || undefined,
+				help: props.help.value || undefined,
+				placeholder: props.placeholder.value || undefined,
+				value: state.value.value || undefined,
+				required: Boolean(look?.required),
+				multiple: Boolean(look?.multiple),
+				invalid: Boolean(state.invalid.value),
+				disabled: Boolean(look?.disabled),
+				open: Boolean(state.open.value),
+				class: ['uiux-ref-scope', props.theme.value],
+				onToggle: () => {
+					if (look?.disabled) return
+					state.open.value = !state.open.value
+					emit.toggle()
+				},
+			}, { default: () => h(WidgetSlot, { name: 'options' }) })
+		}
+	},
+})
+
+export interface SelectOptionInterfaces {
+	config: {
+		raw: ({ label?: string; labelKey?: string; selected?: boolean; disabled?: boolean }) | null
+		resolved: { label: string; labelKey: string | null; selected: boolean; disabled: boolean }
+	}
+	state: { selected: boolean }
+	events: { click: readonly [] }
+	properties: {
+		labelResult: TranslationResult
+		label: string
+		disabled: boolean
+		theme: string
+	}
+}
+
+export const selectOptionPlugin = createWidgetPlugin('SelectOption')
+	.description('One option of a Select listbox: a translatable label, a check while `selected`, and a `disabled` flag. A press fires `click`; the author-writable `selected` state drives Variants.')
+	.interfaces<SelectOptionInterfaces>()
+	.config({
+		description: 'SelectOption configuration. `label` accepts an `$i18n` binding (lowered to `labelKey`).',
+		schema: configSchema({
+			label: { type: 'string' }, labelKey: { type: 'string' },
+			selected: { type: 'boolean' },
+			disabled: { type: 'boolean' },
+		}),
+		validate: (c): c is SelectOptionInterfaces['config']['raw'] => isConfigOrOmitted(c),
+		resolve: raw => ({
+			label: stringOr(raw?.label, ''),
+			labelKey: optionalString(raw?.labelKey),
+			selected: Boolean(raw?.selected),
+			disabled: Boolean(raw?.disabled),
+		}),
+	})
+	.state(state => state.selected({ authorWritable: true, validate: isBoolean, default: ({ config }) => config.selected }))
+	.properties(p => p
+		.labelResult(translatedResult<SelectOptionInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
+		.label(translatedText<SelectOptionInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
+		.disabled({ compute: ({ config }) => config.disabled })
+		.theme(themeProperty()),
+	)
+	.events(events => events.click({ description: 'Fired when an enabled option is pressed' }))
+	.done()
+
+export const SelectOptionRenderer = defineComponent({
+	name: 'SelectOptionRenderer',
+	setup() {
+		const { widgetId, useState, useProperties, emit } = useWidget(selectOptionPlugin)
+		const state = useState()
+		const props = useProperties()
+		return (): VNode => h(KitSelectOption, {
+			[WIDGET_ID_ATTRIBUTE]: widgetId,
+			label: props.label.value ?? '',
+			selected: Boolean(state.selected.value),
+			disabled: Boolean(props.disabled.value),
+			class: ['uiux-ref-scope', props.theme.value],
+			onClick: () => {
+				if (!props.disabled.value) emit.click()
+			},
+		})
+	},
+})
+
+// ---------------------------------------------------------------------------
+// 27. Disclosure — header button that shows or hides its content (kit/src/ui/Disclosure.vue)
+// ---------------------------------------------------------------------------
+export interface DisclosureInterfaces {
+	config: {
+		raw: ({ label?: string; labelKey?: string; meta?: string | number; open?: boolean }) | null
+		resolved: { label: string; labelKey: string | null; meta: string; open: boolean }
+	}
+	slots: 'content'
+	state: { open: boolean }
+	events: { toggle: readonly [] }
+	properties: {
+		labelResult: TranslationResult
+		label: string
+		meta: string
+		theme: string
+	}
+}
+
+export const disclosurePlugin = createWidgetPlugin('Disclosure')
+	.description('Disclosure: a header button with a chevron, a translatable label and a literal trailing `meta` (a count or a status), above a `content` slot. The author-writable `open` state shows the content; the header press writes it and fires `toggle`.')
+	.interfaces<DisclosureInterfaces>()
+	.config({
+		description: 'Disclosure configuration. `label` accepts an `$i18n` binding (lowered to `labelKey`). `meta` is literal text such as a count.',
+		schema: configSchema({
+			label: { type: 'string' }, labelKey: { type: 'string' },
+			meta: { type: ['string', 'number'] },
+			open: { type: 'boolean' },
+		}),
+		validate: (c): c is DisclosureInterfaces['config']['raw'] => isConfigOrOmitted(c),
+		resolve: raw => ({
+			label: stringOr(raw?.label, ''),
+			labelKey: optionalString(raw?.labelKey),
+			meta: raw?.meta === undefined ? '' : String(raw.meta),
+			open: Boolean(raw?.open),
+		}),
+	})
+	.slots({ content: { description: 'The content the header shows or hides' } })
+	.state(state => state.open({ authorWritable: true, validate: isBoolean, default: ({ config }) => config.open }))
+	.properties(p => p
+		.labelResult(translatedResult<DisclosureInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
+		.label(translatedText<DisclosureInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
+		.meta({ compute: ({ config }) => config.meta })
+		.theme(themeProperty()),
+	)
+	.events(events => events.toggle({ description: 'Fired when the header is pressed to open or close the content' }))
+	.done()
+
+export const DisclosureRenderer = defineComponent({
+	name: 'DisclosureRenderer',
+	setup() {
+		const { widgetId, WidgetSlot, useState, useProperties, emit } = useWidget(disclosurePlugin)
+		const state = useState()
+		const props = useProperties()
+		return (): VNode => h(KitDisclosure, {
+			[WIDGET_ID_ATTRIBUTE]: widgetId,
+			label: props.label.value ?? '',
+			meta: props.meta.value || undefined,
+			open: Boolean(state.open.value),
+			class: ['uiux-ref-scope', props.theme.value],
+			onToggle: () => {
+				state.open.value = !state.open.value
+				emit.toggle()
+			},
+		}, { default: () => h(WidgetSlot, { name: 'content' }) })
+	},
+})
+
+// ---------------------------------------------------------------------------
+// 28. CodeBlock — literal mono text (kit/src/ui/CodeBlock.vue)
+// ---------------------------------------------------------------------------
+export interface CodeBlockInterfaces {
+	config: {
+		raw: ({ code?: string; maxHeight?: number | string; wrap?: boolean; label?: string; labelKey?: string }) | null
+		resolved: { code: string; maxHeight: number | string | undefined; wrap: boolean; label: string; labelKey: string | null }
+	}
+	properties: {
+		labelResult: TranslationResult
+		label: string
+		look: { code: string; maxHeight: number | string | undefined; wrap: boolean }
+		theme: string
+	}
+}
+
+export const codeBlockPlugin = createWidgetPlugin('CodeBlock')
+	.description('Literal text in the mono face (JSON, a diff, a log), shown exactly as authored and never translated. A long line scrolls sideways or wraps; `maxHeight` bounds the block, which then scrolls and is focusable. With a `label` it is a named region.')
+	.interfaces<CodeBlockInterfaces>()
+	.config({
+		description: 'CodeBlock configuration. `code` is literal. `maxHeight` is px as a number or any CSS length. `label` accepts an `$i18n` binding (lowered to `labelKey`).',
+		schema: configSchema({
+			code: { type: 'string' },
+			maxHeight: { type: ['number', 'string'] },
+			wrap: { type: 'boolean' },
+			label: { type: 'string' }, labelKey: { type: 'string' },
+		}),
+		validate: (c): c is CodeBlockInterfaces['config']['raw'] => isConfigOrOmitted(c),
+		resolve: raw => ({
+			code: stringOr(raw?.code, ''),
+			maxHeight: lengthOr(raw?.maxHeight),
+			wrap: Boolean(raw?.wrap),
+			label: stringOr(raw?.label, ''),
+			labelKey: optionalString(raw?.labelKey),
+		}),
+	})
+	.properties(p => p
+		.labelResult(translatedResult<CodeBlockInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
+		.label(translatedText<CodeBlockInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
+		.look({ compute: ({ config }) => ({ code: config.code, maxHeight: config.maxHeight, wrap: config.wrap }) })
+		.theme(themeProperty()),
+	)
+	.done()
+
+export const CodeBlockRenderer = defineComponent({
+	name: 'CodeBlockRenderer',
+	setup() {
+		const { widgetId, useProperties } = useWidget(codeBlockPlugin)
+		const props = useProperties()
+		return (): VNode => h(KitCodeBlock, {
+			[WIDGET_ID_ATTRIBUTE]: widgetId,
+			code: props.look.value?.code ?? '',
+			maxHeight: props.look.value?.maxHeight,
+			wrap: Boolean(props.look.value?.wrap),
+			label: props.label.value || undefined,
+			class: ['uiux-ref-scope', props.theme.value],
+		})
+	},
+})
+
+// ---------------------------------------------------------------------------
+// 29. Table & TableRow — a column grid of rows whose cells are other Widgets (kit/src/ui/Table.vue, TableRow.vue)
+// ---------------------------------------------------------------------------
+export interface TableInterfaces {
+	config: {
+		raw: ({ columns?: string; label?: string; labelKey?: string }) | null
+		resolved: { columns: string; label: string; labelKey: string | null }
+	}
+	slots: 'rows'
+	properties: {
+		labelResult: TranslationResult
+		label: string
+		columns: string
+		theme: string
+	}
+}
+
+export const tablePlugin = createWidgetPlugin('Table')
+	.description('Column grid for TableRow widgets: `columns` is the CSS grid template every row follows, so cells line up. Cells are other Widgets, so it is exposed as a named list of rows.')
+	.interfaces<TableInterfaces>()
+	.config({
+		description: 'Table configuration. `columns` is a CSS `grid-template-columns` value such as `2fr 1fr 80px`. `label` accepts an `$i18n` binding (lowered to `labelKey`).',
+		schema: configSchema({
+			columns: { type: 'string' },
+			label: { type: 'string' }, labelKey: { type: 'string' },
+		}),
+		validate: (c): c is TableInterfaces['config']['raw'] => isConfigOrOmitted(c),
+		resolve: raw => ({ columns: stringOr(raw?.columns, ''), label: stringOr(raw?.label, ''), labelKey: optionalString(raw?.labelKey) }),
+	})
+	.slots({ rows: { description: 'TableRow widgets' } })
+	.properties(p => p
+		.labelResult(translatedResult<TableInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
+		.label(translatedText<TableInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
+		.columns({ compute: ({ config }) => config.columns })
+		.theme(themeProperty()),
+	)
+	.done()
+
+export const TableRenderer = defineComponent({
+	name: 'TableRenderer',
+	setup() {
+		const { widgetId, WidgetSlot, useProperties } = useWidget(tablePlugin)
+		const props = useProperties()
+		return (): VNode => h(KitTable, {
+			[WIDGET_ID_ATTRIBUTE]: widgetId,
+			columns: props.columns.value || undefined,
+			label: props.label.value || undefined,
+			class: ['uiux-ref-scope', props.theme.value],
+		}, { default: () => h(WidgetSlot, { name: 'rows' }) })
+	},
+})
+
+export interface TableRowInterfaces {
+	config: {
+		raw: ({ header?: boolean; selected?: boolean }) | null
+		resolved: { header: boolean; selected: boolean }
+	}
+	slots: 'cells'
+	state: { selected: boolean }
+	properties: {
+		header: boolean
+		theme: string
+	}
+}
+
+export const tableRowPlugin = createWidgetPlugin('TableRow')
+	.description('One row of a Table: its `cells` slot holds the cell Widgets, laid out on the table\'s column grid. `header` styles it as the column headings; the author-writable `selected` state marks the current row.')
+	.interfaces<TableRowInterfaces>()
+	.config({
+		description: 'TableRow configuration.',
+		schema: configSchema({ header: { type: 'boolean' }, selected: { type: 'boolean' } }),
+		validate: (c): c is TableRowInterfaces['config']['raw'] => isConfigOrOmitted(c),
+		resolve: raw => ({ header: Boolean(raw?.header), selected: Boolean(raw?.selected) }),
+	})
+	.slots({ cells: { description: 'The cell widgets, one per column' } })
+	.state(state => state.selected({ authorWritable: true, validate: isBoolean, default: ({ config }) => config.selected }))
+	.properties(p => p
+		.header({ compute: ({ config }) => config.header })
+		.theme(themeProperty()),
+	)
+	.done()
+
+export const TableRowRenderer = defineComponent({
+	name: 'TableRowRenderer',
+	setup() {
+		const { widgetId, WidgetSlot, useState, useProperties } = useWidget(tableRowPlugin)
+		const state = useState()
+		const props = useProperties()
+		return (): VNode => h(KitTableRow, {
+			[WIDGET_ID_ATTRIBUTE]: widgetId,
+			header: Boolean(props.header.value),
+			selected: Boolean(state.selected.value),
+			class: ['uiux-ref-scope', props.theme.value],
+		}, { default: () => h(WidgetSlot, { name: 'cells' }) })
+	},
+})
+
+// ---------------------------------------------------------------------------
+// 30. DiffItem — one change of a semantic diff (kit/src/ui/DiffItem.vue)
+// ---------------------------------------------------------------------------
+type DiffOp = 'added' | 'removed' | 'changed' | 'moved'
+const DIFF_OPS: readonly DiffOp[] = ['added', 'removed', 'changed', 'moved']
+type DiffChange = { label?: string; before?: string; after?: string; opLabel?: string }
+
+function diffChanges(value: unknown): DiffChange[] {
+	if (!Array.isArray(value)) return []
+	return value.filter((entry): entry is Record<string, unknown> => typeof entry === 'object' && entry !== null && !Array.isArray(entry)).map((entry) => {
+		const change: DiffChange = {}
+		for (const key of ['label', 'before', 'after', 'opLabel'] as const) {
+			if (typeof entry[key] === 'string') change[key] = entry[key]
+		}
+		return change
+	})
+}
+
+export interface DiffItemInterfaces {
+	config: {
+		raw: ({
+			op?: DiffOp
+			opLabel?: string
+			opLabelKey?: string
+			field?: string
+			fieldKey?: string
+			label?: string
+			before?: string
+			after?: string
+			changes?: DiffChange[]
+		}) | null
+		resolved: {
+			op: DiffOp
+			opLabel: string
+			opLabelKey: string | null
+			field: string
+			fieldKey: string | null
+			label: string
+			before: string | undefined
+			after: string | undefined
+			changes: DiffChange[]
+		}
+	}
+	properties: {
+		opLabelResult: TranslationResult
+		opLabel: string
+		fieldResult: TranslationResult
+		field: string
+		look: { op: DiffOp; label: string; before: string | undefined; after: string | undefined; changes: DiffChange[] }
+		theme: string
+	}
+}
+
+export const diffItemPlugin = createWidgetPlugin('DiffItem')
+	.description('One change of a semantic diff: an operation (added, removed, changed or moved) with its icon, tone and translated words, the translated field name, the changed thing as literal mono text, a struck `before` and inserted `after` value, and a list of finer `changes`. Values are content and are never translated.')
+	.interfaces<DiffItemInterfaces>()
+	.config({
+		description: 'DiffItem configuration. `opLabel` and `field` accept `$i18n` bindings (lowered to `opLabelKey`, `fieldKey`). `label`, `before`, `after` and `changes[]` are literal.',
+		schema: configSchema({
+			op: { enum: [...DIFF_OPS] },
+			opLabel: { type: 'string' }, opLabelKey: { type: 'string' },
+			field: { type: 'string' }, fieldKey: { type: 'string' },
+			label: { type: 'string' },
+			before: { type: 'string' },
+			after: { type: 'string' },
+			changes: {
+				type: 'array',
+				items: {
+					type: 'object',
+					properties: { label: { type: 'string' }, before: { type: 'string' }, after: { type: 'string' }, opLabel: { type: 'string' } },
+				},
+			},
+		}),
+		validate: (c): c is DiffItemInterfaces['config']['raw'] => isConfigOrOmitted(c),
+		resolve: raw => ({
+			op: oneOf(raw?.op, DIFF_OPS, 'changed'),
+			opLabel: stringOr(raw?.opLabel, ''),
+			opLabelKey: optionalString(raw?.opLabelKey),
+			field: stringOr(raw?.field, ''),
+			fieldKey: optionalString(raw?.fieldKey),
+			label: stringOr(raw?.label, ''),
+			before: typeof raw?.before === 'string' ? raw.before : undefined,
+			after: typeof raw?.after === 'string' ? raw.after : undefined,
+			changes: diffChanges(raw?.changes),
+		}),
+	})
+	.properties(p => p
+		.opLabelResult(translatedResult<DiffItemInterfaces['config']['resolved']>(c => ({ key: c.opLabelKey, literal: c.opLabel })))
+		.opLabel(translatedText<DiffItemInterfaces['config']['resolved']>(c => ({ key: c.opLabelKey, literal: c.opLabel })))
+		.fieldResult(translatedResult<DiffItemInterfaces['config']['resolved']>(c => ({ key: c.fieldKey, literal: c.field })))
+		.field(translatedText<DiffItemInterfaces['config']['resolved']>(c => ({ key: c.fieldKey, literal: c.field })))
+		.look({ compute: ({ config }) => ({ op: config.op, label: config.label, before: config.before, after: config.after, changes: config.changes }) })
+		.theme(themeProperty()),
+	)
+	.done()
+
+export const DiffItemRenderer = defineComponent({
+	name: 'DiffItemRenderer',
+	setup() {
+		const { widgetId, useProperties } = useWidget(diffItemPlugin)
+		const props = useProperties()
+		return (): VNode => {
+			const look = props.look.value
+			return h(KitDiffItem, {
+				[WIDGET_ID_ATTRIBUTE]: widgetId,
+				op: look?.op ?? 'changed',
+				opLabel: props.opLabel.value || undefined,
+				field: props.field.value || undefined,
+				label: look?.label || undefined,
+				before: look?.before,
+				after: look?.after,
+				changes: look?.changes?.length ? look.changes : undefined,
+				class: ['uiux-ref-scope', props.theme.value],
+			})
+		}
+	},
+})
+
+// ---------------------------------------------------------------------------
+// 31. Breadcrumb & BreadcrumbItem — a path of steps (kit/src/ui/Breadcrumb.vue, BreadcrumbItem.vue)
+// ---------------------------------------------------------------------------
+export interface BreadcrumbInterfaces {
+	config: {
+		raw: ({ label?: string; labelKey?: string }) | null
+		resolved: { label: string; labelKey: string | null }
+	}
+	slots: 'items'
+	properties: {
+		labelResult: TranslationResult
+		label: string
+		theme: string
+	}
+}
+
+export const breadcrumbPlugin = createWidgetPlugin('Breadcrumb')
+	.description('A path of steps in a named navigation landmark, one BreadcrumbItem per step. A long path scrolls sideways, so the landmark itself is the focusable scroller.')
+	.interfaces<BreadcrumbInterfaces>()
+	.config({
+		description: 'Breadcrumb configuration. `label` accepts an `$i18n` binding (lowered to `labelKey`) and names the landmark.',
+		schema: configSchema({ label: { type: 'string' }, labelKey: { type: 'string' } }),
+		validate: (c): c is BreadcrumbInterfaces['config']['raw'] => isConfigOrOmitted(c),
+		resolve: raw => ({ label: stringOr(raw?.label, ''), labelKey: optionalString(raw?.labelKey) }),
+	})
+	.slots({ items: { description: 'BreadcrumbItem widgets' } })
+	.properties(p => p
+		.labelResult(translatedResult<BreadcrumbInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
+		.label(translatedText<BreadcrumbInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
+		.theme(themeProperty()),
+	)
+	.done()
+
+export const BreadcrumbRenderer = defineComponent({
+	name: 'BreadcrumbRenderer',
+	setup() {
+		const { widgetId, WidgetSlot, useProperties } = useWidget(breadcrumbPlugin)
+		const props = useProperties()
+		return (): VNode => h(KitBreadcrumb, {
+			[WIDGET_ID_ATTRIBUTE]: widgetId,
+			label: props.label.value || undefined,
+			class: ['uiux-ref-scope', props.theme.value],
+		}, { default: () => h(WidgetSlot, { name: 'items' }) })
+	},
+})
+
+export interface BreadcrumbItemInterfaces {
+	config: {
+		raw: ({
+			index?: number | string
+			label?: string
+			labelKey?: string
+			variant?: string
+			variantKey?: string
+			trailing?: string
+			trailingKey?: string
+			icon?: string
+			current?: boolean
+		}) | null
+		resolved: {
+			index: string
+			label: string
+			labelKey: string | null
+			variant: string
+			variantKey: string | null
+			trailing: string
+			trailingKey: string | null
+			icon: string
+			current: boolean
+		}
+	}
+	state: { current: boolean }
+	properties: {
+		labelResult: TranslationResult
+		label: string
+		variantResult: TranslationResult
+		variant: string
+		trailingResult: TranslationResult
+		trailing: string
+		look: { index: string; icon: string }
+		theme: string
+	}
+}
+
+export const breadcrumbItemPlugin = createWidgetPlugin('BreadcrumbItem')
+	.description('One step of a Breadcrumb: its number, a variant (the state the step shows), a label (what it belongs to), a trailing note and an optional Lucide icon. The author-writable `current` state marks the step the path ends on (`aria-current="step"`).')
+	.interfaces<BreadcrumbItemInterfaces>()
+	.config({
+		description: 'BreadcrumbItem configuration. `label`, `variant` and `trailing` accept `$i18n` bindings (lowered to `labelKey`, `variantKey`, `trailingKey`) and otherwise show as written.',
+		schema: configSchema({
+			index: { type: ['number', 'string'] },
+			label: { type: 'string' }, labelKey: { type: 'string' },
+			variant: { type: 'string' }, variantKey: { type: 'string' },
+			trailing: { type: 'string' }, trailingKey: { type: 'string' },
+			icon: { type: 'string' },
+			current: { type: 'boolean' },
+		}),
+		validate: (c): c is BreadcrumbItemInterfaces['config']['raw'] => isConfigOrOmitted(c),
+		resolve: raw => ({
+			index: raw?.index === undefined ? '' : String(raw.index),
+			label: stringOr(raw?.label, ''),
+			labelKey: optionalString(raw?.labelKey),
+			variant: stringOr(raw?.variant, ''),
+			variantKey: optionalString(raw?.variantKey),
+			trailing: stringOr(raw?.trailing, ''),
+			trailingKey: optionalString(raw?.trailingKey),
+			icon: stringOr(raw?.icon, ''),
+			current: Boolean(raw?.current),
+		}),
+	})
+	.state(state => state.current({ authorWritable: true, validate: isBoolean, default: ({ config }) => config.current }))
+	.properties(p => p
+		.labelResult(translatedResult<BreadcrumbItemInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
+		.label(translatedText<BreadcrumbItemInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
+		.variantResult(translatedResult<BreadcrumbItemInterfaces['config']['resolved']>(c => ({ key: c.variantKey, literal: c.variant })))
+		.variant(translatedText<BreadcrumbItemInterfaces['config']['resolved']>(c => ({ key: c.variantKey, literal: c.variant })))
+		.trailingResult(translatedResult<BreadcrumbItemInterfaces['config']['resolved']>(c => ({ key: c.trailingKey, literal: c.trailing })))
+		.trailing(translatedText<BreadcrumbItemInterfaces['config']['resolved']>(c => ({ key: c.trailingKey, literal: c.trailing })))
+		.look({ compute: ({ config }) => ({ index: config.index, icon: config.icon }) })
+		.theme(themeProperty()),
+	)
+	.done()
+
+export const BreadcrumbItemRenderer = defineComponent({
+	name: 'BreadcrumbItemRenderer',
+	setup() {
+		const { widgetId, useState, useProperties } = useWidget(breadcrumbItemPlugin)
+		const state = useState()
+		const props = useProperties()
+		return (): VNode => h(KitBreadcrumbItem, {
+			[WIDGET_ID_ATTRIBUTE]: widgetId,
+			index: props.look.value?.index || undefined,
+			label: props.label.value || undefined,
+			variant: props.variant.value || undefined,
+			trailing: props.trailing.value || undefined,
+			icon: props.look.value?.icon || undefined,
+			current: Boolean(state.current.value),
+			class: ['uiux-ref-scope', props.theme.value],
+		})
+	},
+})
+
+// ---------------------------------------------------------------------------
+// 32. GraphCanvas — a static projection of a node-and-edge graph, drawn like the Workbench's Flow graph
+// ---------------------------------------------------------------------------
+// Adapter only: no Kit component. Nodes sit on an explicit column and row grid, edges are routed the way
+// the Workbench's UX Flow graph routes them (forward edges leave a node's right side, back edges arc
+// below, a self-loop arcs above), and the nodes and edge labels are buttons. A node or an edge label
+// writes the `selection` state and fires `select`.
+const GRAPH_NODE_WIDTH = 216
+const GRAPH_NODE_HEIGHT = 76
+const GRAPH_COLUMN_GAP = 192
+const GRAPH_ROW_GAP = 48
+const GRAPH_PADDING = 48
+/** Room above the first row for self-loops and their labels. */
+const GRAPH_PADDING_TOP = 88
+
+type GraphNodeRaw = { key?: string; label?: string; variantName?: string; entry?: boolean; terminal?: boolean; unreachable?: boolean; problems?: number; col?: number; row?: number }
+type GraphEdgeRaw = { from?: string; to?: string; trigger?: string; tone?: 'default' | 'problem' }
+type GraphNodeConfig = {
+	key: string
+	label: string
+	variantName: string
+	entry: boolean
+	terminal: boolean
+	unreachable: boolean
+	problems: number
+	col: number
+	row: number
+}
+type GraphEdgeConfig = { from: string; to: string; trigger: string; tone: 'default' | 'problem' }
+type GraphPlacedNode = GraphNodeConfig & { x: number; y: number }
+type GraphRoutedEdge = GraphEdgeConfig & { index: number; path: string; labelX: number; labelY: number; dangling: boolean }
+type GraphLayout = { width: number; height: number; nodes: GraphPlacedNode[]; edges: GraphRoutedEdge[] }
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function nonNegative(value: unknown): number {
+	return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0
+}
+
+function graphNodes(value: unknown): GraphNodeConfig[] {
+	if (!Array.isArray(value)) return []
+	const seen = new Set<string>()
+	const nodes: GraphNodeConfig[] = []
+	for (const entry of value) {
+		if (!isRecord(entry) || typeof entry.key !== 'string' || entry.key === '' || seen.has(entry.key)) continue
+		seen.add(entry.key)
+		nodes.push({
+			key: entry.key,
+			label: typeof entry.label === 'string' ? entry.label : entry.key,
+			variantName: stringOr(entry.variantName, ''),
+			entry: Boolean(entry.entry),
+			terminal: Boolean(entry.terminal),
+			unreachable: Boolean(entry.unreachable),
+			problems: Math.floor(nonNegative(entry.problems)),
+			col: Math.floor(nonNegative(entry.col)),
+			row: nonNegative(entry.row),
+		})
+	}
+	return nodes
+}
+
+function graphEdges(value: unknown): GraphEdgeConfig[] {
+	if (!Array.isArray(value)) return []
+	const edges: GraphEdgeConfig[] = []
+	for (const entry of value) {
+		if (!isRecord(entry) || typeof entry.from !== 'string' || typeof entry.to !== 'string') continue
+		edges.push({ from: entry.from, to: entry.to, trigger: stringOr(entry.trigger, ''), tone: entry.tone === 'problem' ? 'problem' : 'default' })
+	}
+	return edges
+}
+
+type GraphPoint = { x: number; y: number }
+function cubicMidpoint(p0: GraphPoint, p1: GraphPoint, p2: GraphPoint, p3: GraphPoint): GraphPoint {
+	return { x: (p0.x + 3 * p1.x + 3 * p2.x + p3.x) / 8, y: (p0.y + 3 * p1.y + 3 * p2.y + p3.y) / 8 }
+}
+
+/** The route of one edge, as the Workbench's Flow graph draws it. `lane` spreads parallel edges between one pair of nodes. */
+function routeGraphEdge(source: GraphPlacedNode, target: GraphPlacedNode | undefined, lane: number): { path: string; label: GraphPoint; dangling: boolean } {
+	const spread = lane * 22
+	if (!target) {
+		const start = { x: source.x + GRAPH_NODE_WIDTH, y: source.y + GRAPH_NODE_HEIGHT / 2 + spread }
+		const end = { x: start.x + 72, y: start.y }
+		return { path: `M ${start.x} ${start.y} L ${end.x} ${end.y}`, label: { x: start.x + 36, y: start.y - 14 }, dangling: true }
+	}
+	if (source.key === target.key) {
+		const left = source.x + GRAPH_NODE_WIDTH * 0.62 - spread
+		const right = source.x + GRAPH_NODE_WIDTH * 0.86
+		const top = source.y
+		const lift = 44 + spread
+		return { path: `M ${left} ${top} C ${left} ${top - lift}, ${right} ${top - lift}, ${right} ${top}`, label: { x: (left + right) / 2, y: top - lift * 0.75 - 10 }, dangling: false }
+	}
+	if (target.col > source.col) {
+		const start = { x: source.x + GRAPH_NODE_WIDTH, y: source.y + GRAPH_NODE_HEIGHT / 2 }
+		const end = { x: target.x, y: target.y + GRAPH_NODE_HEIGHT / 2 }
+		const bend = Math.max(48, (end.x - start.x) / 2)
+		const c1 = { x: start.x + bend, y: start.y + spread }
+		const c2 = { x: end.x - bend, y: end.y + spread }
+		return { path: `M ${start.x} ${start.y} C ${c1.x} ${c1.y}, ${c2.x} ${c2.y}, ${end.x} ${end.y}`, label: cubicMidpoint(start, c1, c2, end), dangling: false }
+	}
+	const start = { x: source.x + GRAPH_NODE_WIDTH / 2 - 16, y: source.y + GRAPH_NODE_HEIGHT }
+	const end = { x: target.x + GRAPH_NODE_WIDTH / 2 + 16, y: target.y + GRAPH_NODE_HEIGHT }
+	const drop = 52 + spread + Math.abs(source.row - target.row) * 8
+	const bottom = Math.max(start.y, end.y) + drop
+	const c1 = { x: start.x, y: bottom }
+	const c2 = { x: end.x, y: bottom }
+	return { path: `M ${start.x} ${start.y} C ${c1.x} ${c1.y}, ${c2.x} ${c2.y}, ${end.x} ${end.y}`, label: cubicMidpoint(start, c1, c2, end), dangling: false }
+}
+
+function layoutGraph(nodes: readonly GraphNodeConfig[], edges: readonly GraphEdgeConfig[]): GraphLayout {
+	const placed: GraphPlacedNode[] = nodes.map(node => ({
+		...node,
+		x: GRAPH_PADDING + node.col * (GRAPH_NODE_WIDTH + GRAPH_COLUMN_GAP),
+		y: GRAPH_PADDING_TOP + node.row * (GRAPH_NODE_HEIGHT + GRAPH_ROW_GAP),
+	}))
+	const byKey = new Map(placed.map(node => [node.key, node]))
+	const lanes = new Map<string, number>()
+	const routed: GraphRoutedEdge[] = []
+	edges.forEach((edge, index) => {
+		const source = byKey.get(edge.from)
+		if (!source) return
+		const target = byKey.get(edge.to)
+		const pair = `${edge.from}>${target ? edge.to : '?'}`
+		const lane = lanes.get(pair) ?? 0
+		lanes.set(pair, lane + 1)
+		const route = routeGraphEdge(source, target, lane)
+		routed.push({ ...edge, index, path: route.path, labelX: route.label.x, labelY: route.label.y, dangling: route.dangling })
+	})
+	const columns = Math.max(1, ...placed.map(node => node.col + 1))
+	const bottom = Math.max(GRAPH_PADDING_TOP + GRAPH_NODE_HEIGHT, ...placed.map(node => node.y + GRAPH_NODE_HEIGHT))
+	return {
+		width: GRAPH_PADDING * 2 + columns * GRAPH_NODE_WIDTH + (columns - 1) * GRAPH_COLUMN_GAP,
+		// Room below the lowest row for routed back edges and their labels.
+		height: bottom + GRAPH_PADDING + 56,
+		nodes: placed,
+		edges: routed,
+	}
+}
+
+export interface GraphCanvasInterfaces {
+	config: {
+		raw: ({
+			label?: string
+			labelKey?: string
+			entryLabel?: string
+			entryLabelKey?: string
+			endLabel?: string
+			endLabelKey?: string
+			unreachableLabel?: string
+			unreachableLabelKey?: string
+			baseLabel?: string
+			baseLabelKey?: string
+			problemsLabel?: string
+			problemsLabelKey?: string
+			nodes?: GraphNodeRaw[]
+			edges?: GraphEdgeRaw[]
+			selection?: string
+		}) | null
+		resolved: {
+			label: string
+			labelKey: string | null
+			entryLabel: string
+			entryLabelKey: string | null
+			endLabel: string
+			endLabelKey: string | null
+			unreachableLabel: string
+			unreachableLabelKey: string | null
+			baseLabel: string
+			baseLabelKey: string | null
+			problemsLabel: string
+			problemsLabelKey: string | null
+			nodes: GraphNodeConfig[]
+			edges: GraphEdgeConfig[]
+			selection: string
+		}
+	}
+	state: { selection: string }
+	events: { select: readonly [] }
+	properties: {
+		labelResult: TranslationResult
+		label: string
+		entryLabelResult: TranslationResult
+		entryLabel: string
+		endLabelResult: TranslationResult
+		endLabel: string
+		unreachableLabelResult: TranslationResult
+		unreachableLabel: string
+		baseLabelResult: TranslationResult
+		baseLabel: string
+		problemsLabelResult: TranslationResult
+		problemsLabel: string
+		graph: GraphLayout
+		theme: string
+	}
+}
+
+type GraphResolved = GraphCanvasInterfaces['config']['resolved']
+
+export const graphCanvasPlugin = createWidgetPlugin('GraphCanvas')
+	.description('A static projection of a node-and-edge graph on the canvas ground, drawn like the Workbench\'s UX Flow graph: nodes on an explicit column and row grid with an entry flag, a variant chip, a problem count and an end or unreachable mark, and routed edges with mono trigger labels. A node or an edge label writes the `selection` state and fires `select`; arrow keys travel along edges.')
+	.interfaces<GraphCanvasInterfaces>()
+	.config({
+		description: 'GraphCanvas configuration. `nodes` are `{ key, label, variantName, entry, terminal, unreachable, problems, col, row }` (literal; `row` may be fractional), `edges` are `{ from, to, trigger, tone }` over node keys (`tone` is `default` or `problem`). The chrome words `label`, `entryLabel`, `endLabel`, `unreachableLabel`, `baseLabel` and `problemsLabel` accept `$i18n` bindings (lowered to `<field>Key`). `selection` is a node key, or `edge:<index>` for an edge.',
+		schema: configSchema({
+			label: { type: 'string' }, labelKey: { type: 'string' },
+			entryLabel: { type: 'string' }, entryLabelKey: { type: 'string' },
+			endLabel: { type: 'string' }, endLabelKey: { type: 'string' },
+			unreachableLabel: { type: 'string' }, unreachableLabelKey: { type: 'string' },
+			baseLabel: { type: 'string' }, baseLabelKey: { type: 'string' },
+			problemsLabel: { type: 'string' }, problemsLabelKey: { type: 'string' },
+			nodes: {
+				type: 'array',
+				items: {
+					type: 'object',
+					properties: {
+						key: { type: 'string' },
+						label: { type: 'string' },
+						variantName: { type: 'string' },
+						entry: { type: 'boolean' },
+						terminal: { type: 'boolean' },
+						unreachable: { type: 'boolean' },
+						problems: { type: 'number' },
+						col: { type: 'number' },
+						row: { type: 'number' },
+					},
+				},
+			},
+			edges: {
+				type: 'array',
+				items: {
+					type: 'object',
+					properties: {
+						from: { type: 'string' },
+						to: { type: 'string' },
+						trigger: { type: 'string' },
+						tone: { enum: ['default', 'problem'] },
+					},
+				},
+			},
+			selection: { type: 'string' },
+		}),
+		validate: (c): c is GraphCanvasInterfaces['config']['raw'] => isConfigOrOmitted(c),
+		resolve: raw => ({
+			label: stringOr(raw?.label, ''),
+			labelKey: optionalString(raw?.labelKey),
+			entryLabel: stringOr(raw?.entryLabel, 'Entry'),
+			entryLabelKey: optionalString(raw?.entryLabelKey),
+			endLabel: stringOr(raw?.endLabel, 'End'),
+			endLabelKey: optionalString(raw?.endLabelKey),
+			unreachableLabel: stringOr(raw?.unreachableLabel, 'Unreachable'),
+			unreachableLabelKey: optionalString(raw?.unreachableLabelKey),
+			baseLabel: stringOr(raw?.baseLabel, 'Base'),
+			baseLabelKey: optionalString(raw?.baseLabelKey),
+			problemsLabel: stringOr(raw?.problemsLabel, 'Problems'),
+			problemsLabelKey: optionalString(raw?.problemsLabelKey),
+			nodes: graphNodes(raw?.nodes),
+			edges: graphEdges(raw?.edges),
+			selection: stringOr(raw?.selection, ''),
+		}),
+	})
+	.state(state => state.selection({ authorWritable: true, validate: (v): v is string => typeof v === 'string', default: ({ config }) => config.selection }))
+	.properties(p => p
+		.labelResult(translatedResult<GraphResolved>(c => ({ key: c.labelKey, literal: c.label })))
+		.label(translatedText<GraphResolved>(c => ({ key: c.labelKey, literal: c.label })))
+		.entryLabelResult(translatedResult<GraphResolved>(c => ({ key: c.entryLabelKey, literal: c.entryLabel })))
+		.entryLabel(translatedText<GraphResolved>(c => ({ key: c.entryLabelKey, literal: c.entryLabel })))
+		.endLabelResult(translatedResult<GraphResolved>(c => ({ key: c.endLabelKey, literal: c.endLabel })))
+		.endLabel(translatedText<GraphResolved>(c => ({ key: c.endLabelKey, literal: c.endLabel })))
+		.unreachableLabelResult(translatedResult<GraphResolved>(c => ({ key: c.unreachableLabelKey, literal: c.unreachableLabel })))
+		.unreachableLabel(translatedText<GraphResolved>(c => ({ key: c.unreachableLabelKey, literal: c.unreachableLabel })))
+		.baseLabelResult(translatedResult<GraphResolved>(c => ({ key: c.baseLabelKey, literal: c.baseLabel })))
+		.baseLabel(translatedText<GraphResolved>(c => ({ key: c.baseLabelKey, literal: c.baseLabel })))
+		.problemsLabelResult(translatedResult<GraphResolved>(c => ({ key: c.problemsLabelKey, literal: c.problemsLabel })))
+		.problemsLabel(translatedText<GraphResolved>(c => ({ key: c.problemsLabelKey, literal: c.problemsLabel })))
+		.graph({ compute: ({ config }) => layoutGraph(config.nodes, config.edges) })
+		.theme(themeProperty()),
+	)
+	.events(events => events.select({ description: 'Fired when a node or an edge label is chosen' }))
+	.done()
+
+export const GraphCanvasRenderer = defineComponent({
+	name: 'GraphCanvasRenderer',
+	setup() {
+		const { widgetId, useState, useProperties, emit } = useWidget(graphCanvasPlugin)
+		const state = useState()
+		const props = useProperties()
+
+		function choose(selection: string): void {
+			state.selection.value = selection
+			emit.select()
+		}
+
+		/** The connected node for keyboard travel along edges, or the node above or below in the same column. */
+		function neighbour(graph: GraphLayout, key: string, direction: 'next' | 'previous' | 'up' | 'down'): string | undefined {
+			const node = graph.nodes.find(item => item.key === key)
+			if (!node) return undefined
+			if (direction === 'next') return graph.edges.find(edge => edge.from === key && !edge.dangling && edge.to !== key)?.to
+			if (direction === 'previous') return graph.edges.find(edge => edge.to === key && edge.from !== key)?.from
+			const column = graph.nodes.filter(item => item.col === node.col).sort((a, b) => a.row - b.row)
+			return column[column.findIndex(item => item.key === key) + (direction === 'down' ? 1 : -1)]?.key
+		}
+
+		function onNodeKeydown(event: KeyboardEvent, graph: GraphLayout, key: string): void {
+			if (event.altKey || event.metaKey || event.ctrlKey) return
+			let next: string | undefined
+			switch (event.key) {
+				case 'ArrowRight': next = neighbour(graph, key, 'next'); break
+				case 'ArrowLeft': next = neighbour(graph, key, 'previous'); break
+				case 'ArrowDown': next = neighbour(graph, key, 'down'); break
+				case 'ArrowUp': next = neighbour(graph, key, 'up'); break
+				case 'Home': next = graph.nodes[0]?.key; break
+				case 'End': next = graph.nodes[graph.nodes.length - 1]?.key; break
+				case 'Escape':
+					if (!state.selection.value) return
+					event.preventDefault()
+					state.selection.value = ''
+					emit.select()
+					return
+				default: return
+			}
+			event.preventDefault()
+			if (next === undefined) return
+			const surface = (event.currentTarget as HTMLElement).parentElement
+			const target = next
+			choose(target)
+			// The newly chosen node takes the one tab stop and the focus once it has rendered.
+			setTimeout(() => Array.from(surface?.querySelectorAll<HTMLElement>('[data-graph-node]') ?? []).find(button => button.getAttribute('data-graph-node') === target)?.focus())
+		}
+
+		return (): VNode => {
+			const graph = props.graph.value ?? { width: 0, height: 0, nodes: [], edges: [] }
+			const selection = state.selection.value ?? ''
+			const nodeByKey = new Map(graph.nodes.map(node => [node.key, node]))
+			const tabStop = nodeByKey.has(selection) ? selection : graph.nodes[0]?.key
+			const arrow = (tone: string) => `${widgetId}-arrow-${tone}`
+			const edgeTone = (edge: GraphRoutedEdge) => selection === `edge:${edge.index}` ? 'selected' : edge.tone === 'problem' ? 'problem' : 'rest'
+
+			const nodeLabel = (node: GraphPlacedNode): string => {
+				const parts = [node.label, node.variantName || (props.baseLabel.value ?? '')]
+				if (node.entry) parts.push(props.entryLabel.value ?? '')
+				if (node.unreachable) parts.push(props.unreachableLabel.value ?? '')
+				else if (node.terminal) parts.push(props.endLabel.value ?? '')
+				if (node.problems) parts.push(`${props.problemsLabel.value ?? ''} ${node.problems}`.trim())
+				return parts.filter(Boolean).join(', ')
+			}
+			const edgeLabel = (edge: GraphRoutedEdge): string => {
+				const target = nodeByKey.get(edge.to)
+				return `${edge.trigger} → ${target ? target.label : edge.to}`
+			}
+
+			return h('div', {
+				[WIDGET_ID_ATTRIBUTE]: widgetId,
+				class: ['uiux-ref-scope', 'uiux-ref-graph', props.theme.value],
+			}, [
+				h('div', {
+					class: 'uiux-ref-graph-surface',
+					role: 'group',
+					'aria-label': props.label.value || undefined,
+					style: { width: `${graph.width}px`, height: `${graph.height}px` },
+				}, [
+					h('svg', { class: 'uiux-ref-graph-edges', width: graph.width, height: graph.height, 'aria-hidden': 'true' }, [
+						h('defs', ['rest', 'selected', 'problem'].map(tone => h('marker', {
+							id: arrow(tone),
+							viewBox: '0 0 10 10',
+							refX: 9,
+							refY: 5,
+							markerWidth: 7,
+							markerHeight: 7,
+							orient: 'auto-start-reverse',
+						}, [h('path', { d: 'M 0 0 L 10 5 L 0 10 z', class: `arrow-${tone}` })]))),
+						...graph.edges.map(edge => h('path', {
+							key: `edge-${edge.index}`,
+							d: edge.path,
+							class: ['uiux-ref-graph-edge', `is-${edgeTone(edge)}`],
+							'marker-end': edge.dangling ? undefined : `url(#${arrow(edgeTone(edge))})`,
+						})),
+					]),
+					...graph.edges.map(edge => h('button', {
+						key: `label-${edge.index}`,
+						type: 'button',
+						tabindex: -1,
+						class: ['uiux-ref-graph-edge-label', `is-${edgeTone(edge)}`],
+						style: { left: `${edge.labelX}px`, top: `${edge.labelY}px` },
+						title: edgeLabel(edge),
+						'aria-label': edgeLabel(edge),
+						'aria-pressed': String(selection === `edge:${edge.index}`),
+						'data-graph-edge': String(edge.index),
+						onClick: () => choose(`edge:${edge.index}`),
+					}, edge.trigger)),
+					...graph.nodes.map((node) => {
+						const selected = selection === node.key
+						return h('button', {
+							key: `node-${node.key}`,
+							type: 'button',
+							class: ['uiux-ref-graph-node', selected ? 'is-selected' : '', node.unreachable ? 'is-unreachable' : ''],
+							style: { left: `${node.x}px`, top: `${node.y}px`, width: `${GRAPH_NODE_WIDTH}px`, height: `${GRAPH_NODE_HEIGHT}px` },
+							tabindex: tabStop === node.key ? 0 : -1,
+							title: node.label,
+							'aria-label': nodeLabel(node),
+							'aria-pressed': String(selected),
+							'aria-keyshortcuts': 'ArrowLeft ArrowRight ArrowUp ArrowDown Home End',
+							'data-graph-node': node.key,
+							onClick: () => choose(node.key),
+							onKeydown: (event: KeyboardEvent) => onNodeKeydown(event, graph, node.key),
+						}, [
+							h('span', { class: 'uiux-ref-graph-node-top' }, [
+								node.entry ? iconNode('flag', 14) : null,
+								h('span', { class: 'uiux-ref-graph-node-name' }, node.label),
+								node.problems ? h(KitBadge, { tone: 'danger', variant: 'subtle', icon: 'circle-alert', label: String(node.problems) }) : null,
+							]),
+							h('span', { class: 'uiux-ref-graph-node-bottom' }, [
+								node.variantName
+									? h(KitBadge, { variant: 'mono', label: node.variantName })
+									: h('span', { class: 'uiux-ref-graph-node-base' }, props.baseLabel.value ?? ''),
+								node.unreachable
+									? h('span', { class: 'uiux-ref-graph-node-mark is-unreachable' }, props.unreachableLabel.value ?? '')
+									: node.terminal ? h('span', { class: 'uiux-ref-graph-node-mark' }, props.endLabel.value ?? '') : null,
+							]),
+						])
+					}),
+				]),
+			])
+		}
+	},
+})
+
+// ---------------------------------------------------------------------------
+// 33. Image — an Asset-bound picture
+// ---------------------------------------------------------------------------
+// Adapter only. `source` is an asset-capable Config field (Catalog `assetFields`): the author binds an image
+// Asset with `{ "$asset": "<assetId>" }` and UIUX lowers it to `{ url, mediaType, contentDigest }` before the
+// Widget sees it (Clause 01a167f4-3e4e-7af1-b328-30fb52f7f4c5).
+const IMAGE_FITS = ['contain', 'cover', 'fill', 'none'] as const
+
+export interface ImageInterfaces {
+	config: {
+		raw: ({
+			source?: AdapterAssetValue
+			alt?: string
+			altKey?: string
+			width?: number | string
+			height?: number | string
+			fit?: typeof IMAGE_FITS[number]
+			radius?: number | string
+		}) | null
+		resolved: {
+			source: AdapterAssetValue | null
+			alt: string
+			altKey: string | null
+			width: number | string | undefined
+			height: number | string | undefined
+			fit: typeof IMAGE_FITS[number]
+			radius: number | string | undefined
+		}
+	}
+	properties: {
+		altResult: TranslationResult
+		alt: string
+		source: AdapterAssetValue | null
+		look: { width: number | string | undefined; height: number | string | undefined; fit: string; radius: number | string | undefined }
+		theme: string
+	}
+}
+
+function assetValueOf(value: unknown): AdapterAssetValue | null {
+	if (!isRecord(value) || typeof value.url !== 'string' || value.url === '') return null
+	return { url: value.url, mediaType: stringOr(value.mediaType, ''), contentDigest: stringOr(value.contentDigest, '') }
+}
+
+export const imagePlugin = createWidgetPlugin('Image')
+	.description('A picture from an image Asset: `source` is an Asset-bound field, so the author binds an Asset and the Workspace resolves it. Translatable alternative text (empty for a decorative image), a size, a fit and a radius. Without a resolved source it shows a dashed placeholder.')
+	.interfaces<ImageInterfaces>()
+	.config({
+		description: 'Image configuration. `source` takes `{ "$asset": "<assetId>" }` (an image Asset). `alt` accepts an `$i18n` binding (lowered to `altKey`). `width` and `height` are px as a number or any CSS length.',
+		schema: configSchema({
+			source: {
+				type: 'object',
+				properties: { url: { type: 'string' }, mediaType: { type: 'string' }, contentDigest: { type: 'string' } },
+				required: ['url', 'mediaType', 'contentDigest'],
+			},
+			alt: { type: 'string' }, altKey: { type: 'string' },
+			width: { type: ['number', 'string'] },
+			height: { type: ['number', 'string'] },
+			fit: { enum: [...IMAGE_FITS] },
+			radius: { type: ['number', 'string'] },
+		}),
+		validate: (c): c is ImageInterfaces['config']['raw'] => isConfigOrOmitted(c),
+		resolve: raw => ({
+			source: assetValueOf(raw?.source),
+			alt: stringOr(raw?.alt, ''),
+			altKey: optionalString(raw?.altKey),
+			width: lengthOr(raw?.width),
+			height: lengthOr(raw?.height),
+			fit: oneOf(raw?.fit, IMAGE_FITS, 'contain'),
+			radius: lengthOr(raw?.radius),
+		}),
+	})
+	.properties(p => p
+		.altResult(translatedResult<ImageInterfaces['config']['resolved']>(c => ({ key: c.altKey, literal: c.alt })))
+		.alt(translatedText<ImageInterfaces['config']['resolved']>(c => ({ key: c.altKey, literal: c.alt })))
+		.source({ compute: ({ config }) => config.source })
+		.look({ compute: ({ config }) => ({ width: config.width, height: config.height, fit: config.fit, radius: config.radius }) })
+		.theme(themeProperty()),
+	)
+	.done()
+
+export const ImageRenderer = defineComponent({
+	name: 'ImageRenderer',
+	setup() {
+		const { widgetId, useProperties } = useWidget(imagePlugin)
+		const props = useProperties()
+		return (): VNode => {
+			const look = props.look.value
+			const source = props.source.value
+			const alt = props.alt.value ?? ''
+			const style: CssStyle = {
+				...(look?.width !== undefined ? { width: px(look.width, '') } : {}),
+				...(look?.height !== undefined ? { height: px(look.height, '') } : {}),
+				...(look?.radius !== undefined ? { borderRadius: px(look.radius, '') } : {}),
+			}
+			if (!source) {
+				return h('span', {
+					[WIDGET_ID_ATTRIBUTE]: widgetId,
+					role: alt ? 'img' : undefined,
+					'aria-label': alt || undefined,
+					'aria-hidden': alt ? undefined : 'true',
+					class: ['uiux-ref-scope', 'uiux-ref-image', 'is-empty', props.theme.value],
+					style,
+				})
+			}
+			return h('img', {
+				[WIDGET_ID_ATTRIBUTE]: widgetId,
+				class: ['uiux-ref-scope', 'uiux-ref-image', props.theme.value],
+				style: { ...style, objectFit: look?.fit ?? 'contain' },
+				src: source.url,
+				alt,
+				'data-media-type': source.mediaType,
+				'data-content-digest': source.contentDigest,
+			})
+		}
+	},
+})
+
+// ---------------------------------------------------------------------------
 // Canonical Adapter Manifest
 // ---------------------------------------------------------------------------
 // Each translatable field `<field>` keeps its literal key in the Config member `<field>Key`. Its Properties
@@ -3152,8 +4762,23 @@ const catalogWidgets: Readonly<Record<string, AdapterWidgetCatalogEntry>> = {
 	ContextChip: { i18n: { fields: { label: i18nField('label'), value: i18nField('value', RENDER_CONTEXT_PARAMS) } } },
 	TimelineItem: i18nFields('role', 'time', 'body'),
 	ThreadRow: i18nFields('title', 'meta', 'time'),
-	Alert: i18nFields('title', 'description'),
+	Alert: i18nFields('title', 'description', 'dismissLabel'),
 	EmptyState: i18nFields('title', 'description'),
+	Icon: i18nFields('label'),
+	Skeleton: i18nFields('label'),
+	ListItem: {},
+	Checkbox: i18nFields('label', 'description'),
+	Select: i18nFields('label', 'help', 'placeholder'),
+	SelectOption: i18nFields('label'),
+	Disclosure: i18nFields('label'),
+	CodeBlock: i18nFields('label'),
+	Table: i18nFields('label'),
+	TableRow: {},
+	DiffItem: i18nFields('opLabel', 'field'),
+	Breadcrumb: i18nFields('label'),
+	BreadcrumbItem: i18nFields('label', 'variant', 'trailing'),
+	GraphCanvas: i18nFields('label', 'entryLabel', 'endLabel', 'unreachableLabel', 'baseLabel', 'problemsLabel'),
+	Image: { ...i18nFields('alt'), assetFields: { source: { acceptedCategories: ['image'] } } },
 }
 
 export const manifest: AdapterManifest = {
@@ -3184,6 +4809,21 @@ export const manifest: AdapterManifest = {
 		threadRowPlugin,
 		alertPlugin,
 		emptyStatePlugin,
+		iconPlugin,
+		skeletonPlugin,
+		listItemPlugin,
+		checkboxPlugin,
+		selectPlugin,
+		selectOptionPlugin,
+		disclosurePlugin,
+		codeBlockPlugin,
+		tablePlugin,
+		tableRowPlugin,
+		diffItemPlugin,
+		breadcrumbPlugin,
+		breadcrumbItemPlugin,
+		graphCanvasPlugin,
+		imagePlugin,
 	],
 	catalog: {
 		widgets: catalogWidgets,
@@ -3213,6 +4853,21 @@ export const manifest: AdapterManifest = {
 		{ type: 'ThreadRow', component: ThreadRowRenderer },
 		{ type: 'Alert', component: AlertRenderer },
 		{ type: 'EmptyState', component: EmptyStateRenderer },
+		{ type: 'Icon', component: IconRenderer },
+		{ type: 'Skeleton', component: SkeletonRenderer },
+		{ type: 'ListItem', component: ListItemRenderer },
+		{ type: 'Checkbox', component: CheckboxRenderer },
+		{ type: 'Select', component: SelectRenderer },
+		{ type: 'SelectOption', component: SelectOptionRenderer },
+		{ type: 'Disclosure', component: DisclosureRenderer },
+		{ type: 'CodeBlock', component: CodeBlockRenderer },
+		{ type: 'Table', component: TableRenderer },
+		{ type: 'TableRow', component: TableRowRenderer },
+		{ type: 'DiffItem', component: DiffItemRenderer },
+		{ type: 'Breadcrumb', component: BreadcrumbRenderer },
+		{ type: 'BreadcrumbItem', component: BreadcrumbItemRenderer },
+		{ type: 'GraphCanvas', component: GraphCanvasRenderer },
+		{ type: 'Image', component: ImageRenderer },
 	],
 	providers: [],
 	// The reference CSS styles exactly the Workspace themes `light` and `dark`; UIUX diagnoses any other

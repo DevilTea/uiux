@@ -17,7 +17,10 @@ import { validateProductKit } from '../src/domain/product-kit/schema'
 const ROOT = join(import.meta.dirname, '..')
 const WORKSPACE = join(ROOT, '.uiux')
 const KIT = join(WORKSPACE, 'kit')
-const COMPONENTS = ['badge', 'button', 'comment-pin', 'field', 'icon', 'kbd', 'tokens'] as const
+const COMPONENTS = [
+	'badge', 'breadcrumb', 'breadcrumb-item', 'button', 'checkbox', 'code-block', 'comment-pin', 'diff-item', 'disclosure', 'field', 'icon', 'kbd',
+	'list-item', 'select', 'select-option', 'skeleton', 'table', 'table-row', 'tokens',
+] as const
 
 async function productKit() {
 	const validation = validateProductKit(JSON.parse(await readFile(join(WORKSPACE, 'product-kit.json'), 'utf8')))
@@ -51,10 +54,45 @@ describe('the dogfood Product Kit registry', () => {
 		const kit = await productKit()
 		expect(kit.widgets).toEqual({
 			Badge: { component: 'badge' },
+			Breadcrumb: { component: 'breadcrumb' },
+			BreadcrumbItem: { component: 'breadcrumb-item' },
 			Button: { component: 'button' },
+			Checkbox: { component: 'checkbox' },
+			CodeBlock: { component: 'code-block' },
+			DiffItem: { component: 'diff-item' },
+			Disclosure: { component: 'disclosure' },
+			Icon: { component: 'icon' },
+			ListItem: { component: 'list-item' },
 			Pin: { component: 'comment-pin' },
+			Select: { component: 'select' },
+			SelectOption: { component: 'select-option' },
+			Skeleton: { component: 'skeleton' },
+			Table: { component: 'table' },
+			TableRow: { component: 'table-row' },
 			TextInput: { component: 'field' },
 		})
+	})
+
+	it('registers every file of src/ui and src/tokens in exactly one component, and each component\'s requires closure names the Kit components it imports', async () => {
+		const kit = await productKit()
+		const declared = Object.values(kit.components).flatMap(component => component.files).sort()
+		const onDisk = [
+			...(await uiFiles()).map(name => `src/ui/${name}`),
+			'src/ui/icons.ts',
+			'src/tokens/tokens.css',
+		].sort()
+		expect(declared).toEqual(onDisk)
+		// A component that imports another Kit component's file requires it (the import scan reports the rest).
+		const owner = new Map(Object.entries(kit.components).flatMap(([name, component]) => component.files.map(file => [file, name] as const)))
+		for (const [name, component] of Object.entries(kit.components)) {
+			for (const file of component.files.filter(entry => entry.endsWith('.vue'))) {
+				const source = await readFile(join(KIT, file), 'utf8')
+				for (const specifier of scanImportSpecifiers(source).filter(entry => entry.startsWith('./'))) {
+					const target = owner.get(`src/ui/${specifier.slice(2)}`)
+					if (target && target !== name) expect(component.requires, `${name} imports ${specifier}`).toContain(target)
+				}
+			}
+		}
 	})
 })
 
@@ -129,7 +167,11 @@ describe('the kit build (kit/build.mjs)', () => {
 				expect(text).not.toContain(ROOT)
 				expect(text).not.toContain(directory)
 			}
-			for (const selector of ['.kit-btn', '.kit-badge', '.kit-comment-pin', '.kit-field', '--color-iris-600', '--kit-primary'])
+			for (const selector of [
+				'.kit-btn', '.kit-badge', '.kit-comment-pin', '.kit-field', '--color-iris-600', '--kit-primary',
+				'.kit-skeleton', '.kit-list-item', '.kit-checkbox', '.kit-select', '.kit-select-option', '.kit-disclosure', '.kit-code-block',
+				'.kit-table', '.kit-table-row', '.kit-diff-item', '.kit-breadcrumb', '.kit-breadcrumb-item', '.uiux-ref-graph', '.uiux-ref-icon',
+			])
 				expect(css, selector).toContain(selector)
 		}
 		finally {

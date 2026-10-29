@@ -277,3 +277,66 @@
 .uiux-ref-empty-title { margin: 0; font-size: 15px; line-height: 22px; font-weight: 600; color: var(--kit-text-highlighted); }
 .uiux-ref-empty-desc { margin: 0; font-size: 14px; line-height: 22px; max-width: 44ch; }
 .uiux-ref-empty-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 8px; }
+
+/* Stack outline: the region is a changed region of a diff (added, removed, modified or moved). */
+.uiux-ref-stack.is-outline-added { outline: 2px solid var(--kit-success); outline-offset: 2px; }
+.uiux-ref-stack.is-outline-removed { outline: 2px dashed var(--kit-danger); outline-offset: 2px; }
+.uiux-ref-stack.is-outline-modified { outline: 2px solid var(--kit-warning); outline-offset: 2px; }
+.uiux-ref-stack.is-outline-moved { outline: 2px dotted var(--kit-info); outline-offset: 2px; }
+
+/* Alert: the dismiss button sits at the end of the row. */
+.uiux-ref-alert-dismiss { margin-left: auto; flex-shrink: 0; }
+
+/* Icon: a Kit icon (kit/src/ui/Icon.vue) with a tone. */
+.uiux-ref-icon { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; line-height: 0; }
+.uiux-ref-icon.tone-default { color: var(--kit-text); }
+.uiux-ref-icon.tone-muted { color: var(--kit-text-muted); }
+.uiux-ref-icon.tone-subtle { color: var(--kit-text-subtle); }
+.uiux-ref-icon.tone-primary { color: var(--kit-primary); }
+.uiux-ref-icon.tone-annotation { color: var(--kit-annotation); }
+.uiux-ref-icon.tone-success { color: var(--kit-success); }
+.uiux-ref-icon.tone-warning { color: var(--kit-warning); }
+.uiux-ref-icon.tone-danger { color: var(--kit-danger); }
+.uiux-ref-icon.tone-info { color: var(--kit-info); }
+
+/* Image: an Asset-bound picture. */
+.uiux-ref-image { display: block; max-width: 100%; }
+.uiux-ref-image.is-empty { min-width: 48px; min-height: 48px; border: 1px dashed var(--kit-border-control); border-radius: 6px; background-color: var(--kit-bg-muted); }
+
+/* GraphCanvas: the canvas ground (DESIGN.md "Canvas") with nodes, routed edges and edge labels. */
+.uiux-ref-graph {
+  position: relative; display: flex; min-width: 0; min-height: 0; overflow: auto; background-color: var(--kit-bg-canvas);
+  background-image: radial-gradient(var(--kit-canvas-dot) 1px, transparent 1px); background-size: 16px 16px; background-position: 8px 8px; background-attachment: local;
+}
+.uiux-ref-graph-surface { position: relative; margin: auto; flex-shrink: 0; }
+.uiux-ref-graph-edges { position: absolute; inset: 0; overflow: visible; pointer-events: none; }
+.uiux-ref-graph-edge { fill: none; stroke: var(--kit-border-control); stroke-width: 1.5; }
+.uiux-ref-graph-edge.is-selected { stroke: var(--kit-primary); stroke-width: 2; }
+.uiux-ref-graph-edge.is-problem { stroke: var(--kit-danger); stroke-dasharray: 4 3; }
+.uiux-ref-graph-edges .arrow-rest { fill: var(--kit-border-control); }
+.uiux-ref-graph-edges .arrow-selected { fill: var(--kit-primary); }
+.uiux-ref-graph-edges .arrow-problem { fill: var(--kit-danger); }
+.uiux-ref-graph-edge-label {
+  position: absolute; z-index: 10; max-width: 176px; padding: 2px 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; transform: translate(-50%, -50%);
+  font-family: var(--kit-font-mono); font-size: 12px; line-height: 16px; color: var(--kit-text-muted); background-color: var(--kit-bg-surface);
+  border: 1px solid var(--kit-border); border-radius: 4px; cursor: pointer; transition: background-color 120ms ease, color 120ms ease;
+}
+.uiux-ref-graph-edge-label:hover { background-color: var(--kit-bg-surface-elevated); color: var(--kit-text); }
+.uiux-ref-graph-edge-label.is-selected { color: var(--kit-primary); background-color: var(--kit-primary-subtle); border-color: var(--kit-primary); }
+.uiux-ref-graph-edge-label.is-problem { color: var(--kit-danger); border-color: var(--kit-danger); }
+.uiux-ref-graph-node {
+  position: absolute; z-index: 20; display: flex; flex-direction: column; justify-content: center; gap: 6px; padding: 0 12px; text-align: start; cursor: pointer;
+  font: inherit; color: var(--kit-text); background-color: var(--kit-bg-surface); border: 1px solid var(--kit-bg-accented); border-radius: 8px;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+.uiux-ref-graph-node:hover { background-color: var(--kit-bg-muted); }
+.uiux-ref-graph-node:focus-visible { outline: 2px solid var(--kit-primary); outline-offset: 2px; }
+.uiux-ref-graph-node.is-selected { border-color: var(--kit-primary); background-color: var(--kit-primary-subtle); }
+.uiux-ref-graph-node.is-unreachable { border-style: dashed; }
+.uiux-ref-graph-node-top, .uiux-ref-graph-node-bottom { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.uiux-ref-graph-node-top > .kit-icon { color: var(--kit-text-muted); }
+.uiux-ref-graph-node-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; line-height: 20px; font-weight: 500; color: var(--kit-text-highlighted); }
+.uiux-ref-graph-node-base { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; line-height: 16px; color: var(--kit-text-muted); }
+.uiux-ref-graph-node-mark { margin-left: auto; flex-shrink: 0; font-size: 12px; line-height: 16px; color: var(--kit-text-subtle); }
+.uiux-ref-graph-node-mark.is-unreachable { font-weight: 500; color: var(--kit-danger); }
+.uiux-ref-graph-node-bottom .kit-badge { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
