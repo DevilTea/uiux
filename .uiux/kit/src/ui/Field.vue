@@ -19,6 +19,8 @@ const props = defineProps<{
   /** The text; default empty. */
   modelValue?: string
   label?: string
+  /** The label is for assistive technology only: it names the control but takes no room. */
+  hideLabel?: boolean
   placeholder?: string
   help?: string
   error?: string
@@ -80,7 +82,7 @@ function onInput(event: Event): void {
     <label
       v-if="label"
       class="kit-field__label"
-      :class="{ 'is-required': required }"
+      :class="{ 'is-required': required, 'is-visually-hidden': hideLabel }"
       :for="fieldId"
     >{{ label }}</label>
     <div class="kit-field__shell">
@@ -153,6 +155,7 @@ function onInput(event: Event): void {
 <style>
 .kit-field { display: flex; flex-direction: column; gap: 6px; width: 100%; box-sizing: border-box; min-width: 0; }
 .kit-field__label { font-size: 12px; line-height: 16px; font-weight: 500; color: var(--kit-text); }
+.kit-field__label.is-visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 .kit-field__label.is-required::after { content: "*"; margin-inline-start: 2px; color: var(--kit-danger); }
 .kit-field__shell { position: relative; display: flex; align-items: center; width: 100%; }
 .kit-field__shell > .kit-icon { position: absolute; left: 10px; color: var(--kit-text-subtle); pointer-events: none; }

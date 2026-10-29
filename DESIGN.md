@@ -459,6 +459,9 @@ Every component below is a Nuxt UI 4 component themed through `app.config.ts` an
 - **Shape:** gently squared (6px radius), 32px tall at desktop (`md`), 28px for dense toolbars (`sm`). On coarse pointers they grow to a 44px minimum target.
 - **Default:** `color="neutral" variant="outline"` (white or graphite-900 fill, graphite-450 / graphite-500 boundary). The theme makes this the default, so violet must be asked for.
 - **Primary:** `color="primary" variant="solid"`. Iris-600 with white text in light; iris-400 with graphite-900 text in dark. Hover moves one ramp step and never lowers opacity. At most one per region.
+- **Solid neutral:** `color="neutral" variant="solid"`, the current choice of a group of neutral buttons (the compare-with target, the canvas mode).
+- **Links:** `variant="link"` is the primary link; `color="neutral" variant="link"` is the quiet one (muted, highlighted on hover) for "Select all" and clear actions.
+- **Disabled and loading:** a disabled primary keeps its Iris fill at reduced opacity, a ghost button loses its fill and border, and `loading` swaps the leading icon for a spinner and disables the button.
 - **Ghost icon:** toolbar and row actions, 32px square, graphite-600 icon, `bg-elevated` on hover. Always has a translated `aria-label` and a `UTooltip` with its shortcut (`UKbd`).
 - **Focus:** a 2px solid Iris outline at 2px offset on every variant (overriding Nuxt UI's 25%-opacity outline, which fails 3:1).
 - **Destructive:** `color="error" variant="soft"` in confirmation surfaces only.

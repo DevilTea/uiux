@@ -68,7 +68,7 @@ describe('the catalog of the phase-5 Widgets', () => {
 		expect(ownership.rendererKeys).toEqual(expect.arrayContaining(types))
 		for (const type of types) expect(manifest.catalog.widgets, type).toHaveProperty(type)
 		expect(manifest.catalog.widgets.Image?.assetFields).toEqual({ source: { acceptedCategories: ['image'] } })
-		expect(Object.keys(manifest.catalog.widgets.Select?.i18n?.fields ?? {})).toEqual(['label', 'help', 'placeholder'])
+		expect(Object.keys(manifest.catalog.widgets.Select?.i18n?.fields ?? {})).toEqual(['label', 'help', 'placeholder', 'value'])
 		expect(Object.keys(manifest.catalog.widgets.GraphCanvas?.i18n?.fields ?? {})).toEqual(['label', 'entryLabel', 'endLabel', 'unreachableLabel', 'baseLabel', 'problemsLabel'])
 		expect(Object.keys(manifest.catalog.widgets.Alert?.i18n?.fields ?? {})).toContain('dismissLabel')
 	})
