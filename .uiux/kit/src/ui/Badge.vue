@@ -15,13 +15,15 @@ defineProps<{
   variant?: 'subtle' | 'soft' | 'solid' | 'outline' | 'mono' | 'count'
   /** Leading Lucide icon name (icons.ts). */
   icon?: string
+  /** Spins the leading icon, for work in progress (use `loader-circle`). It stands still under `prefers-reduced-motion`. */
+  spin?: boolean
 }>()
 </script>
 
 <template>
   <span
     class="kit-badge"
-    :class="[`kit-badge--tone-${tone ?? 'neutral'}`, `kit-badge--${variant ?? 'subtle'}`]"
+    :class="[`kit-badge--tone-${tone ?? 'neutral'}`, `kit-badge--${variant ?? 'subtle'}`, { 'is-spin': spin }]"
   >
     <slot name="leading"><Icon
       v-if="icon"
@@ -39,6 +41,9 @@ defineProps<{
   border: 1px solid transparent; flex-shrink: 0;
 }
 .kit-badge .kit-icon { width: 14px; height: 14px; }
+.kit-badge.is-spin .kit-icon { animation: kit-badge-spin 1s linear infinite; }
+@keyframes kit-badge-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .kit-badge.is-spin .kit-icon { animation: none; } }
 .kit-badge.kit-badge--tone-neutral { --kit-badge-fg: var(--kit-text-muted); --kit-badge-bg: var(--kit-bg-surface-elevated); --kit-badge-border: var(--kit-border); --kit-badge-solid: var(--kit-text-muted); }
 .kit-badge.kit-badge--tone-primary { --kit-badge-fg: var(--kit-primary); --kit-badge-bg: var(--kit-primary-subtle); --kit-badge-border: var(--kit-primary-border); --kit-badge-solid: var(--kit-primary); }
 .kit-badge.kit-badge--tone-annotation { --kit-badge-fg: var(--kit-annotation); --kit-badge-bg: var(--kit-annotation-subtle); --kit-badge-border: var(--kit-annotation-border); --kit-badge-solid: var(--kit-pin); }
