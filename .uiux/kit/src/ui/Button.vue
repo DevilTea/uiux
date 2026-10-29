@@ -3,8 +3,9 @@ import Icon from './Icon.vue'
 import Kbd from './Kbd.vue'
 
 /**
- * The Kit button (DESIGN.md "Buttons"): neutral outline by default, one solid `primary` per region.
- * It is controlled and has no state of its own: it renders from its props and its click reaches the
+ * The Kit button (DESIGN.md "Buttons"): neutral outline by default, one solid `primary` per region
+ * (`neutral` is the solid neutral one, for the current choice of a group; `link` is a primary link and
+ * `link-muted` a quiet one). It is controlled and has no state of its own: it renders from its props and its click reaches the
  * parent as the native `click` event. The label arrives as the `label` prop or the default slot;
  * `icon-only` shows only the icon and keeps the label as the accessible name.
  */
@@ -12,7 +13,7 @@ defineProps<{
   /** The label text, which is also the accessible name of an icon-only button. */
   label?: string
   /** Default `secondary`. */
-  variant?: 'primary' | 'secondary' | 'ghost' | 'outline' | 'danger' | 'annotation' | 'link' | 'brand' | 'display'
+  variant?: 'primary' | 'secondary' | 'ghost' | 'outline' | 'danger' | 'annotation' | 'link' | 'link-muted' | 'brand' | 'display' | 'neutral'
   /** Default `md`. */
   size?: 'sm' | 'md' | 'lg'
   /** Leading Lucide icon name (icons.ts). */
@@ -26,6 +27,11 @@ defineProps<{
   /** 44px target, for a touch render context. */
   touch?: boolean
   disabled?: boolean
+  /**
+   * Work is in progress: a spinning icon replaces the leading icon (or is the whole content of an
+   * icon-only button), the button is busy (`aria-busy`) and does not press, and it looks disabled.
+   */
+  loading?: boolean
   /** Default `button`. */
   type?: 'button' | 'submit' | 'reset'
 }>()
@@ -34,15 +40,22 @@ defineProps<{
 <template>
   <button
     class="kit-btn"
-    :class="[`kit-btn--${variant ?? 'secondary'}`, `kit-btn--${size ?? 'md'}`, { 'is-touch': touch, 'is-icon-only': iconOnly, 'is-full-width': fullWidth }]"
+    :class="[`kit-btn--${variant ?? 'secondary'}`, `kit-btn--${size ?? 'md'}`, { 'is-touch': touch, 'is-icon-only': iconOnly, 'is-full-width': fullWidth, 'is-loading': loading }]"
     :type="type ?? 'button'"
-    :disabled="disabled"
+    :disabled="disabled || loading"
+    :aria-busy="loading ? 'true' : undefined"
     :aria-label="iconOnly ? label : undefined"
     :title="iconOnly ? label : undefined"
   >
     <slot name="leading">
       <Icon
-        v-if="icon"
+        v-if="loading"
+        class="kit-btn__spinner"
+        name="loader-circle"
+        :size="16"
+      />
+      <Icon
+        v-else-if="icon"
         :name="icon"
         :size="16"
       />
@@ -82,17 +95,29 @@ defineProps<{
 .kit-btn.is-icon-only.kit-btn--lg { width: 40px; padding: 0; }
 .kit-btn.is-icon-only.is-touch { width: 44px; height: 44px; }
 .kit-btn.is-full-width { width: 100%; }
-.kit-btn.kit-btn--primary:not(:disabled) { background-color: var(--kit-primary); color: var(--kit-on-primary); border-color: var(--kit-primary); }
+.kit-btn.kit-btn--primary { background-color: var(--kit-primary); color: var(--kit-on-primary); border-color: var(--kit-primary); }
+.kit-btn.kit-btn--primary:disabled { opacity: 0.6; }
+.kit-btn.kit-btn--neutral { background-color: var(--kit-text-highlighted); color: var(--kit-text-inverted); border-color: var(--kit-text-highlighted); }
+.kit-btn.kit-btn--neutral:hover:not(:disabled) { opacity: 0.9; }
+.kit-btn.kit-btn--neutral:disabled { opacity: 0.6; }
+.kit-btn.is-loading { cursor: progress; }
+.kit-btn .kit-btn__spinner { animation: kit-btn-spin 1s linear infinite; }
+@keyframes kit-btn-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .kit-btn .kit-btn__spinner { animation: none; } }
 .kit-btn.kit-btn--primary:hover:not(:disabled) { background-color: var(--kit-primary-hover); border-color: var(--kit-primary-hover); }
 .kit-btn.kit-btn--secondary, .kit-btn.kit-btn--outline { background-color: var(--kit-bg-surface); color: var(--kit-text); border-color: var(--kit-border-control); }
 .kit-btn.kit-btn--secondary:hover:not(:disabled), .kit-btn.kit-btn--outline:hover:not(:disabled) { background-color: var(--kit-bg-surface-elevated); }
 .kit-btn.kit-btn--ghost { background-color: transparent; color: var(--kit-text-muted); }
 .kit-btn.kit-btn--ghost:hover:not(:disabled) { background-color: var(--kit-bg-surface-elevated); color: var(--kit-text-highlighted); }
+.kit-btn.kit-btn--ghost:disabled { background-color: transparent; border-color: transparent; color: var(--kit-text-muted); opacity: 0.6; }
 .kit-btn.kit-btn--annotation { background-color: var(--kit-annotation-subtle); color: var(--kit-annotation); border-color: var(--kit-annotation-border); }
 .kit-btn.kit-btn--annotation:hover:not(:disabled) { background-color: var(--kit-annotation-hover); }
 .kit-btn.kit-btn--danger { background-color: var(--kit-danger-subtle); color: var(--kit-danger); border-color: var(--kit-danger-border); }
 .kit-btn.kit-btn--danger:hover:not(:disabled) { background-color: var(--kit-danger-hover); }
 .kit-btn.kit-btn--link { background: none; border-color: transparent; color: var(--kit-primary); padding-inline: 0; text-decoration: underline; text-underline-offset: 3px; }
+.kit-btn.kit-btn--link-muted { background: none; border-color: transparent; color: var(--kit-text-muted); padding-inline: 0; }
+.kit-btn.kit-btn--link-muted:hover:not(:disabled) { color: var(--kit-text-highlighted); }
+.kit-btn.kit-btn--link:disabled, .kit-btn.kit-btn--link-muted:disabled { background: none; border-color: transparent; opacity: 0.6; }
 .kit-btn.kit-btn--brand:not(:disabled) { background-color: var(--kit-brand); color: var(--kit-on-brand); border-color: var(--kit-brand); }
 .kit-btn.kit-btn--brand:hover:not(:disabled) { background-color: var(--kit-brand-hover); }
 .kit-btn.kit-btn--display { background: transparent; border-color: transparent; height: auto; min-height: 40px; padding: 0 4px; font-size: 24px; line-height: 32px; font-weight: 600; letter-spacing: -0.012em; color: var(--kit-text-highlighted); white-space: normal; text-align: left; }

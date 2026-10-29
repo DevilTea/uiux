@@ -11,6 +11,8 @@ defineProps<{
   columns?: string
   /** The accessible name of the table. */
   label?: string
+  /** A minimum width for every row (any CSS length). A narrower container scrolls the table sideways. */
+  minWidth?: string
 }>()
 </script>
 
@@ -19,12 +21,12 @@ defineProps<{
     class="kit-table"
     role="list"
     :aria-label="label || undefined"
-    :style="columns ? { '--kit-table-columns': columns } : undefined"
+    :style="{ ...(columns ? { '--kit-table-columns': columns } : {}), ...(minWidth ? { '--kit-table-min-width': minWidth } : {}) }"
   >
     <slot />
   </div>
 </template>
 
 <style>
-.kit-table { display: flex; flex-direction: column; min-width: 0; box-sizing: border-box; border: 1px solid var(--kit-border); border-radius: 8px; overflow: hidden; background-color: var(--kit-bg-surface); }
+.kit-table { display: flex; flex-direction: column; min-width: 0; box-sizing: border-box; border: 1px solid var(--kit-border); border-radius: 8px; overflow-x: auto; overflow-y: hidden; background-color: var(--kit-bg-surface); }
 </style>

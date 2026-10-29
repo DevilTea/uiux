@@ -21,6 +21,10 @@ const props = defineProps<{
   disabled?: boolean
   /** Literal mono text at the end of the row, such as an id or a count. */
   meta?: string
+  /** The label is mono 12px text, for ids and file names. */
+  mono?: boolean
+  /** The whole row is a 44px target, centered on its content. */
+  touch?: boolean
   name?: string
   /** The control's id; generated when omitted. */
   id?: string
@@ -52,7 +56,7 @@ function onChange(event: Event): void {
 <template>
   <label
     class="kit-checkbox"
-    :class="{ 'is-disabled': disabled }"
+    :class="{ 'is-disabled': disabled, 'is-mono': mono, 'is-touch': touch }"
   >
     <input
       :id="id ?? controlId"
@@ -95,6 +99,9 @@ function onChange(event: Event): void {
 <style>
 .kit-checkbox { display: flex; align-items: flex-start; gap: 8px; min-width: 0; box-sizing: border-box; cursor: pointer; font-size: 13px; line-height: 20px; color: var(--kit-text); }
 .kit-checkbox.is-disabled { cursor: not-allowed; color: var(--kit-text-subtle); }
+.kit-checkbox.is-touch { align-items: center; min-height: 44px; }
+.kit-checkbox.is-touch .kit-checkbox__control { margin: 0; }
+.kit-checkbox.is-mono .kit-checkbox__label { font-family: var(--kit-font-mono); font-size: 12px; font-weight: 400; line-height: 16px; }
 .kit-checkbox__control { flex-shrink: 0; width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--kit-primary); cursor: inherit; }
 .kit-checkbox__control:focus-visible { outline: 2px solid var(--kit-primary); outline-offset: 2px; }
 .kit-checkbox__text { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
