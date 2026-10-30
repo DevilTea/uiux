@@ -191,6 +191,7 @@
 .uiux-ref-segment.appearance-palette.is-selected { background: var(--kit-primary); color: var(--kit-on-primary); font-weight: 500; }
 .uiux-ref-segment.appearance-palette.is-selected.tone-annotation { background: var(--kit-annotation-subtle); color: var(--kit-annotation); box-shadow: inset 0 0 0 1px var(--kit-annotation-border); }
 .uiux-ref-segment.appearance-palette.is-selected .kit-kbd { background: transparent; color: inherit; border-color: currentColor; }
+.uiux-ref-segment.is-blocked, .uiux-ref-segment.is-blocked:hover, .uiux-ref-segment.appearance-palette.is-selected.is-blocked { color: var(--kit-text-subtle); background: transparent; box-shadow: none; cursor: not-allowed; }
 .uiux-ref-segment.is-touch { height: 44px; }
 .uiux-ref-segment.is-icon-only { width: 32px; padding: 0; }
 .uiux-ref-segment.is-icon-only.is-touch { width: 44px; }
@@ -234,6 +235,10 @@
 .uiux-ref-chip-value { color: var(--kit-text-highlighted); font-weight: 500; }
 .uiux-ref-chip-value.is-mono { font-family: var(--kit-font-mono); font-size: 12px; font-weight: 400; }
 .uiux-ref-chip.is-touch { height: 44px; }
+.uiux-ref-chip.is-invalid { box-shadow: inset 0 0 0 1px var(--kit-danger); }
+.uiux-ref-chip.is-invalid .uiux-ref-chip-value { color: var(--kit-danger); }
+.uiux-ref-chip:disabled { cursor: not-allowed; opacity: 0.75; }
+.uiux-ref-chip:disabled:hover { background: transparent; }
 
 /* TimelineItem */
 .uiux-ref-timeline { display: flex; gap: 10px; align-items: flex-start; min-width: 0; }

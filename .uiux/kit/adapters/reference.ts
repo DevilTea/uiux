@@ -2473,6 +2473,8 @@ export interface SegmentInterfaces {
 			appearance?: SegmentAppearance
 			activeTone?: 'primary' | 'annotation'
 			selected?: boolean
+			blocked?: boolean
+			visible?: boolean
 			responsive?: Responsive<SegmentPresentation>
 		}) | null
 		resolved: {
@@ -2487,12 +2489,18 @@ export interface SegmentInterfaces {
 			appearance: SegmentAppearance
 			activeTone: string
 			selected: boolean
+			blocked: boolean
+			visible: boolean
 			base: SegmentPresentation
 			responsive?: Responsive<SegmentPresentation>
 		}
 	}
 	state: {
 		selected: boolean
+		/** The segment is unavailable here: it stays in the group, dimmed and `aria-disabled`, and does not report `click`. */
+		blocked: boolean
+		/** `false` hides the segment (a toggle that shows one of two looks swaps two segments). */
+		visible: boolean
 		/** A Locale key: while set, the badge shows its translation instead of `badge` (a Variant shows a badge on a tab). */
 		badgeKey: string
 	}
@@ -2508,10 +2516,10 @@ export interface SegmentInterfaces {
 }
 
 export const segmentPlugin = createWidgetPlugin('Segment')
-	.description('One option inside a SegmentedControl: Lucide icon, translatable label, count, and shortcut hint. The palette appearance fills Iris when selected, or tints Marker for the Comment tool (`activeTone: "annotation"`).')
+	.description('One option inside a SegmentedControl: Lucide icon, translatable label, count, and shortcut hint. The palette appearance fills Iris when selected, or tints Marker for the Comment tool (`activeTone: "annotation"`). The author-writable `blocked` state dims a segment that cannot be used here without removing it (it stays focusable with `aria-disabled` and reports no `click`), and `visible` hides it.')
 	.interfaces<SegmentInterfaces>()
 	.config({
-		description: 'Segment configuration. `label` and `badge` accept `$i18n` bindings (lowered to `labelKey`, `badgeKey`); `appearance` must match the parent SegmentedControl.',
+		description: 'Segment configuration. `label` and `badge` accept `$i18n` bindings (lowered to `labelKey`, `badgeKey`); `appearance` must match the parent SegmentedControl; `blocked` and `visible` are the initial values of the states of the same name.',
 		schema: configSchema({
 			label: { type: 'string' },
 			labelKey: { type: 'string' },
@@ -2524,12 +2532,14 @@ export const segmentPlugin = createWidgetPlugin('Segment')
 			appearance: { enum: [...SEGMENT_APPEARANCES] },
 			activeTone: { enum: ['primary', 'annotation'] },
 			selected: { type: 'boolean' },
+			blocked: { type: 'boolean' },
+			visible: { type: 'boolean' },
 			iconOnly: { type: 'boolean' },
 			hidden: { type: 'boolean' },
 		}),
 		validate: (c): c is SegmentInterfaces['config']['raw'] => isConfigOrOmitted(c),
 		resolve: (raw) => {
-			const { label, labelKey, icon, kbd, count, countTone, badge, badgeKey, appearance, activeTone, selected, ...presentation } = raw ?? {}
+			const { label, labelKey, icon, kbd, count, countTone, badge, badgeKey, appearance, activeTone, selected, blocked, visible, ...presentation } = raw ?? {}
 			return {
 				label: stringOr(label, ''),
 				labelKey: optionalString(labelKey),
@@ -2542,12 +2552,16 @@ export const segmentPlugin = createWidgetPlugin('Segment')
 				appearance: oneOf(appearance, SEGMENT_APPEARANCES, 'segment'),
 				activeTone: activeTone ?? 'primary',
 				selected: Boolean(selected),
+				blocked: Boolean(blocked),
+				visible: visible === undefined ? true : Boolean(visible),
 				...splitResponsive<SegmentPresentation>(presentation),
 			}
 		},
 	})
 	.state(state => state
 		.selected({ authorWritable: true, validate: isBoolean, default: ({ config }) => config.selected })
+		.blocked({ authorWritable: true, validate: isBoolean, default: ({ config }) => config.blocked })
+		.visible({ ...visibleState, default: ({ config }) => config.visible })
 		.badgeKey({ authorWritable: true, validate: (v): v is string => typeof v === 'string', default: ({ config }) => config.badgeKey ?? '' }))
 	.properties(p => p
 		.labelResult(translatedResult<SegmentInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
@@ -2610,6 +2624,7 @@ export const SegmentRenderer = defineComponent({
 				'aria-selected': tabLike ? String(selected) : undefined,
 				'aria-pressed': tabLike ? undefined : String(selected),
 				'aria-label': look?.iconOnly ? label : undefined,
+				'aria-disabled': state.blocked.value ? 'true' : undefined,
 				title: look?.iconOnly ? label : undefined,
 				class: [
 					'uiux-ref-scope',
@@ -2618,11 +2633,14 @@ export const SegmentRenderer = defineComponent({
 					`appearance-${appearance}`,
 					`tone-${look?.activeTone ?? 'primary'}`,
 					selected ? 'is-selected' : '',
+					state.blocked.value ? 'is-blocked' : '',
 					look?.iconOnly ? 'is-icon-only' : '',
 					look?.touch ? 'is-touch' : '',
-					look?.hidden ? 'uiux-ref-hidden' : '',
+					look?.hidden || !state.visible.value ? 'uiux-ref-hidden' : '',
 				],
-				onClick: () => emit.click(),
+				onClick: () => {
+					if (!state.blocked.value) emit.click()
+				},
 			}, children)
 		}
 	},
@@ -2878,10 +2896,13 @@ export interface ContextChipInterfaces {
 			valueKey?: string
 			mono?: boolean
 			chevron?: boolean
+			invalid?: boolean
+			disabled?: boolean
 			responsive?: Responsive<ContextChipPresentation>
 		}) | null
-		resolved: { icon: string; label: string; labelKey: string | null; value: string; valueKey: string | null; mono: boolean; chevron: boolean; base: ContextChipPresentation; responsive?: Responsive<ContextChipPresentation> }
+		resolved: { icon: string; label: string; labelKey: string | null; value: string; valueKey: string | null; mono: boolean; chevron: boolean; invalid: boolean; disabled: boolean; base: ContextChipPresentation; responsive?: Responsive<ContextChipPresentation> }
 	}
+	state: { invalid: boolean; disabled: boolean }
 	events: { click: readonly [] }
 	properties: {
 		contextViewportId: string
@@ -2898,18 +2919,19 @@ export interface ContextChipInterfaces {
 }
 
 export const contextChipPlugin = createWidgetPlugin('ContextChip')
-	.description('Render-context chip: icon, muted label and a highlighted value with a select chevron. Translated values may interpolate the live render context ({viewportId}, {viewport}, {locale}, {theme}).')
+	.description('Render-context chip: icon, muted label and a highlighted value with a select chevron. Translated values may interpolate the live render context ({viewportId}, {viewport}, {locale}, {theme}). The author-writable `invalid` state shows the value in the error ink with an error ring (a selection the Workspace no longer has), and `disabled` locks the chip (a Prototype player fixes the Variant).')
 	.interfaces<ContextChipInterfaces>()
 	.config({
-		description: 'ContextChip configuration. `label` and `value` accept `$i18n` bindings (lowered to `labelKey`, `valueKey`).',
+		description: 'ContextChip configuration. `label` and `value` accept `$i18n` bindings (lowered to `labelKey`, `valueKey`); `invalid` and `disabled` are the initial values of the states of the same name.',
 		schema: configSchema({
 			icon: { type: 'string' }, label: { type: 'string' }, labelKey: { type: 'string' },
 			value: { type: 'string' }, valueKey: { type: 'string' }, mono: { type: 'boolean' }, chevron: { type: 'boolean' },
+			invalid: { type: 'boolean' }, disabled: { type: 'boolean' },
 			hideLabel: { type: 'boolean' }, hidden: { type: 'boolean' },
 		}),
 		validate: (c): c is ContextChipInterfaces['config']['raw'] => isConfigOrOmitted(c),
 		resolve: (raw) => {
-			const { icon, label, labelKey, value, valueKey, mono, chevron, ...presentation } = raw ?? {}
+			const { icon, label, labelKey, value, valueKey, mono, chevron, invalid, disabled, ...presentation } = raw ?? {}
 			return {
 				icon: stringOr(icon, ''),
 				label: stringOr(label, ''),
@@ -2918,10 +2940,15 @@ export const contextChipPlugin = createWidgetPlugin('ContextChip')
 				valueKey: optionalString(valueKey),
 				mono: Boolean(mono),
 				chevron: chevron === undefined ? true : Boolean(chevron),
+				invalid: Boolean(invalid),
+				disabled: Boolean(disabled),
 				...splitResponsive<ContextChipPresentation>(presentation),
 			}
 		},
 	})
+	.state(state => state
+		.invalid({ authorWritable: true, validate: isBoolean, default: ({ config }) => config.invalid })
+		.disabled({ authorWritable: true, validate: isBoolean, default: ({ config }) => config.disabled }))
 	.properties(p => p
 		.contextViewportId({ valueContract: STRING, registerDeps: viewportDeps, compute: ({ deps }) => readViewport(deps.viewport())?.id ?? '' })
 		.contextViewport({
@@ -2973,7 +3000,8 @@ export const contextChipPlugin = createWidgetPlugin('ContextChip')
 export const ContextChipRenderer = defineComponent({
 	name: 'ContextChipRenderer',
 	setup() {
-		const { widgetId, useProperties, emit } = useWidget(contextChipPlugin)
+		const { widgetId, useState, useProperties, emit } = useWidget(contextChipPlugin)
+		const state = useState()
 		const props = useProperties()
 		return (): VNode => {
 			const look = props.look.value
@@ -2983,8 +3011,11 @@ export const ContextChipRenderer = defineComponent({
 				type: 'button',
 				'aria-haspopup': 'listbox',
 				'aria-label': look?.hideLabel ? `${label}: ${props.value.value ?? ''}` : undefined,
-				class: ['uiux-ref-scope', 'uiux-ref-chip', props.theme.value, look?.touch ? 'is-touch' : '', look?.hidden ? 'uiux-ref-hidden' : ''],
-				onClick: () => emit.click(),
+				disabled: Boolean(state.disabled.value),
+				class: ['uiux-ref-scope', 'uiux-ref-chip', props.theme.value, look?.touch ? 'is-touch' : '', state.invalid.value ? 'is-invalid' : '', look?.hidden ? 'uiux-ref-hidden' : ''],
+				onClick: () => {
+					if (!state.disabled.value) emit.click()
+				},
 			}, [
 				iconNode(look?.icon, 16),
 				look?.hideLabel ? null : h('span', label),
