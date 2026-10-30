@@ -159,6 +159,62 @@ describe('the icon the error page dogfood needed (issue #409, phase 5)', () => {
 	})
 })
 
+describe('the icons and render-context states the Preview and canvas dogfood needed (issue #409, phase 5)', () => {
+	it('draws every Lucide icon of the batch, by its Lucide name, as an svg', async () => {
+		const names = ['octagon-alert', 'globe-lock', 'palette', 'monitor-dot', 'square-dashed']
+		const { container, bridge } = await mount(names.map(name => ({ type: 'Icon', id: `i-${name}`, config: { name } })))
+		for (const name of names) expect(widget(container, `i-${name}`).querySelector('svg'), name).not.toBeNull()
+		bridge.dispose()
+	})
+
+	it('marks a ContextChip invalid or disabled while a Variant sets the state, and neither before', async () => {
+		const chip = (id: string, config: Record<string, unknown> = {}): Widget => ({ type: 'ContextChip', id, config: { icon: 'layers', label: 'Variant', value: 'missing', ...config } })
+		const variants = { gone: { state: { plain: { invalid: true } } }, locked: { state: { plain: { disabled: true } } } }
+		const first = await mount([chip('plain'), chip('configured', { invalid: true, disabled: true })], { variants })
+		const plain = widget(first.container, 'plain') as HTMLButtonElement
+		expect(plain.classList.contains('is-invalid')).toBe(false)
+		expect(plain.disabled).toBe(false)
+		expect((widget(first.container, 'configured') as HTMLButtonElement).disabled).toBe(true)
+		expect(widget(first.container, 'configured').classList.contains('is-invalid')).toBe(true)
+		await applyVariant(first.bridge, 'gone')
+		expect(plain.classList.contains('is-invalid')).toBe(true)
+		expect(plain.disabled).toBe(false)
+		first.bridge.dispose()
+		const second = await mount([chip('plain')], { variants })
+		await applyVariant(second.bridge, 'locked')
+		const locked = widget(second.container, 'plain') as HTMLButtonElement
+		expect(locked.classList.contains('is-invalid')).toBe(false)
+		expect(locked.disabled).toBe(true)
+		second.bridge.dispose()
+	})
+
+	it('keeps a blocked Segment in the group, dimmed and aria-disabled, and reports no click for it', async () => {
+		const segment = (id: string, config: Record<string, unknown> = {}): Widget => ({ type: 'Segment', id, config: { appearance: 'palette', label: id, ...config } })
+		const { container, bridge } = await mount(
+			[{ type: 'SegmentedControl', id: 'tools', config: { appearance: 'palette' }, slots: { content: [segment('open'), segment('later')] } }],
+			{ variants: { blocked: { state: { later: { blocked: true } } } } },
+		)
+		const probe = bridge.interactionProbe!()
+		expect(probe.watch('later', 'click')).toBe(true)
+		expect(probe.watch('open', 'click')).toBe(true)
+		expect(widget(container, 'later').getAttribute('aria-disabled')).toBeNull()
+		click(widget(container, 'later'))
+		await tick()
+		expect(events(bridge)).toEqual(['later:click'])
+		await applyVariant(bridge, 'blocked')
+		expect(widget(container, 'later').getAttribute('aria-disabled')).toBe('true')
+		expect(widget(container, 'later').classList.contains('is-blocked')).toBe(true)
+		expect(widget(container, 'open').classList.contains('is-blocked')).toBe(false)
+		click(widget(container, 'later'))
+		await tick()
+		expect(events(bridge)).toEqual(['later:click'])
+		click(widget(container, 'open'))
+		await tick()
+		expect(events(bridge)).toEqual(['later:click', 'open:click'])
+		bridge.dispose()
+	})
+})
+
 describe('the Kbd: a key cap that is content, not a hint', () => {
 	const phone = { viewportId: 'mobile', viewport: { width: 390, height: 844 } }
 	const kbds: readonly Widget[] = [{ type: 'Kbd', id: 'hint', config: { keys: 'K' } }, { type: 'Kbd', id: 'content', config: { keys: 'K', showOnTouch: true } }]
