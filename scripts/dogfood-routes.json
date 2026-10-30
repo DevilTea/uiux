@@ -14,13 +14,17 @@
 		},
 		"/flows": {
 			"views": [
-				"f10a5c01-3a6e-4c1d-9b0e-5d1c7e2a4f01"
+				"f10a5c01-3a6e-4c1d-9b0e-5d1c7e2a4f01",
+				"f10a5c04-3a6e-4c1d-9b0e-5d1c7e2a4f04"
 			]
 		},
 		"/flows/:flowId": {
 			"views": [
 				"f10a5c02-3a6e-4c1d-9b0e-5d1c7e2a4f02",
-				"f10a5c03-3a6e-4c1d-9b0e-5d1c7e2a4f03"
+				"f10a5c03-3a6e-4c1d-9b0e-5d1c7e2a4f03",
+				"f10a5c05-3a6e-4c1d-9b0e-5d1c7e2a4f05",
+				"f10a5c06-3a6e-4c1d-9b0e-5d1c7e2a4f06",
+				"f10a5c07-3a6e-4c1d-9b0e-5d1c7e2a4f07"
 			]
 		},
 		"/login": {
