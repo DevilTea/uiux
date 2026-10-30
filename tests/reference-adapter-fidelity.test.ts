@@ -159,6 +159,15 @@ describe('the icon the error page dogfood needed (issue #409, phase 5)', () => {
 	})
 })
 
+describe('the icons the Overview tabs, ViewHeader and shell dogfood needed (issue #409, phase 5)', () => {
+	it('draws every Lucide icon of the batch, by its Lucide name, as an svg', async () => {
+		const names = ['database', 'hard-drive', 'unplug', 'hammer', 'log-out', 'ban', 'filter-x', 'circle-minus', 'table-cells-merge', 'gauge']
+		const { container, bridge } = await mount(names.map(name => ({ type: 'Icon', id: `i-${name}`, config: { name } })))
+		for (const name of names) expect(widget(container, `i-${name}`).querySelector('svg'), name).not.toBeNull()
+		bridge.dispose()
+	})
+})
+
 describe('the icons and render-context states the Preview and canvas dogfood needed (issue #409, phase 5)', () => {
 	it('draws every Lucide icon of the batch, by its Lucide name, as an svg', async () => {
 		const names = ['octagon-alert', 'globe-lock', 'palette', 'monitor-dot', 'square-dashed']
