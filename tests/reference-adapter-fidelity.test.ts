@@ -151,6 +151,14 @@ describe('the icons the Reviews inbox dogfood needed (issue #409, phase 5)', () 
 	})
 })
 
+describe('the icon the error page dogfood needed (issue #409, phase 5)', () => {
+	it('draws the Lucide icon house, by its Lucide name, as an svg', async () => {
+		const { container, bridge } = await mount([{ type: 'Icon', id: 'i-house', config: { name: 'house' } }])
+		expect(widget(container, 'i-house').querySelector('svg'), 'house').not.toBeNull()
+		bridge.dispose()
+	})
+})
+
 describe('the Kbd: a key cap that is content, not a hint', () => {
 	const phone = { viewportId: 'mobile', viewport: { width: 390, height: 844 } }
 	const kbds: readonly Widget[] = [{ type: 'Kbd', id: 'hint', config: { keys: 'K' } }, { type: 'Kbd', id: 'content', config: { keys: 'K', showOnTouch: true } }]
