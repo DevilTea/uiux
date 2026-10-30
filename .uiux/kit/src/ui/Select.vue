@@ -15,6 +15,8 @@ import Icon from './Icon.vue'
  */
 const props = defineProps<{
   label?: string
+  /** Keeps the label for assistive technology only (a select whose name is clear from its place). */
+  hideLabel?: boolean
   help?: string
   /** Shown, muted, while `value` is empty. */
   placeholder?: string
@@ -61,7 +63,7 @@ function onKeydown(event: KeyboardEvent): void {
       v-if="label"
       :id="labelId"
       class="kit-select__label"
-      :class="{ 'is-required': required }"
+      :class="{ 'is-required': required, 'is-visually-hidden': hideLabel }"
       :for="triggerId"
     >{{ label }}</label>
     <div class="kit-select__shell">
@@ -118,6 +120,7 @@ function onKeydown(event: KeyboardEvent): void {
 <style>
 .kit-select { display: flex; flex-direction: column; gap: 6px; width: 100%; box-sizing: border-box; min-width: 0; }
 .kit-select__label { font-size: 12px; line-height: 16px; font-weight: 500; color: var(--kit-text); }
+.kit-select__label.is-visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 .kit-select__label.is-required::after { content: "*"; margin-inline-start: 2px; color: var(--kit-danger); }
 .kit-select__shell { position: relative; width: 100%; }
 .kit-select__trigger {

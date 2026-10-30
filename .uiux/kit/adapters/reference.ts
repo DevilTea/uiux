@@ -3857,6 +3857,7 @@ export interface SelectInterfaces {
 		raw: ({
 			label?: string
 			labelKey?: string
+			hideLabel?: boolean
 			help?: string
 			helpKey?: string
 			placeholder?: string
@@ -3873,6 +3874,7 @@ export interface SelectInterfaces {
 		resolved: {
 			label: string
 			labelKey: string | null
+			hideLabel: boolean
 			help: string
 			helpKey: string | null
 			placeholder: string
@@ -3904,7 +3906,7 @@ export interface SelectInterfaces {
 		help: string
 		placeholderResult: TranslationResult
 		placeholder: string
-		look: { required: boolean; multiple: boolean; disabled: boolean }
+		look: { required: boolean; multiple: boolean; disabled: boolean; hideLabel: boolean }
 		theme: string
 	}
 }
@@ -3913,9 +3915,10 @@ export const selectPlugin = createWidgetPlugin('Select')
 	.description('Select trigger with a translatable label, help and placeholder, the chosen value as literal text (a multiple select joins its values with a comma and a space), required, invalid and disabled flags, and an author-writable `open` state that shows its SelectOption children as a listbox panel. The trigger fires `toggle`.')
 	.interfaces<SelectInterfaces>()
 	.config({
-		description: 'Select configuration. `label`, `help` and `placeholder` accept `$i18n` bindings (lowered to `labelKey`, `helpKey`, `placeholderKey`). `value` is the chosen value as shown: a literal string (or a list of strings for `multiple`), or an `$i18n` binding (lowered to `valueKey`) so the chosen label is translated. A Variant that sets the `valueKey` state to a Locale key localizes the chosen label too.',
+		description: 'Select configuration. `label`, `help` and `placeholder` accept `$i18n` bindings (lowered to `labelKey`, `helpKey`, `placeholderKey`). `hideLabel` keeps the label for assistive technology only. `value` is the chosen value as shown: a literal string (or a list of strings for `multiple`), or an `$i18n` binding (lowered to `valueKey`) so the chosen label is translated. A Variant that sets the `valueKey` state to a Locale key localizes the chosen label too.',
 		schema: configSchema({
 			label: { type: 'string' }, labelKey: { type: 'string' },
+			hideLabel: { type: 'boolean' },
 			help: { type: 'string' }, helpKey: { type: 'string' },
 			placeholder: { type: 'string' }, placeholderKey: { type: 'string' },
 			required: { type: 'boolean' },
@@ -3930,6 +3933,7 @@ export const selectPlugin = createWidgetPlugin('Select')
 		resolve: raw => ({
 			label: stringOr(raw?.label, ''),
 			labelKey: optionalString(raw?.labelKey),
+			hideLabel: Boolean(raw?.hideLabel),
 			help: stringOr(raw?.help, ''),
 			helpKey: optionalString(raw?.helpKey),
 			placeholder: stringOr(raw?.placeholder, ''),
@@ -3966,7 +3970,7 @@ export const selectPlugin = createWidgetPlugin('Select')
 		.help(translatedText<SelectInterfaces['config']['resolved']>(c => ({ key: c.helpKey, literal: c.help })))
 		.placeholderResult(translatedResult<SelectInterfaces['config']['resolved']>(c => ({ key: c.placeholderKey, literal: c.placeholder })))
 		.placeholder(translatedText<SelectInterfaces['config']['resolved']>(c => ({ key: c.placeholderKey, literal: c.placeholder })))
-		.look({ compute: ({ config }) => ({ required: config.required, multiple: config.multiple, disabled: config.disabled }) })
+		.look({ compute: ({ config }) => ({ required: config.required, multiple: config.multiple, disabled: config.disabled, hideLabel: config.hideLabel }) })
 		.theme(themeProperty()),
 	)
 	.events(events => events.toggle({ description: 'Fired when the user presses the trigger to open or close the panel' }))
@@ -3984,6 +3988,7 @@ export const SelectRenderer = defineComponent({
 				[WIDGET_ID_ATTRIBUTE]: widgetId,
 				id: `${widgetId}-select`,
 				label: props.label.value || undefined,
+				hideLabel: Boolean(look?.hideLabel),
 				help: props.help.value || undefined,
 				placeholder: props.placeholder.value || undefined,
 				value: (state.valueKey.value ? props.value.value : state.value.value) || undefined,
