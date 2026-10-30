@@ -102,12 +102,5 @@ const items = computed<DropdownMenuItem[][]>(() => {
         :aria-label="t('prefs.title')"
       />
     </UTooltip>
-    <template #item-label="{ item }">
-      <span class="block">{{ item.label }}</span>
-      <span
-        v-if="item.type === 'label' && item.description"
-        class="block text-xs font-normal text-muted"
-      >{{ item.description }}</span>
-    </template>
   </UDropdownMenu>
 </template>
