@@ -234,10 +234,10 @@ const conflictActions = computed(() => [
           <li
             v-for="(reference, index) in draft.references"
             :key="index"
-            class="grid gap-1.5 border-b border-muted pb-2"
+            class="@container grid gap-1.5 border-b border-muted pb-2"
             data-reference-row
           >
-            <div class="flex items-end gap-1.5">
+            <div class="flex items-end justify-between gap-1.5">
               <UFormField
                 :label="t('spec.ref.type')"
                 class="w-28 shrink-0"
@@ -247,33 +247,6 @@ const conflictActions = computed(() => [
                   :items="typeItems"
                   class="w-full"
                   @update:model-value="setReferenceType(index, $event)"
-                />
-              </UFormField>
-              <UFormField
-                v-if="reference.type === 'external'"
-                :label="t('spec.ref.uri')"
-                :error="fieldErrors[`references.${index}.uri`]"
-                class="min-w-0 flex-1"
-              >
-                <UInput
-                  v-model="reference.uri"
-                  type="url"
-                  inputmode="url"
-                  class="w-full font-mono"
-                  translate="no"
-                />
-              </UFormField>
-              <UFormField
-                v-else
-                :label="t('spec.ref.view')"
-                :error="fieldErrors[`references.${index}.viewId`]"
-                class="min-w-0 flex-1"
-              >
-                <USelect
-                  v-model="reference.viewId"
-                  :items="viewItems as SelectItem[]"
-                  :placeholder="t('spec.ref.pickView')"
-                  class="w-full"
                 />
               </UFormField>
               <UTooltip :text="t('spec.ref.remove', { n: index + 1 })">
@@ -286,7 +259,34 @@ const conflictActions = computed(() => [
                 />
               </UTooltip>
             </div>
-            <div class="grid grid-cols-2 gap-1.5">
+            <UFormField
+              v-if="reference.type === 'external'"
+              :label="t('spec.ref.uri')"
+              :error="fieldErrors[`references.${index}.uri`]"
+              class="min-w-0"
+            >
+              <UInput
+                v-model="reference.uri"
+                type="url"
+                inputmode="url"
+                class="w-full font-mono"
+                translate="no"
+              />
+            </UFormField>
+            <UFormField
+              v-else
+              :label="t('spec.ref.view')"
+              :error="fieldErrors[`references.${index}.viewId`]"
+              class="min-w-0"
+            >
+              <USelect
+                v-model="reference.viewId"
+                :items="viewItems as SelectItem[]"
+                :placeholder="t('spec.ref.pickView')"
+                class="w-full"
+              />
+            </UFormField>
+            <div class="grid grid-cols-1 gap-1.5 @sm:grid-cols-2">
               <UFormField
                 v-if="reference.type === 'external'"
                 :label="t('spec.ref.label')"
