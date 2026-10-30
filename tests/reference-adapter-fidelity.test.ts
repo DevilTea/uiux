@@ -94,6 +94,31 @@ describe('the icons the Members and Access presets dogfood needed (issue #379, p
 	})
 })
 
+describe('the icons the Locales, Assets and Settings dogfood needed (issue #379, phase 5)', () => {
+	it('draws every Lucide icon of the batch, by its Lucide name, as an svg', async () => {
+		const names = ['upload', 'layout-grid', 'download', 'file-x-2', 'star', 'circle-off', 'space', 'circle-plus', 'lock-open', 'replace', 'pencil-line', 'link-2-off', 'search-x']
+		const { container, bridge } = await mount(names.map(name => ({ type: 'Icon', id: `i-${name}`, config: { name } })))
+		for (const name of names) expect(widget(container, `i-${name}`).querySelector('svg'), name).not.toBeNull()
+		bridge.dispose()
+	})
+})
+
+describe('the Select: a hidden label', () => {
+	it('keeps the label for assistive technology only with `hideLabel`, and still names the trigger by it', async () => {
+		const option = (id: string, label: string): Widget => ({ type: 'SelectOption', id, config: { label, selected: true } })
+		const { container, bridge } = await mount([
+			{ type: 'Select', id: 'hidden', config: { label: 'Usage', hideLabel: true, value: 'Any usage' }, slots: { options: [option('any', 'Any usage')] } },
+			{ type: 'Select', id: 'shown', config: { label: 'Type', value: 'All types' }, slots: { options: [option('all', 'All types')] } },
+		])
+		const label = widget(container, 'hidden').querySelector('label')!
+		expect(label.textContent).toBe('Usage')
+		expect(label.classList.contains('is-visually-hidden')).toBe(true)
+		expect(widget(container, 'hidden').querySelector('button')!.getAttribute('aria-labelledby')).toBe(label.id)
+		expect(widget(container, 'shown').querySelector('label')!.classList.contains('is-visually-hidden')).toBe(false)
+		bridge.dispose()
+	})
+})
+
 describe('the Button (loading, link looks, solid neutral, disabled primary)', () => {
 	it('shows a spinner instead of its icon while `loading`, is busy and disabled, and reports no click', async () => {
 		const { container, bridge } = await mount([
