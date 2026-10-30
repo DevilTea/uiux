@@ -9,7 +9,7 @@ import { createSpecClient } from '@deviltea/spec-tool'
  * A read of the workspace exports the whole graph (about 100 ms for this repository's `.spec/`) and, while
  * a Spec Tool writer holds its lock, waits for it. Spec Tool exposes its revision only through such a
  * read, so the cache keys on a cheap change signal instead: a fingerprint of the name, size, inode and
- * modification time of every entry under `.spec/` (a directory's own time moves when an entry is added,
+ * modification and change time of every entry under `.spec/` (a directory's own time moves when an entry is added,
  * removed or renamed). An unchanged signature serves the Rules read last, with the status of a provider
  * that was read; a changed one reads again. Nothing is served for a changed workspace, so no staleness
  * is reported: Clause 01a18120-f903-7f8d-9b44-d581ab520c0d has `none`, `url`, `ok` and `unavailable`, and
@@ -18,7 +18,7 @@ import { createSpecClient } from '@deviltea/spec-tool'
  * While a writer holds the workspace's lock and the signature changed (or nothing is cached), a read waits
  * only {@link WRITER_WAIT_MS} before it reports the provider as unavailable, where the Spec Tool reader
  * would wait up to 30 s. Reads that overlap share one underlying read, even after one of them gave up,
- * so a held lock does not pile up readers.
+ * so a held lock does not pile up readers (a few can still start while a writer publishes).
  */
 
 /** How long a read waits while a Spec Tool writer holds the workspace's lock. */
@@ -48,7 +48,7 @@ export type SpecRulesCache = Readonly<{
 
 async function fingerprint(directory: string, prefix: string, lines: string[]): Promise<void> {
 	const own = await lstat(directory)
-	lines.push(`${prefix}/ ${own.mtimeMs} ${own.ino}`)
+	lines.push(`${prefix}/ ${own.mtimeMs} ${own.ctimeMs} ${own.ino}`)
 	const entries = (await readdir(directory, { withFileTypes: true })).sort((a, b) => a.name < b.name ? -1 : 1)
 	const collected = await Promise.all(entries.map(async (entry) => {
 		const path = join(directory, entry.name)
@@ -59,7 +59,7 @@ async function fingerprint(directory: string, prefix: string, lines: string[]): 
 			return nested
 		}
 		const stats = await lstat(path)
-		return [`${name} ${stats.size} ${stats.mtimeMs} ${stats.ino}`]
+		return [`${name} ${stats.size} ${stats.mtimeMs} ${stats.ctimeMs} ${stats.ino}`]
 	}))
 	for (const part of collected) lines.push(...part)
 }
@@ -158,7 +158,7 @@ export function createSpecRulesCache(
 				sharedRead(root, signature),
 				new Promise<never>((_, reject) => {
 					timer = setTimeout(() => reject(new Error(writing
-						? 'A Spec Tool writer holds the workspace lock; the provider is read again on the next request.'
+						? 'A Spec Tool writer holds the workspace lock, or `.spec-tool-v1.lock` beside `.spec/` is stale (remove it if no `spec` process is running); the provider is read again on the next request.'
 						: 'The Spec Tool workspace did not answer in time.')), limit)
 				}),
 			])

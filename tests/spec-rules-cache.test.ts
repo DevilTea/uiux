@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -236,6 +236,33 @@ describe('the file system change signal of a Spec Tool workspace', () => {
 		const touched = join(root, '.spec', 'spec.yaml')
 		await utimes(touched, new Date(Date.now() + 5_000), new Date(Date.now() + 5_000))
 		expect(await fileSystemSpecWorkspace.signature(root)).not.toBe(settled)
+	})
+
+	it('misses an in-place rewrite that keeps the inode, the size and the modification time', async () => {
+		const { root } = await workspace()
+		const cache = createSpecRulesCache(fileSystemSpecWorkspace)
+		const features = join(root, '.spec', 'features')
+		const file = join(features, (await readdir(features)).find(name => name.endsWith('.md'))!)
+		// A whole-second time, which a restore reproduces exactly.
+		const fixed = new Date('2026-01-01T00:00:00Z')
+		await utimes(file, fixed, fixed)
+		const first = await cache.read(root)
+		expect(first.ok && [...first.rules.values()]).toEqual(['Rule 1 states a behavior.'])
+		const before = await fileSystemSpecWorkspace.signature(root)
+		const original = await stat(file)
+		const text = await readFile(file, 'utf8')
+		const rewritten = text.replace('Rule 1 states a behavior.', 'Rule 9 states a behavior.')
+		expect(rewritten).not.toBe(text)
+		expect(rewritten.length).toBe(text.length)
+		// Truncating the same file keeps its inode; restoring the times is what `cp -p` or `touch -r` do.
+		await writeFile(file, rewritten)
+		await utimes(file, fixed, fixed)
+		const after = await stat(file)
+		expect([after.ino, after.size, after.mtimeMs]).toEqual([original.ino, original.size, original.mtimeMs])
+
+		expect(await fileSystemSpecWorkspace.signature(root)).not.toBe(before)
+		const changed = await cache.read(root)
+		expect(changed.ok && [...changed.rules.values()]).toEqual(['Rule 9 states a behavior.'])
 	})
 
 	it('sees the writer lock beside `.spec/` and serves a real workspace from the cache', async () => {
