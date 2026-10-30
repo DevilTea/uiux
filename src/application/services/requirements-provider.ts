@@ -1,7 +1,6 @@
 import { execFile } from 'node:child_process'
 import { lstat, realpath } from 'node:fs/promises'
 import { basename, dirname, join, resolve, sep } from 'node:path'
-import { createSpecClient } from '@deviltea/spec-tool'
 
 import {
 	REQUIREMENT_DIAGNOSTIC_CODES,
@@ -10,6 +9,7 @@ import {
 	type SpecRequirementsProvider,
 } from '../../domain/requirements/schema'
 import { isRecord, type Diagnostic } from '../../domain/validation'
+import { specRulesCache, type SpecRulesCache } from './spec-rules-cache'
 
 /**
  * Reads the requirement provider of the Workspace manifest's `requirements` setting (Clauses
@@ -28,13 +28,15 @@ export type RequirementsProviderRead =
 	| Readonly<{ status: 'ok'; provider: RequirementsProvider; noUi: Readonly<Record<string, string>>; rules: ReadonlyMap<string, string> }>
 	| Readonly<{ status: 'unavailable'; provider: RequirementsProvider; noUi: Readonly<Record<string, string>>; reason: string }>
 
-/** How long a read of a Spec Tool workspace may take (its reader lock waits on a writer up to 30 s). */
-const SPEC_READ_TIMEOUT_MS = 10_000
-
 /** Test seam: the Git work tree root of a directory, or `undefined` outside a Git work tree. */
 export type GitWorkTreeRoot = (directory: string) => Promise<string | undefined>
 
-export type RequirementsProviderOptions = Readonly<{ gitWorkTreeRoot?: GitWorkTreeRoot }>
+export type RequirementsProviderOptions = Readonly<{
+	/** Defaults to {@link cachedGitWorkTreeRoot}. */
+	gitWorkTreeRoot?: GitWorkTreeRoot
+	/** Defaults to the process-wide cache of Spec Tool reads. */
+	specRulesCache?: SpecRulesCache
+}>
 
 /** The Git work tree root of `directory`, or `undefined` outside a Git work tree or without Git. */
 export const gitWorkTreeRoot: GitWorkTreeRoot = directory => new Promise((resolveRoot) => {
@@ -43,6 +45,38 @@ export const gitWorkTreeRoot: GitWorkTreeRoot = directory => new Promise((resolv
 		resolveRoot(root === '' ? undefined : root)
 	})
 })
+
+/** How long a found Git work tree root is reused before `git rev-parse` runs again (issue #390). */
+export const GIT_ROOT_TTL_MS = 30_000
+
+/**
+ * {@link gitWorkTreeRoot} remembered per directory for `ttlMs`. Only a found root is remembered (a
+ * directory outside a work tree is asked again, as `git init` may follow), and the lifetime bounds how
+ * long a root that a nested `git init` or a moved `.git` made wrong is reused. Overlapping asks share one spawn.
+ */
+export function createCachedGitWorkTreeRoot(
+	resolveRoot: GitWorkTreeRoot = gitWorkTreeRoot,
+	ttlMs = GIT_ROOT_TTL_MS,
+	now: () => number = Date.now,
+): GitWorkTreeRoot {
+	const found = new Map<string, Readonly<{ root: string; at: number }>>()
+	const pending = new Map<string, Promise<string | undefined>>()
+	return async (directory) => {
+		const hit = found.get(directory)
+		if (hit && now() - hit.at < ttlMs) return hit.root
+		const running = pending.get(directory)
+		if (running) return running
+		const asked = resolveRoot(directory).then((root) => {
+			if (root === undefined) found.delete(directory)
+			else found.set(directory, { root, at: now() })
+			return root
+		}).finally(() => pending.delete(directory))
+		pending.set(directory, asked)
+		return asked
+	}
+}
+
+export const cachedGitWorkTreeRoot: GitWorkTreeRoot = createCachedGitWorkTreeRoot()
 
 function isInside(path: string, directory: string): boolean {
 	return path === directory || path.startsWith(directory.endsWith(sep) ? directory : `${directory}${sep}`)
@@ -78,7 +112,7 @@ export async function resolveSpecProviderRoot(
 	provider: SpecRequirementsProvider,
 	options: RequirementsProviderOptions = {},
 ): Promise<Readonly<{ ok: true; root: string }> | Readonly<{ ok: false; reason: string }>> {
-	const toplevel = await (options.gitWorkTreeRoot ?? gitWorkTreeRoot)(workspaceRoot)
+	const toplevel = await (options.gitWorkTreeRoot ?? cachedGitWorkTreeRoot)(workspaceRoot)
 	if (toplevel === undefined) return { ok: false, reason: 'A spec requirements provider needs a Git work tree, and the Workspace root is in none.' }
 	let target: string
 	let tree: string
@@ -110,24 +144,7 @@ export async function readSpecProviderRules(
 	catch {
 		return { ok: false, reason: 'The provider path holds no Spec Tool workspace.' }
 	}
-	let timer: NodeJS.Timeout | undefined
-	try {
-		const exported = await Promise.race([
-			createSpecClient(resolved.root).graph.export(),
-			new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error('The Spec Tool workspace did not answer in time.')), SPEC_READ_TIMEOUT_MS) }),
-		])
-		const rules = new Map<string, string>()
-		for (const node of exported.data.nodes) {
-			if (node.kind === 'rule') rules.set(node.id, node.statement)
-		}
-		return { ok: true, rules }
-	}
-	catch (error) {
-		return { ok: false, reason: error instanceof Error && error.message !== '' ? error.message : 'The Spec Tool workspace cannot be read.' }
-	}
-	finally {
-		if (timer) clearTimeout(timer)
-	}
+	return (options.specRulesCache ?? specRulesCache).read(resolved.root)
 }
 
 /** Reads the provider of `setting` (the manifest's `requirements`, possibly absent). */
