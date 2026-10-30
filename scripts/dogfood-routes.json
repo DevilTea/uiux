@@ -41,7 +41,13 @@
 		},
 		"/reviews": {
 			"views": [
-				"468247e8-4f39-4f04-8056-b2af4c1c37ea"
+				"468247e8-4f39-4f04-8056-b2af4c1c37ea",
+				"e1b7a101-4c2d-4e3f-9a5b-6d7c8e9f0a01",
+				"e1b7a102-4c2d-4e3f-9a5b-6d7c8e9f0a02",
+				"e1b7a103-4c2d-4e3f-9a5b-6d7c8e9f0a03",
+				"e1b7a104-4c2d-4e3f-9a5b-6d7c8e9f0a04",
+				"e1b7a105-4c2d-4e3f-9a5b-6d7c8e9f0a05",
+				"e1b7a106-4c2d-4e3f-9a5b-6d7c8e9f0a06"
 			]
 		},
 		"/views/:viewId": {
