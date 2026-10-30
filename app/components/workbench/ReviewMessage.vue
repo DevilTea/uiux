@@ -2,6 +2,8 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from '#imports'
 import type { DropdownMenuItem } from '@nuxt/ui'
+import KitBadge from '~/components/kit/ui/Badge.vue'
+import KitButton from '~/components/kit/ui/Button.vue'
 import type { ReviewThread } from '../../../src/domain/reviews/schema'
 import { messageVersions, type ReviewTimelineItem } from '../../utils/review-timeline'
 import { messageEditState } from '../../utils/review-message-actions'
@@ -9,6 +11,7 @@ import { relativeTime } from '../../utils/widget-inspection'
 import { memberInitials } from '../../utils/member-initials'
 import { useWorkbenchFormat } from '../../composables/useWorkbenchFormat'
 import { useActorName } from '../../composables/useActorName'
+import { useKbdHints } from '../../composables/useKbdHints'
 
 /**
  * One Review message in a timeline (Part 7 10b; scope/edit decision 16), shared by the inbox
@@ -42,6 +45,7 @@ const emit = defineEmits<{
 
 const { t, locale } = useI18n()
 const fmt = useWorkbenchFormat()
+const kbdHint = useKbdHints()
 
 const actor = computed(() => props.item.actor)
 const actorNameOf = useActorName()
@@ -139,11 +143,9 @@ const editedTime = computed(() => props.item.editedAt ? fmt.dateTime(props.item.
       :class="compact ? 'text-xs text-muted' : 'text-sm'"
     >
       <b class="font-semibold text-highlighted text-sm">{{ shownName }}</b>
-      <UBadge
+      <KitBadge
         v-if="agent"
-        color="neutral"
         variant="soft"
-        size="sm"
         :label="t('comments.agent')"
       />
       <time
@@ -186,18 +188,14 @@ const editedTime = computed(() => props.item.editedAt ? fmt.dateTime(props.item.
                     :datetime="version.at"
                     :title="fmt.dateTime(version.at)"
                   >{{ fmt.dateTime(version.at) }}</time>
-                  <UBadge
+                  <KitBadge
                     v-if="version.current"
-                    color="neutral"
                     variant="soft"
-                    size="sm"
                     :label="t('comments.editCurrent')"
                   />
-                  <UBadge
+                  <KitBadge
                     v-else-if="index === versions.length - 1"
-                    color="neutral"
                     variant="outline"
-                    size="sm"
                     :label="t('comments.editOriginal')"
                   />
                 </span>
@@ -217,13 +215,13 @@ const editedTime = computed(() => props.item.editedAt ? fmt.dateTime(props.item.
         :content="{ align: 'end' }"
         :ui="{ itemDescription: 'max-w-56 whitespace-normal' }"
       >
-        <UButton
-          color="neutral"
+        <KitButton
           variant="ghost"
-          size="xs"
-          icon="i-lucide-ellipsis"
+          size="sm"
+          icon="ellipsis"
+          icon-only
+          :label="t('comments.messageActions')"
           class="-my-1 opacity-100 sm:opacity-0 sm:group-hover/message:opacity-100 sm:focus-visible:opacity-100 sm:data-[state=open]:opacity-100 pointer-coarse:opacity-100"
-          :aria-label="t('comments.messageActions')"
           data-message-menu
         />
       </UDropdownMenu>
@@ -246,41 +244,24 @@ const editedTime = computed(() => props.item.editedAt ? fmt.dateTime(props.item.
         @keydown="onEditorKeydown"
       />
       <div class="flex justify-end gap-2">
-        <UButton
-          color="neutral"
+        <KitButton
           variant="ghost"
-          size="xs"
+          size="sm"
+          :label="t('common.cancel')"
+          :kbd="kbdHint.cancel.value"
           data-message-edit-cancel
           @click="cancel"
-        >
-          {{ t('common.cancel') }}
-          <UKbd
-            value="escape"
-            size="sm"
-            class="pointer-coarse:hidden"
-          />
-        </UButton>
-        <UButton
-          color="primary"
-          variant="solid"
-          size="xs"
+        />
+        <KitButton
+          variant="primary"
+          size="sm"
+          :label="t('comments.editSave')"
+          :kbd="kbdHint.submit.value"
           :loading="saving"
           :disabled="!changed"
           data-message-edit-save
           @click="save"
-        >
-          {{ t('comments.editSave') }}
-          <UKbd
-            value="meta"
-            size="sm"
-            class="pointer-coarse:hidden"
-          />
-          <UKbd
-            value="enter"
-            size="sm"
-            class="-ms-1 pointer-coarse:hidden"
-          />
-        </UButton>
+        />
       </div>
     </div>
     <p

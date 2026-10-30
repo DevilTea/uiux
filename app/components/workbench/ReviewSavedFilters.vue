@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from '#imports'
+import KitButton from '~/components/kit/ui/Button.vue'
 import { useReviewInbox } from '../../composables/useReviewInbox'
 import { MAX_SAVED_FILTERS, MAX_SAVED_FILTER_NAME } from '../../utils/saved-inbox-filters'
 
@@ -119,23 +120,21 @@ function apply(id: string): void {
                 data-review-saved-apply
                 @click="apply(item.id)"
               />
-              <UButton
+              <KitButton
                 size="sm"
-                color="neutral"
                 variant="ghost"
-                icon="i-lucide-pencil"
-                :aria-label="t('inbox.saved.renameNamed', { name: item.name })"
-                class="pointer-coarse:min-h-11 pointer-coarse:min-w-11"
+                icon="pencil"
+                icon-only
+                :label="t('inbox.saved.renameNamed', { name: item.name })"
                 data-review-saved-rename
                 @click="startRename(item.id)"
               />
-              <UButton
+              <KitButton
                 size="sm"
-                color="neutral"
                 variant="ghost"
-                icon="i-lucide-trash-2"
-                :aria-label="t('inbox.saved.deleteNamed', { name: item.name })"
-                class="pointer-coarse:min-h-11 pointer-coarse:min-w-11"
+                icon="trash-2"
+                icon-only
+                :label="t('inbox.saved.deleteNamed', { name: item.name })"
                 data-review-saved-delete
                 @click="remove(item.id)"
               />
@@ -171,35 +170,31 @@ function apply(id: string): void {
               />
             </UFormField>
             <div class="flex justify-end gap-2">
-              <UButton
+              <KitButton
                 type="button"
                 size="sm"
-                color="neutral"
                 variant="ghost"
                 :label="t('inbox.saved.cancel')"
-                class="pointer-coarse:min-h-11"
                 @click="cancel"
               />
-              <UButton
+              <KitButton
                 type="submit"
                 size="sm"
+                variant="primary"
                 :label="editing.mode === 'save' ? t('inbox.saved.save') : t('inbox.saved.rename')"
-                class="pointer-coarse:min-h-11"
                 data-review-saved-submit
               />
             </div>
           </form>
-          <UButton
+          <KitButton
             v-else
             ref="saveButton"
             size="sm"
-            color="neutral"
             variant="outline"
-            icon="i-lucide-bookmark-plus"
+            icon="bookmark-plus"
             :label="t('inbox.saved.saveCurrent')"
             :disabled="!inbox.canSaveFilters.value"
-            block
-            class="pointer-coarse:min-h-11"
+            full-width
             data-review-saved-save
             @click="startSave"
           />

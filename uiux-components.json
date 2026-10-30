@@ -70,6 +70,17 @@
       },
       "target": "app/components/kit"
     },
+    "skeleton": {
+      "componentDigest": "sha256:c439c23eb10f281bd2b571fd175ff58e30461a1ff37100fba873cc69e0e9d0c0",
+      "exportedAt": "2026-10-30T15:03:22.676Z",
+      "files": {
+        "app/components/kit/ui/Skeleton.vue": {
+          "digest": "sha256:64b59b2ade48fe59e281193c7e2d4625fd6584a5861081bacf1960be14d63894",
+          "source": "src/ui/Skeleton.vue"
+        }
+      },
+      "target": "app/components/kit"
+    },
     "tokens": {
       "componentDigest": "sha256:84bccde88c9292f1558394b3907fdb31d2d8cbda56a9ba2e32119c2a8a7517cc",
       "exportedAt": "2026-10-29T01:55:21.496Z",
