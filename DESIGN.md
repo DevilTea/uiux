@@ -457,6 +457,7 @@ Every component below is a Nuxt UI 4 component themed through `app.config.ts` an
 
 ### Buttons
 - **Shape:** gently squared (6px radius), 32px tall at desktop (`md`), 28px for dense toolbars (`sm`). On coarse pointers they grow to a 44px minimum target.
+- **Kit button:** the Kit `Button` adds `xs` (24px, 12px label) for inline rows and chips, `soft` (an elevated fill, no border, `bg-accented` at 75% on hover) as the quiet filled look, `pressed` (a toggle: `aria-pressed`, soft while pressed, never the loud solid neutral), `expanded` (`aria-expanded`, the trailing chevron turns 180 degrees), `truncate` (a long label ends in an ellipsis and its text is the title) and `ButtonGroup` (a split button and its menu trigger share one border and square off the inner corners).
 - **Default:** `color="neutral" variant="outline"` (white or graphite-900 fill, graphite-450 / graphite-500 boundary). The theme makes this the default, so violet must be asked for.
 - **Primary:** `color="primary" variant="solid"`. Iris-600 with white text in light; iris-400 with graphite-900 text in dark. Hover moves one ramp step and never lowers opacity. At most one per region.
 - **Solid neutral:** `color="neutral" variant="solid"`, the current choice of a group of neutral buttons (the compare-with target, the canvas mode).

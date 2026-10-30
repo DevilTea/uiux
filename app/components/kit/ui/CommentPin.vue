@@ -256,7 +256,7 @@ const isMuted = computed(() => props.muted || props.context !== undefined)
   border-radius: 4px;
   background: var(--kit-bg-surface);
   color: var(--kit-text-muted);
-  font-family: var(--kit-font-mono);
+  font-family: var(--kit-font-mono); font-feature-settings: var(--kit-font-mono-features);
   font-size: 12px;
   line-height: 16px;
   font-weight: 400;

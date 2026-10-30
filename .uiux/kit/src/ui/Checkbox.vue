@@ -101,7 +101,7 @@ function onChange(event: Event): void {
 .kit-checkbox.is-disabled { cursor: not-allowed; color: var(--kit-text-subtle); }
 .kit-checkbox.is-touch { align-items: center; min-height: 44px; }
 .kit-checkbox.is-touch .kit-checkbox__control { margin: 0; }
-.kit-checkbox.is-mono .kit-checkbox__label { font-family: var(--kit-font-mono); font-size: 12px; font-weight: 400; line-height: 16px; }
+.kit-checkbox.is-mono .kit-checkbox__label { font-family: var(--kit-font-mono); font-feature-settings: var(--kit-font-mono-features); font-size: 12px; font-weight: 400; line-height: 16px; }
 .kit-checkbox__control { flex-shrink: 0; width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--kit-primary); cursor: inherit; }
 .kit-checkbox__control:focus-visible { outline: 2px solid var(--kit-primary); outline-offset: 2px; }
 .kit-checkbox__text { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
@@ -110,5 +110,5 @@ function onChange(event: Event): void {
 .kit-checkbox__description.is-muted { color: var(--kit-text-muted); }
 .kit-checkbox__description.is-warning { color: var(--kit-warning); }
 .kit-checkbox__description .kit-icon { margin-top: 2px; }
-.kit-checkbox__meta { flex-shrink: 0; font-family: var(--kit-font-mono); font-size: 12px; line-height: 20px; color: var(--kit-text-muted); }
+.kit-checkbox__meta { flex-shrink: 0; font-family: var(--kit-font-mono); font-feature-settings: var(--kit-font-mono-features); font-size: 12px; line-height: 20px; color: var(--kit-text-muted); }
 </style>

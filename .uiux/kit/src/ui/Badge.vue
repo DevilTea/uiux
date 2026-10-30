@@ -17,20 +17,27 @@ defineProps<{
   icon?: string
   /** Spins the leading icon, for work in progress (use `loader-circle`). It stands still under `prefers-reduced-motion`. */
   spin?: boolean
+  /** A long label ends in an ellipsis instead of widening the badge (it then yields to `max-width: 100%`), and the `label` text is its `title`. */
+  truncate?: boolean
 }>()
 </script>
 
 <template>
   <span
     class="kit-badge"
-    :class="[`kit-badge--tone-${tone ?? 'neutral'}`, `kit-badge--${variant ?? 'subtle'}`, { 'is-spin': spin }]"
+    :class="[`kit-badge--tone-${tone ?? 'neutral'}`, `kit-badge--${variant ?? 'subtle'}`, { 'is-spin': spin, 'is-truncate': truncate }]"
+    :title="truncate ? label : undefined"
   >
     <slot name="leading"><Icon
       v-if="icon"
       :name="icon"
       :size="14"
     /></slot>
-    <slot>{{ label }}</slot>
+    <span
+      v-if="truncate"
+      class="kit-badge__label"
+    ><slot>{{ label }}</slot></span>
+    <slot v-else>{{ label }}</slot>
   </span>
 </template>
 
@@ -41,6 +48,8 @@ defineProps<{
   border: 1px solid transparent; flex-shrink: 0;
 }
 .kit-badge .kit-icon { width: 14px; height: 14px; }
+.kit-badge.is-truncate { max-width: 100%; min-width: 0; flex-shrink: 1; }
+.kit-badge .kit-badge__label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .kit-badge.is-spin .kit-icon { animation: kit-badge-spin 1s linear infinite; }
 @keyframes kit-badge-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .kit-badge.is-spin .kit-icon { animation: none; } }
@@ -55,6 +64,6 @@ defineProps<{
 .kit-badge.kit-badge--soft { color: var(--kit-badge-fg); background-color: var(--kit-badge-bg); }
 .kit-badge.kit-badge--outline { color: var(--kit-badge-fg); background-color: transparent; border-color: var(--kit-badge-border); }
 .kit-badge.kit-badge--solid { color: var(--kit-bg-surface); background-color: var(--kit-badge-solid); border-color: var(--kit-badge-solid); }
-.kit-badge.kit-badge--mono { font-family: var(--kit-font-mono); font-weight: 400; color: var(--kit-text-muted); background-color: var(--kit-bg-surface-elevated); }
+.kit-badge.kit-badge--mono { font-family: var(--kit-font-mono); font-feature-settings: var(--kit-font-mono-features); font-weight: 400; color: var(--kit-text-muted); background-color: var(--kit-bg-surface-elevated); }
 .kit-badge.kit-badge--count { min-width: 20px; justify-content: center; color: var(--kit-badge-fg); background-color: var(--kit-badge-bg); }
 </style>

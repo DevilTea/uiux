@@ -60,6 +60,6 @@ function onKeydown(event: KeyboardEvent): void {
 .kit-select-option.is-disabled:hover { background-color: transparent; }
 .kit-select-option__text { display: flex; flex-direction: column; min-width: 0; }
 .kit-select-option__label { min-width: 0; overflow-wrap: anywhere; }
-.kit-select-option.is-mono .kit-select-option__label { font-family: var(--kit-font-mono); font-size: 12px; line-height: 20px; }
+.kit-select-option.is-mono .kit-select-option__label { font-family: var(--kit-font-mono); font-feature-settings: var(--kit-font-mono-features); font-size: 12px; line-height: 20px; }
 .kit-select-option__description { font-size: 12px; line-height: 16px; color: var(--kit-text-muted); overflow-wrap: anywhere; }
 </style>
