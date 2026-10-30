@@ -2474,6 +2474,7 @@ export interface SegmentInterfaces {
 			activeTone?: 'primary' | 'annotation'
 			selected?: boolean
 			blocked?: boolean
+			visible?: boolean
 			responsive?: Responsive<SegmentPresentation>
 		}) | null
 		resolved: {
@@ -2489,6 +2490,7 @@ export interface SegmentInterfaces {
 			activeTone: string
 			selected: boolean
 			blocked: boolean
+			visible: boolean
 			base: SegmentPresentation
 			responsive?: Responsive<SegmentPresentation>
 		}
@@ -2497,6 +2499,8 @@ export interface SegmentInterfaces {
 		selected: boolean
 		/** The segment is unavailable here: it stays in the group, dimmed and `aria-disabled`, and does not report `click`. */
 		blocked: boolean
+		/** `false` hides the segment (a toggle that shows one of two looks swaps two segments). */
+		visible: boolean
 		/** A Locale key: while set, the badge shows its translation instead of `badge` (a Variant shows a badge on a tab). */
 		badgeKey: string
 	}
@@ -2512,10 +2516,10 @@ export interface SegmentInterfaces {
 }
 
 export const segmentPlugin = createWidgetPlugin('Segment')
-	.description('One option inside a SegmentedControl: Lucide icon, translatable label, count, and shortcut hint. The palette appearance fills Iris when selected, or tints Marker for the Comment tool (`activeTone: "annotation"`). The author-writable `blocked` state dims a segment that cannot be used here without removing it: it stays focusable with `aria-disabled` and reports no `click`.')
+	.description('One option inside a SegmentedControl: Lucide icon, translatable label, count, and shortcut hint. The palette appearance fills Iris when selected, or tints Marker for the Comment tool (`activeTone: "annotation"`). The author-writable `blocked` state dims a segment that cannot be used here without removing it (it stays focusable with `aria-disabled` and reports no `click`), and `visible` hides it.')
 	.interfaces<SegmentInterfaces>()
 	.config({
-		description: 'Segment configuration. `label` and `badge` accept `$i18n` bindings (lowered to `labelKey`, `badgeKey`); `appearance` must match the parent SegmentedControl; `blocked` is the initial value of the state of the same name.',
+		description: 'Segment configuration. `label` and `badge` accept `$i18n` bindings (lowered to `labelKey`, `badgeKey`); `appearance` must match the parent SegmentedControl; `blocked` and `visible` are the initial values of the states of the same name.',
 		schema: configSchema({
 			label: { type: 'string' },
 			labelKey: { type: 'string' },
@@ -2529,12 +2533,13 @@ export const segmentPlugin = createWidgetPlugin('Segment')
 			activeTone: { enum: ['primary', 'annotation'] },
 			selected: { type: 'boolean' },
 			blocked: { type: 'boolean' },
+			visible: { type: 'boolean' },
 			iconOnly: { type: 'boolean' },
 			hidden: { type: 'boolean' },
 		}),
 		validate: (c): c is SegmentInterfaces['config']['raw'] => isConfigOrOmitted(c),
 		resolve: (raw) => {
-			const { label, labelKey, icon, kbd, count, countTone, badge, badgeKey, appearance, activeTone, selected, blocked, ...presentation } = raw ?? {}
+			const { label, labelKey, icon, kbd, count, countTone, badge, badgeKey, appearance, activeTone, selected, blocked, visible, ...presentation } = raw ?? {}
 			return {
 				label: stringOr(label, ''),
 				labelKey: optionalString(labelKey),
@@ -2548,6 +2553,7 @@ export const segmentPlugin = createWidgetPlugin('Segment')
 				activeTone: activeTone ?? 'primary',
 				selected: Boolean(selected),
 				blocked: Boolean(blocked),
+				visible: visible === undefined ? true : Boolean(visible),
 				...splitResponsive<SegmentPresentation>(presentation),
 			}
 		},
@@ -2555,6 +2561,7 @@ export const segmentPlugin = createWidgetPlugin('Segment')
 	.state(state => state
 		.selected({ authorWritable: true, validate: isBoolean, default: ({ config }) => config.selected })
 		.blocked({ authorWritable: true, validate: isBoolean, default: ({ config }) => config.blocked })
+		.visible({ ...visibleState, default: ({ config }) => config.visible })
 		.badgeKey({ authorWritable: true, validate: (v): v is string => typeof v === 'string', default: ({ config }) => config.badgeKey ?? '' }))
 	.properties(p => p
 		.labelResult(translatedResult<SegmentInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
@@ -2629,7 +2636,7 @@ export const SegmentRenderer = defineComponent({
 					state.blocked.value ? 'is-blocked' : '',
 					look?.iconOnly ? 'is-icon-only' : '',
 					look?.touch ? 'is-touch' : '',
-					look?.hidden ? 'uiux-ref-hidden' : '',
+					look?.hidden || !state.visible.value ? 'uiux-ref-hidden' : '',
 				],
 				onClick: () => {
 					if (!state.blocked.value) emit.click()

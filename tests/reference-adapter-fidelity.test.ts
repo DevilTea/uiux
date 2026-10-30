@@ -188,6 +188,20 @@ describe('the icons and render-context states the Preview and canvas dogfood nee
 		second.bridge.dispose()
 	})
 
+	it('hides a Segment with `visible: false` and shows it again while a Variant sets the `visible` state', async () => {
+		const segment = (id: string, config: Record<string, unknown> = {}): Widget => ({ type: 'Segment', id, config: { appearance: 'palette', label: id, ...config } })
+		const { container, bridge } = await mount(
+			[{ type: 'SegmentedControl', id: 'tools', config: { appearance: 'palette' }, slots: { content: [segment('shown'), segment('swapped', { visible: false })] } }],
+			{ variants: { swap: { state: { shown: { visible: false }, swapped: { visible: true } } } } },
+		)
+		expect(hidden(container, 'shown')).toBe(false)
+		expect(hidden(container, 'swapped')).toBe(true)
+		await applyVariant(bridge, 'swap')
+		expect(hidden(container, 'shown')).toBe(true)
+		expect(hidden(container, 'swapped')).toBe(false)
+		bridge.dispose()
+	})
+
 	it('keeps a blocked Segment in the group, dimmed and aria-disabled, and reports no click for it', async () => {
 		const segment = (id: string, config: Record<string, unknown> = {}): Widget => ({ type: 'Segment', id, config: { appearance: 'palette', label: id, ...config } })
 		const { container, bridge } = await mount(
