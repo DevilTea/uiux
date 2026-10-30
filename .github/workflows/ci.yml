@@ -38,7 +38,8 @@ jobs:
   # Dogfood drift check (issue #383, Discussion #379 P4, docs/dogfood-worktree.md): on a copy of .uiux/
   # with a temporary UIUX_HOME it builds the kit, serves the copy on loopback and fails on any required
   # render context without fresh formal Evidence, then runs the Kit import scan, `uiux components diff
-  # --check` and `design:tokens --check`, and asserts it changed nothing under the checked-out .uiux/.
+  # --check` and `design:tokens --check`, judges requirement coverage (a ratchet against the merge base)
+  # and the route map of app/pages/, and asserts it changed nothing under the checked-out .uiux/.
   # It recaptures nothing and writes its report to the step summary.
   #
   # REPORT-ONLY until 2026-11-11 (two weeks after it landed on 2026-10-28, owner ruling 8 of
@@ -54,7 +55,10 @@ jobs:
     continue-on-error: true
     timeout-minutes: 20
     steps:
+      # Full history: the requirement coverage ratchet compares with the merge base's own .uiux/ and .spec/.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: pnpm/action-setup@v4
         with:
           version: 10.34.4

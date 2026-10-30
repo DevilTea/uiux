@@ -17,7 +17,14 @@
  *     fails on any required render context without a fresh complete formal capture (stale or missing);
  *  4. runs the Kit import scan (`checkProductKitAgainstKit`), `uiux components diff --check` (app against
  *     Kit) and `design-tokens.mjs --check` (DESIGN.md against `tokens.css`);
- *  5. fails when the run changed any file under the checked-out `.uiux/`.
+ *  5. fails when the run changed any file under the checked-out `.uiux/`;
+ *  6. requirement coverage: reads `GET /api/requirements` (the `uiux://requirements` Resource) from the served
+ *     copy, which gets a copy of `.spec/` in a Git work tree of its own for the `spec` provider; fails when
+ *     the provider is not `ok`, on unresolved or unverified IDs, on an ID that is both referenced and `noUi`,
+ *     and when the number of UI Rules left unreferenced grew against the merge base (a ratchet, computed on the
+ *     base commit's own `.uiux/` and `.spec/`, so no baseline file can drift);
+ *  7. route coverage: every page under `app/pages/` maps to a dogfood View, an exemption or a todo in
+ *     `scripts/dogfood-routes.json` (a todo only warns). Both are in `scripts/dogfood-coverage.mjs`.
  *
  * Required render contexts: every View x every Locale of the Workspace x every viewport preset x every
  * theme, without Variants (the dogfood captures the base context of each View; a Variant is an explicit
@@ -27,10 +34,12 @@
  * Older captures of a context that a fresh one supersedes are counted and ignored (`uiux artifacts gc`
  * collects them; records carry no capture time, so "latest" is not decidable here).
  *
- * Usage: node scripts/dogfood-check.mjs [--source <dir>] [--keep]
+ * Usage: node scripts/dogfood-check.mjs [--source <dir>] [--base <ref>] [--keep]
  *   --source <dir>  the Workspace to check: a `.uiux/` directory or the directory that holds one
  *                   (default: this repository's `.uiux/`); the tree-unchanged check applies to it
- *   --keep          keep the temporary directory and print its path (debugging)
+ *   --base <ref>    the ref the requirement ratchet compares with (default: origin/$GITHUB_BASE_REF in a CI
+ *                   pull request, else origin/main, else main); the baseline is the merge base of it and HEAD
+ *   --keep         keep the temporary directory and print its path (debugging)
  * Exit 0 when every check passes, 1 when one fails, 2 on a usage or environment error. With
  * GITHUB_STEP_SUMMARY set, the report is also appended there as Markdown.
  */
@@ -43,7 +52,8 @@ import { dirname, join, relative, resolve, sep } from 'node:path'
 import { parseArgs } from 'node:util'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
-import { makeScratch } from './dogfood-guard.mjs'
+import { assessRequirementCoverage, assessRoutes, coverageNumbers, describeNumbers, enumeratePages, ROUTE_MAP_FILE } from './dogfood-coverage.mjs'
+import { exportCommitted, git, makeScratch, mergeBase, resolveBase } from './dogfood-guard.mjs'
 
 const REPOSITORY = join(dirname(fileURLToPath(import.meta.url)), '..')
 const HOST = '127.0.0.1'
@@ -274,7 +284,7 @@ export function parseReadiness(response) {
 // The report
 // ---------------------------------------------------------------------------------------------
 
-/** Collects check results: `{ id, title, status: 'pass' | 'fail' | 'skip', lines }`. */
+/** Collects check results: `{ id, title, status: 'pass' | 'warn' | 'fail' | 'skip', lines }`; only `fail` fails the run. */
 export function createReport() {
 	const checks = []
 	return {
@@ -300,7 +310,7 @@ export function formatReport(report) {
 }
 
 export function formatSummaryMarkdown(report, header = []) {
-	const icon = { pass: 'pass', fail: '**FAIL**', skip: 'skip' }
+	const icon = { pass: 'pass', warn: 'warn', fail: '**FAIL**', skip: 'skip' }
 	const out = ['## dogfood:check', '', ...header.map(line => `- ${line}`), '', '| Check | Result |', '| --- | --- |']
 	for (const check of report.checks) out.push(`| ${check.title} | ${icon[check.status]} |`)
 	for (const check of report.checks.filter(item => item.status !== 'pass' && item.lines.length > 0)) {
@@ -308,24 +318,6 @@ export function formatSummaryMarkdown(report, header = []) {
 	}
 	return `${out.join('\n')}\n`
 }
-
-// ---------------------------------------------------------------------------------------------
-// Phase 3 hook
-// ---------------------------------------------------------------------------------------------
-
-/**
- * TODO(phase 3, #382): the checks that need requirement references (Workspace schema 7) are not built yet.
- * When #382 lands, replace each entry with a function that returns `{ status, lines }` and run it
- * with the others in `main`:
- *  - requirement coverage: every `.spec/` Rule that is not `noUi` is referenced by a View, Variant or Flow
- *    (the product's own coverage computation, read through the served copy);
- *  - route coverage: every route under `app/pages/` maps to at least one View or has an explicit exemption.
- * Until then they are listed as skipped, so the report says what it does not check.
- */
-export const PHASE_3_CHECKS = Object.freeze([
-	{ id: 'requirement-coverage', title: 'Requirement coverage (phase 3, #382)' },
-	{ id: 'route-coverage', title: 'Route coverage of app/pages/ (phase 3, #382)' },
-])
 
 // ---------------------------------------------------------------------------------------------
 // Running the pieces
@@ -373,6 +365,9 @@ async function loadRepositoryModules(scratch) {
 				'export { evidenceFreshness, contextFromRecord, contextKey } from \'./app/utils/readiness.ts\'',
 				'export { checkProductKitAgainstKit } from \'./src/adapters/kit-registry.ts\'',
 				'export { validateProductKit } from \'./src/domain/product-kit/schema.ts\'',
+				'export { createRequirementsService } from \'./src/application/services/requirements.ts\'',
+				'export { FileNativePersistence } from \'./src/persistence/file-native.ts\'',
+				'export { PRODUCT_WORKSPACE_SCHEMA_POLICY } from \'./src/product/workspace-schema.ts\'',
 			].join('\n'),
 			resolveDir: REPOSITORY,
 			loader: 'js',
@@ -519,8 +514,77 @@ function toolchainLines() {
 	return [`toolchain: node ${process.versions.node} on ${process.platform}-${process.arch}, esbuild ${version('esbuild')}, vue ${version('vue')}`]
 }
 
+/**
+ * Makes the directory `root` the Git work tree that holds a Workspace and its `.spec/`: the `spec` requirements
+ * provider reads only a `.spec/` inside the Git work tree of the Workspace (Clause 01a18120-f49d-7b42-bad5-69d727f6a33a),
+ * so a copy outside this checkout needs a work tree of its own. Nothing is committed.
+ */
+function makeProviderWorkTree(root) {
+	const init = run('git', ['init', '-q'], { cwd: root })
+	if (init.status !== 0) throw new CheckError(`git init failed in the copy:\n${tail(init.stderr || init.stdout).join('\n')}`)
+}
+
+/** Copies the `.spec/` that sits beside the `.uiux/` at `source` into `root` (the work tree of a copy), without Spec Tool's lock files. Returns whether there was one. */
+function copySpec(source, root) {
+	const spec = join(dirname(source), '.spec')
+	if (!existsSync(spec)) return false
+	cpSync(spec, join(root, '.spec'), { recursive: true, filter: path => !relative(spec, path).startsWith('.spec-tool-v1.') })
+	return true
+}
+
+/**
+ * The requirement coverage of the merge base, computed the way the served copy computes it, on the base commit's
+ * own `.uiux/` and `.spec/` exported from Git (the coverage service is bundled from this checkout and run on the
+ * export, no server). Returns `{ numbers, ref }`, or `{ reason }` when there is nothing to compare with.
+ */
+async function readBaselineCoverage({ base, modules, scratchBase }) {
+	let head
+	let baseRef
+	let sha
+	try {
+		head = git(REPOSITORY, ['rev-parse', 'HEAD']).trim()
+		baseRef = resolveBase(REPOSITORY, { base })
+		sha = mergeBase(REPOSITORY, baseRef, 'HEAD')
+	}
+	catch (error) {
+		return { reason: `no base commit to compare with (${error.message.split('\n')[0]}); a CI checkout needs fetch-depth: 0` }
+	}
+	const ref = `${baseRef} @ ${sha.slice(0, 8)}`
+	if (sha === head) return { reason: `HEAD is the merge base of ${baseRef} (this checkout is on the base itself), so there is nothing to compare with` }
+	const root = join(scratchBase, 'baseline')
+	try {
+		mkdirSync(root)
+		exportCommitted(REPOSITORY, sha, root, '.uiux')
+		exportCommitted(REPOSITORY, sha, root, '.spec')
+		makeProviderWorkTree(root)
+		const persistence = new modules.FileNativePersistence({ root: join(root, '.uiux'), schemaPolicy: modules.PRODUCT_WORKSPACE_SCHEMA_POLICY })
+		const coverage = await modules.createRequirementsService(persistence).readCoverage()
+		if (coverage.status !== 'ok') return { reason: `the base ${ref} has no readable requirement coverage (provider status "${coverage.status}")` }
+		return { numbers: coverageNumbers(coverage), ref }
+	}
+	catch (error) {
+		return { reason: `the base ${ref} has no readable requirement coverage (${String(error?.message ?? error).split('\n')[0]})` }
+	}
+}
+
+/** The View ids of the Workspace copy: the files of its `views/` directory. */
+function viewIdsOf(workspaceDirectory) {
+	const directory = join(workspaceDirectory, 'views')
+	if (!existsSync(directory)) return []
+	return readdirSync(directory).filter(name => name.endsWith('.view.json')).map(name => name.slice(0, -'.view.json'.length)).sort()
+}
+
+function checkRouteCoverage({ report, copiedRoot }) {
+	const mappingFile = join(REPOSITORY, ROUTE_MAP_FILE)
+	let mapping
+	try { mapping = JSON.parse(readFileSync(mappingFile, 'utf8')) }
+	catch (error) { throw new CheckError(`${ROUTE_MAP_FILE} is not readable JSON: ${error.message}`) }
+	const result = assessRoutes({ pages: enumeratePages(join(REPOSITORY, 'app', 'pages')), mapping, viewIds: viewIdsOf(join(copiedRoot, '.uiux')) })
+	report.add('route-coverage', 'Route coverage of app/pages/ (Views, exemptions, todos)', result.status, result.lines)
+}
+
 /** Steps 2 and 3: serve the copy, read Evidence freshness and readiness, stop the server. Returns the check results. */
-async function checkServedCopy({ report, scratch, copiedRoot, modules, header }) {
+async function checkServedCopy({ report, scratch, copiedRoot, modules, header, served }) {
 	const cli = (...args) => run(process.execPath, [join(REPOSITORY, 'bin', 'uiux.mjs'), ...args, '--workspace', copiedRoot], { cwd: scratch.base, env: { ...process.env, UIUX_HOME: scratch.home } })
 	const added = cli('member', 'add', CI_NICKNAME, '--preset', 'viewer', '--kind', 'agent')
 	if (added.status !== 0) throw new CheckError(`uiux member add failed:\n${tail(added.stderr || added.stdout).join('\n')}`)
@@ -534,6 +598,10 @@ async function checkServedCopy({ report, scratch, copiedRoot, modules, header })
 		const build = await waitForKitBuild(api)
 		header.push(`kit build in the copy: ${build.state}`)
 		header.push(...digestOutput(join(copiedRoot, '.uiux', 'kit')))
+
+		// The same body the MCP Resource `uiux://requirements` serves; judged by `assessRequirementCoverage`.
+		try { served.requirements = await api.get('/api/requirements') }
+		catch (error) { served.requirementsError = error instanceof CheckError ? error.message : String(error?.message ?? error) }
 
 		const workspace = await api.get('/api/resources/workspace/workspace')
 		if (workspace.inspection?.state !== 'current') {
@@ -619,8 +687,8 @@ function checkDesignTokens({ report }) {
 	report.add('design-tokens', 'design:tokens --check (DESIGN.md against tokens.css)', result.status === 0 ? 'pass' : 'fail', result.status === 0 ? [] : tail(`${result.stdout}\n${result.stderr}`, 10))
 }
 
-/** Runs the whole check on the Workspace at `source` (a `.uiux/`); returns `{ report, header }`. */
-export async function runCheck({ source, keep = false }) {
+/** Runs the whole check on the Workspace at `source` (a `.uiux/`); returns `{ report, header }`. `base` is the ref the requirement ratchet compares with. */
+export async function runCheck({ source, keep = false, base }) {
 	const report = createReport()
 	const header = [...toolchainLines()]
 	const before = snapshotTree(source)
@@ -634,18 +702,28 @@ export async function runCheck({ source, keep = false }) {
 		const files = copyWorkspace(source, join(copiedRoot, '.uiux'))
 		// The kit build resolves esbuild and vue from node_modules; the copy lives outside the repository, so link them.
 		if (existsSync(join(copiedRoot, '.uiux', 'kit', 'package.json'))) symlinkSync(join(REPOSITORY, 'node_modules'), join(copiedRoot, '.uiux', 'kit', 'node_modules'))
-		header.push(`copy: ${files} files, temporary UIUX_HOME, --workspace ${copiedRoot}`)
+		// The `spec` requirements provider reads `.spec/` inside the Git work tree that holds the Workspace.
+		const hasSpec = copySpec(source, copiedRoot)
+		makeProviderWorkTree(copiedRoot)
+		header.push(`copy: ${files} files${hasSpec ? ' and .spec/' : ''}, temporary UIUX_HOME, --workspace ${copiedRoot}`)
 		const modules = await loadRepositoryModules(scratch.base)
 
 		const attempt = async (id, title, work) => {
 			try { await work() }
 			catch (error) { report.add(id, title, 'fail', [error instanceof CheckError ? error.message : `${error?.stack ?? error}`]) }
 		}
-		await attempt('evidence', 'Evidence freshness of the required render contexts', () => checkServedCopy({ report, scratch, copiedRoot, modules, header }))
+		const served = {}
+		await attempt('evidence', 'Evidence freshness of the required render contexts', () => checkServedCopy({ report, scratch, copiedRoot, modules, header, served }))
 		await attempt('kit-registry', 'Kit registry and import scan', () => checkKitRegistry({ report, copiedRoot, modules }))
 		await attempt('components-diff', 'uiux components diff --check (app against Kit)', () => checkComponentsDiff({ report, copiedRoot, scratch }))
 		await attempt('design-tokens', 'design:tokens --check (DESIGN.md against tokens.css)', () => checkDesignTokens({ report }))
-		for (const check of PHASE_3_CHECKS) report.add(check.id, check.title, 'skip', ['not built yet: needs requirement references (schema 7), phase 3'])
+		await attempt('requirement-coverage', 'Requirement coverage (provider, unresolved, unverified, ratchet)', async () => {
+			const baseline = await readBaselineCoverage({ base, modules, scratchBase: scratch.base })
+			const result = assessRequirementCoverage({ coverage: served.requirements, error: served.requirementsError, baseline })
+			if (result.numbers) header.push(`requirement coverage: ${describeNumbers(result.numbers)}`)
+			report.add('requirement-coverage', 'Requirement coverage (provider, unresolved, unverified, ratchet)', result.status, result.lines)
+		})
+		await attempt('route-coverage', 'Route coverage of app/pages/ (Views, exemptions, todos)', () => checkRouteCoverage({ report, copiedRoot }))
 	}
 	finally {
 		if (!keep) scratch.remove()
@@ -659,10 +737,10 @@ export async function runCheck({ source, keep = false }) {
 }
 
 async function main() {
-	const usage = 'Usage: node scripts/dogfood-check.mjs [--source <dir>] [--keep]'
+	const usage = 'Usage: node scripts/dogfood-check.mjs [--source <dir>] [--base <ref>] [--keep]'
 	let values
 	try {
-		({ values } = parseArgs({ args: process.argv.slice(2), options: { source: { type: 'string' }, keep: { type: 'boolean' } }, allowPositionals: false, strict: true }))
+		({ values } = parseArgs({ args: process.argv.slice(2), options: { source: { type: 'string' }, base: { type: 'string' }, keep: { type: 'boolean' } }, allowPositionals: false, strict: true }))
 	}
 	catch (error) {
 		console.error(`dogfood:check: ${error.message}\n${usage}`)
@@ -670,7 +748,7 @@ async function main() {
 	}
 	try {
 		const source = locateWorkspace(values.source ?? join(REPOSITORY, '.uiux'))
-		const { report, header } = await runCheck({ source, keep: values.keep === true })
+		const { report, header } = await runCheck({ source, keep: values.keep === true, ...(values.base ? { base: values.base } : {}) })
 		console.log(header.join('\n'))
 		console.log(`\n${formatReport(report)}`)
 		if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, formatSummaryMarkdown(report, header))
