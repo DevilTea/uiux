@@ -1898,22 +1898,22 @@ export const AvatarRenderer = defineComponent({
 // ---------------------------------------------------------------------------
 export interface KbdInterfaces {
 	config: {
-		raw: ({ keys?: string; hidden?: boolean; responsive?: Responsive<{ hidden?: boolean }> }) | null
-		resolved: { keys: string; base: { hidden?: boolean }; responsive?: Responsive<{ hidden?: boolean }> }
+		raw: ({ keys?: string; hidden?: boolean; showOnTouch?: boolean; responsive?: Responsive<{ hidden?: boolean }> }) | null
+		resolved: { keys: string; showOnTouch: boolean; base: { hidden?: boolean }; responsive?: Responsive<{ hidden?: boolean }> }
 	}
 	properties: { keys: string; hidden: boolean; theme: string }
 }
 
 export const kbdPlugin = createWidgetPlugin('Kbd')
-	.description('Keyboard shortcut key cap in the mono blueprint register. Keys are literal and never translated; hidden on touch tiers by default.')
+	.description('Keyboard shortcut key cap in the mono blueprint register. Keys are literal and never translated; hidden on touch tiers by default, except with `showOnTouch` (a shortcut list shows the keys as its content, not as a hint).')
 	.interfaces<KbdInterfaces>()
 	.config({
-		description: 'Kbd configuration. `keys` is a literal such as "⌘K", "C" or "Esc".',
-		schema: configSchema({ keys: { type: 'string' }, hidden: { type: 'boolean' } }),
+		description: 'Kbd configuration. `keys` is a literal such as "⌘K", "C" or "Esc". `showOnTouch` keeps the key cap on the tablet and phone tiers, where a hint is hidden by default.',
+		schema: configSchema({ keys: { type: 'string' }, hidden: { type: 'boolean' }, showOnTouch: { type: 'boolean' } }),
 		validate: (c): c is KbdInterfaces['config']['raw'] => isConfigOrOmitted(c),
 		resolve: (raw) => {
-			const { keys, ...presentation } = raw ?? {}
-			return { keys: stringOr(keys, ''), ...splitResponsive<{ hidden?: boolean }>(presentation) }
+			const { keys, showOnTouch, ...presentation } = raw ?? {}
+			return { keys: stringOr(keys, ''), showOnTouch: Boolean(showOnTouch), ...splitResponsive<{ hidden?: boolean }>(presentation) }
 		},
 	})
 	.properties(p => p
@@ -1922,7 +1922,7 @@ export const kbdPlugin = createWidgetPlugin('Kbd')
 			registerDeps: viewportDeps,
 			compute: ({ config, deps }) => {
 				const tier = tierOf(readViewport(deps.viewport()))
-				return Boolean(cascade(config.base, config.responsive, tier).hidden) || isTouchTier(tier)
+				return Boolean(cascade(config.base, config.responsive, tier).hidden) || (isTouchTier(tier) && !config.showOnTouch)
 			},
 		})
 		.theme(themeProperty()),

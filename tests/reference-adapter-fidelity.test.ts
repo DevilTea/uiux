@@ -121,6 +121,34 @@ describe('the icons the Inspector, Widget tree and Spec dogfood needed (issue #3
 	})
 })
 
+describe('the icons the command palette, preferences and shortcuts dogfood needed (issue #379, phase 5)', () => {
+	it('draws every Lucide icon of the batch, by its Lucide name, as an svg', async () => {
+		const names = ['blocks', 'library', 'message-square-plus', 'keyboard', 'sun', 'moon']
+		const { container, bridge } = await mount(names.map(name => ({ type: 'Icon', id: `i-${name}`, config: { name } })))
+		for (const name of names) expect(widget(container, `i-${name}`).querySelector('svg'), name).not.toBeNull()
+		bridge.dispose()
+	})
+})
+
+describe('the Kbd: a key cap that is content, not a hint', () => {
+	const phone = { viewportId: 'mobile', viewport: { width: 390, height: 844 } }
+	const kbds: readonly Widget[] = [{ type: 'Kbd', id: 'hint', config: { keys: 'K' } }, { type: 'Kbd', id: 'content', config: { keys: 'K', showOnTouch: true } }]
+
+	it('hides a hint on the phone tier and keeps a key cap with showOnTouch', async () => {
+		const { container, bridge } = await mount(kbds, { context: phone })
+		expect(hidden(container, 'hint')).toBe(true)
+		expect(hidden(container, 'content')).toBe(false)
+		bridge.dispose()
+	})
+
+	it('shows both on the desktop tier', async () => {
+		const { container, bridge } = await mount(kbds)
+		expect(hidden(container, 'hint')).toBe(false)
+		expect(hidden(container, 'content')).toBe(false)
+		bridge.dispose()
+	})
+})
+
 describe('the Select: a hidden label', () => {
 	it('keeps the label for assistive technology only with `hideLabel`, and still names the trigger by it', async () => {
 		const option = (id: string, label: string): Widget => ({ type: 'SelectOption', id, config: { label, selected: true } })
