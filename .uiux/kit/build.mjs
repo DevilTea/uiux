@@ -14,7 +14,7 @@ import { readFile, rm } from 'node:fs/promises'
 import { dirname, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import esbuild from 'esbuild'
-import { compileScript, compileStyle, parse } from 'vue/compiler-sfc'
+import { compileScript, compileStyle, parse, parseCache } from 'vue/compiler-sfc'
 
 const kitDirectory = dirname(fileURLToPath(import.meta.url))
 process.chdir(kitDirectory)
@@ -35,6 +35,11 @@ const vueSfc = {
     const descriptors = new Map()
     build.onLoad({ filter: /\.vue$/ }, async ({ path }) => {
       const label = labelOf(path)
+      // `parse` returns the same cached descriptor for an unchanged source, and `compileScript` leaves its template AST
+      // transformed: a later compile of that descriptor re-parses the template with the `compilerOptions` below (HTML comments
+      // dropped), where the first compile of a fresh process keeps the comments of the AST `parse` made. A watch rebuild would
+      // then emit other bytes than `node build.mjs` for the same sources (issue #402), so every compile starts from a new parse.
+      parseCache.clear()
       const { descriptor, errors } = parse(await readFile(path, 'utf8'), { filename: label })
       if (errors.length > 0) return { errors: errors.map(error => ({ text: error.message, location: { file: label, line: error.loc?.start.line ?? 1, column: 0 } })) }
       // A Kit component's styles are plain global CSS over `--kit-*` tokens, so the same file copies into a product
