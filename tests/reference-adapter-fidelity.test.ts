@@ -103,6 +103,15 @@ describe('the icons the Locales, Assets and Settings dogfood needed (issue #379,
 	})
 })
 
+describe('the icons the Handoff export and Evidence dogfood needed (issue #379, phase 5)', () => {
+	it('draws every Lucide icon of the batch, by its Lucide name, as an svg', async () => {
+		const names = ['badge-check', 'circle-x', 'maximize-2', 'minimize-2', 'clock', 'file-search']
+		const { container, bridge } = await mount(names.map(name => ({ type: 'Icon', id: `i-${name}`, config: { name } })))
+		for (const name of names) expect(widget(container, `i-${name}`).querySelector('svg'), name).not.toBeNull()
+		bridge.dispose()
+	})
+})
+
 describe('the Select: a hidden label', () => {
 	it('keeps the label for assistive technology only with `hideLabel`, and still names the trigger by it', async () => {
 		const option = (id: string, label: string): Widget => ({ type: 'SelectOption', id, config: { label, selected: true } })
