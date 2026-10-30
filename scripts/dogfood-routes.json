@@ -41,7 +41,9 @@
 			]
 		},
 		"/preview": {
-			"todo": "the Preview host page and its failure and loading states have no View yet (Preview failures and Preview host states in #409)"
+			"views": [
+				"b5f8c101-2d4a-4e6b-8c3f-9a1d5e7b0c01"
+			]
 		},
 		"/reviews": {
 			"views": [
@@ -69,7 +71,11 @@
 				"a4c1d703-6e2b-4f3a-9d5c-2b7e1f8a0c03",
 				"a4c1d704-6e2b-4f3a-9d5c-2b7e1f8a0c04",
 				"a4c1d705-6e2b-4f3a-9d5c-2b7e1f8a0c05",
-				"9677f556-50dd-4c04-9466-54d17bf1e2fb"
+				"9677f556-50dd-4c04-9466-54d17bf1e2fb",
+				"b5f8c102-2d4a-4e6b-8c3f-9a1d5e7b0c02",
+				"b5f8c103-2d4a-4e6b-8c3f-9a1d5e7b0c03",
+				"b5f8c104-2d4a-4e6b-8c3f-9a1d5e7b0c04",
+				"b5f8c105-2d4a-4e6b-8c3f-9a1d5e7b0c05"
 			]
 		},
 		"/workspace": {
