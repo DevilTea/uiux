@@ -45,15 +45,15 @@
       "target": "app/components/kit"
     },
     "icon": {
-      "componentDigest": "sha256:6104397b084cd632c3cd0e7af2d5e3cd15afbb693649ad7eb0a22564fdba0b8d",
-      "exportedAt": "2026-10-30T04:51:43.667Z",
+      "componentDigest": "sha256:0e7c029fc262090f6fb66510c975d2e21fffb6797fba9f9c15f97896280f3447",
+      "exportedAt": "2026-10-30T10:35:04.580Z",
       "files": {
         "app/components/kit/ui/Icon.vue": {
           "digest": "sha256:d4bb0289b546a97391181a97b9e209ca82aae324ad89eb760ca30f3c91c649d2",
           "source": "src/ui/Icon.vue"
         },
         "app/components/kit/ui/icons.ts": {
-          "digest": "sha256:5a9c84c0e87fdf7ce9d096900796b878be9a0ecfc360e6f1a6d694b9ef1e038e",
+          "digest": "sha256:3f9f9fd8b2726d1ae0b44aa802f9c805a1b2954638ae33f343b3feb833b3f439",
           "source": "src/ui/icons.ts"
         }
       },
