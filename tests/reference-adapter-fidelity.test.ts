@@ -85,6 +85,15 @@ describe('the icons the dogfood Views needed (issue #394)', () => {
 	})
 })
 
+describe('the icons the Members and Access presets dogfood needed (issue #379, phase 5)', () => {
+	it('draws every Lucide icon of the batch, by its Lucide name, as an svg', async () => {
+		const names = ['user-plus', 'shield-alert', 'plug-zap', 'key-square', 'list-checks', 'user-minus', 'shield-check', 'user-round', 'user-cog', 'users', 'list-restart', 'copy-x']
+		const { container, bridge } = await mount(names.map(name => ({ type: 'Icon', id: `i-${name}`, config: { name } })))
+		for (const name of names) expect(widget(container, `i-${name}`).querySelector('svg'), name).not.toBeNull()
+		bridge.dispose()
+	})
+})
+
 describe('the Button (loading, link looks, solid neutral, disabled primary)', () => {
 	it('shows a spinner instead of its icon while `loading`, is busy and disabled, and reports no click', async () => {
 		const { container, bridge } = await mount([
@@ -233,7 +242,7 @@ describe('text interpolation and inline code', () => {
 
 	it('reports no translation warning for the interpolating fields, and declares `value` for each in the Catalog', async () => {
 		const manifest = extractProductAdapterManifest(await import(pathToFileURL(ADAPTER).href) as Record<string, unknown>)
-		for (const [type, field] of [['Text', 'text'], ['Button', 'label'], ['Alert', 'title'], ['Alert', 'description'], ['Disclosure', 'label'], ['Badge', 'label']] as const)
+		for (const [type, field] of [['Text', 'text'], ['Button', 'label'], ['Alert', 'title'], ['Alert', 'description'], ['Panel', 'title'], ['Panel', 'description'], ['Disclosure', 'label'], ['Badge', 'label']] as const)
 			expect(manifest.catalog.widgets[type]?.i18n?.fields[field]?.params, `${type}.${field}`).toMatchObject({ value: 'valueText' })
 		const { bridge } = await mount([
 			{ type: 'Button', id: 'next', config: { labelKey: 'k.next', value: 'x' } },
@@ -242,7 +251,7 @@ describe('text interpolation and inline code', () => {
 			{ type: 'Select', id: 'select', config: { valueKey: 'k.next', labelKey: 'k.count' } },
 			{ type: 'TextInput', id: 'field', config: { valueKey: 'k.next' } },
 			{ type: 'SelectOption', id: 'option', config: { labelKey: 'k.next', descriptionKey: 'k.count' } },
-			{ type: 'Panel', id: 'panel', config: { titleKey: 'k.next', descriptionKey: 'k.count', closeLabelKey: 'k.count' } },
+			{ type: 'Panel', id: 'panel', config: { titleKey: 'k.next', descriptionKey: 'k.count', closeLabelKey: 'k.count', value: 'x' } },
 			{ type: 'Segment', id: 'segment', config: { labelKey: 'k.next', badgeKey: 'k.count' } },
 		], { locales })
 		const evaluation = bridge.evaluateTranslations!()
@@ -251,7 +260,7 @@ describe('text interpolation and inline code', () => {
 		expect(evaluation.missing).toEqual([])
 		expect(evaluation.entries.length).toBeGreaterThanOrEqual(14)
 		const warned = evaluation.entries.filter(entry => entry.warnings.length > 0).map(entry => entry.occurrence)
-		// `k.next` and `k.count` use `{value}` that the Select, TextInput, SelectOption, Panel and Segment do not supply.
+		// `k.next` and `k.count` use `{value}` that the Select, TextInput, SelectOption, Panel (its close label) and Segment do not supply.
 		expect(warned.every(occurrence => ['select', 'field', 'option', 'panel', 'segment'].includes((occurrence as { widgetId?: string }).widgetId ?? ''))).toBe(true)
 		const interpolating = evaluation.entries.filter(entry => ['next', 'alert', 'quiet'].includes((entry.occurrence as { widgetId?: string }).widgetId ?? ''))
 		expect(interpolating.length).toBeGreaterThanOrEqual(3)
@@ -464,6 +473,25 @@ describe('the Panel dialog: description, close button, separators and backdrop',
 		const css = await readFile(join(KIT, 'dist', 'uiux.css'), 'utf8')
 		expect(css).toContain('.uiux-ref-panel.variant-dialog .uiux-ref-panel-footer:has(> *)')
 		expect(css).toContain('.uiux-ref-panel.variant-dialog.has-backdrop')
+		bridge.dispose()
+	})
+})
+
+describe('the Panel title and description interpolate {value}, {value2} and {value3}', () => {
+	it('fills the placeholders of a translated title and description from the literal values, and reports no warning for them', async () => {
+		const locales = { 'en-US': { 'p.title': 'Remove {value}?', 'p.desc': 'Single use, expires {value}. It signs one browser in as {value2}.', 'p.three': '{value} is editing {value2} until {value3}' } }
+		const { container, bridge } = await mount([
+			{ type: 'Panel', id: 'remove', config: { variant: 'dialog', titleKey: 'p.title', value: 'dana' } },
+			{ type: 'Panel', id: 'invite', config: { variant: 'dialog', title: 'Link', descriptionKey: 'p.desc', value: 'Nov 3, 2026', value2: 'dana' } },
+			{ type: 'Panel', id: 'three', config: { variant: 'dialog', titleKey: 'p.three', value: 'claude', value2: 'Checkout', value3: '15:05' } },
+			{ type: 'Panel', id: 'literal', config: { variant: 'dialog', title: 'Plain {value}' } },
+		], { locales })
+		expect(widget(container, 'remove').querySelector('.uiux-ref-panel-title')!.textContent).toBe('Remove dana?')
+		expect(widget(container, 'invite').querySelector('.uiux-ref-panel-description')!.textContent).toBe('Single use, expires Nov 3, 2026. It signs one browser in as dana.')
+		expect(widget(container, 'three').querySelector('.uiux-ref-panel-title')!.textContent).toBe('claude is editing Checkout until 15:05')
+		expect(widget(container, 'literal').querySelector('.uiux-ref-panel-title')!.textContent).toBe('Plain {value}')
+		const warned = bridge.evaluateTranslations!().entries.filter(entry => entry.warnings.length > 0)
+		expect(warned).toEqual([])
 		bridge.dispose()
 	})
 })

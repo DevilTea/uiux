@@ -568,6 +568,10 @@ export interface PanelInterfaces {
 			/** A muted line under the title (the dialog's description). */
 			description?: string
 			descriptionKey?: string
+			/** Interpolated into a translated title or description as `{value}`, `{value2}` and `{value3}`. */
+			value?: string | number
+			value2?: string | number
+			value3?: string | number
 			variant?: PanelVariant
 			/** Adds a close (X) button at the end of the header; it fires `close`. */
 			closable?: boolean
@@ -577,7 +581,7 @@ export interface PanelInterfaces {
 			backdrop?: boolean
 			responsive?: Responsive<PanelLayout>
 		}) | null
-		resolved: {
+		resolved: InterpolationArgs & {
 			title: string
 			titleKey: string | null
 			description: string
@@ -595,6 +599,9 @@ export interface PanelInterfaces {
 	state: { visible: boolean }
 	events: { close: readonly [] }
 	properties: {
+		valueText: string
+		value2Text: string
+		value3Text: string
 		titleResult: TranslationResult
 		title: string
 		descriptionResult: TranslationResult
@@ -609,15 +616,18 @@ export interface PanelInterfaces {
 }
 
 export const panelPlugin = createWidgetPlugin('Panel')
-	.description('Surface container with optional translatable title and description, header, footer, styling variants (`dialog` adds a header description, a close button, header and footer separators and a dimmed backdrop), viewport-tier overrides, and an author-writable `visible` state.')
+	.description('Surface container with optional translatable title and description (which may interpolate {value}, {value2} and {value3}), header, footer, styling variants (`dialog` adds a header description, a close button, header and footer separators and a dimmed backdrop), viewport-tier overrides, and an author-writable `visible` state.')
 	.interfaces<PanelInterfaces>()
 	.config({
-		description: 'Panel configuration. `title`, `description` and `closeLabel` accept `$i18n` bindings (lowered to `titleKey`, `descriptionKey`, `closeLabelKey`).',
+		description: 'Panel configuration. `title`, `description` and `closeLabel` accept `$i18n` bindings (lowered to `titleKey`, `descriptionKey`, `closeLabelKey`); `{value}`, `{value2}` and `{value3}` in the title or description interpolate `value`, `value2` and `value3` (literal).',
 		schema: configSchema({
 			title: { type: 'string' },
 			titleKey: { type: 'string' },
 			description: { type: 'string' },
 			descriptionKey: { type: 'string' },
+			value: { type: ['string', 'number'] },
+			value2: { type: ['string', 'number'] },
+			value3: { type: ['string', 'number'] },
 			closable: { type: 'boolean' },
 			closeLabel: { type: 'string' },
 			closeLabelKey: { type: 'string' },
@@ -637,9 +647,10 @@ export const panelPlugin = createWidgetPlugin('Panel')
 		}),
 		validate: (c): c is PanelInterfaces['config']['raw'] => isConfigOrOmitted(c),
 		resolve: (raw) => {
-			const { title, titleKey, description, descriptionKey, variant, closable, closeLabel, closeLabelKey, backdrop, ...layout } = raw ?? {}
+			const { title, titleKey, description, descriptionKey, value, value2, value3, variant, closable, closeLabel, closeLabelKey, backdrop, ...layout } = raw ?? {}
 			const split = splitResponsive<PanelLayout>(layout)
 			return {
+				...interpolationArgs({ value, value2, value3 }),
 				title: typeof title === 'string' ? title : '',
 				titleKey: optionalString(titleKey),
 				description: typeof description === 'string' ? description : '',
@@ -660,10 +671,13 @@ export const panelPlugin = createWidgetPlugin('Panel')
 	})
 	.state(state => state.visible({ ...visibleState, default: ({ config }) => config.base.visible !== false }))
 	.properties(p => p
-		.titleResult(translatedResult<PanelInterfaces['config']['resolved']>(c => ({ key: c.titleKey, literal: c.title })))
-		.title(translatedText<PanelInterfaces['config']['resolved']>(c => ({ key: c.titleKey, literal: c.title })))
-		.descriptionResult(translatedResult<PanelInterfaces['config']['resolved']>(c => ({ key: c.descriptionKey, literal: c.description })))
-		.description(translatedText<PanelInterfaces['config']['resolved']>(c => ({ key: c.descriptionKey, literal: c.description })))
+		.valueText({ valueContract: STRING, compute: ({ config }) => config.value })
+		.value2Text({ valueContract: STRING, compute: ({ config }) => config.value2 })
+		.value3Text({ valueContract: STRING, compute: ({ config }) => config.value3 })
+		.titleResult(translatedResultWithValue<PanelInterfaces['config']['resolved']>(c => ({ key: c.titleKey, literal: c.title })))
+		.title(translatedTextWithValue<PanelInterfaces['config']['resolved']>(c => ({ key: c.titleKey, literal: c.title })))
+		.descriptionResult(translatedResultWithValue<PanelInterfaces['config']['resolved']>(c => ({ key: c.descriptionKey, literal: c.description })))
+		.description(translatedTextWithValue<PanelInterfaces['config']['resolved']>(c => ({ key: c.descriptionKey, literal: c.description })))
 		.closeLabelResult(translatedResult<PanelInterfaces['config']['resolved']>(c => ({ key: c.closeLabelKey, literal: c.closeLabel })))
 		.closeLabel(translatedText<PanelInterfaces['config']['resolved']>(c => ({ key: c.closeLabelKey, literal: c.closeLabel })))
 		.variant({ compute: ({ config }) => config.variant })
@@ -5150,7 +5164,7 @@ function i18nField(field: string, params?: Readonly<Record<string, string>>): I1
 	}
 }
 
-/** The interpolation parameters of Text, Button, Alert and Disclosure: each maps to the Widget's Property of its Config value. */
+/** The interpolation parameters of Text, Button, Alert, Panel and Disclosure: each maps to the Widget's Property of its Config value. */
 const VALUE_PARAMS = { value: 'valueText', value2: 'value2Text', value3: 'value3Text' } as const
 
 function i18nFields(...fields: readonly string[]): AdapterWidgetCatalogEntry {
@@ -5166,7 +5180,7 @@ const RENDER_CONTEXT_PARAMS = {
 
 const catalogWidgets: Readonly<Record<string, AdapterWidgetCatalogEntry>> = {
 	Stack: {},
-	Panel: i18nFields('title', 'description', 'closeLabel'),
+	Panel: { i18n: { fields: { title: i18nField('title', VALUE_PARAMS), description: i18nField('description', VALUE_PARAMS), closeLabel: i18nField('closeLabel') } } },
 	Text: { i18n: { fields: { text: i18nField('text', VALUE_PARAMS) } } },
 	Button: { i18n: { fields: { label: i18nField('label', VALUE_PARAMS) } } },
 	Badge: { i18n: { fields: { label: i18nField('label', { value: 'valueText', ...RENDER_CONTEXT_PARAMS }) } } },
