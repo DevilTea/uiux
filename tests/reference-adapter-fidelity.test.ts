@@ -130,6 +130,18 @@ describe('the icons the command palette, preferences and shortcuts dogfood neede
 	})
 })
 
+describe('the icons the Comments dogfood needed (issue #379, phase 5)', () => {
+	it('draws every Lucide icon of the batch, by its Lucide name, as an svg', async () => {
+		const names = [
+			'circle-slash', 'arrow-up-to-line', 'arrow-right-to-line', 'arrow-down-to-line', 'arrow-left-to-line', 'scan-eye', 'map-pin-off',
+			'git-pull-request-arrow', 'send-horizontal', 'undo-2', 'message-circle-warning', 'archive', 'message-circle-reply', 'circle',
+		]
+		const { container, bridge } = await mount(names.map(name => ({ type: 'Icon', id: `i-${name}`, config: { name } })))
+		for (const name of names) expect(widget(container, `i-${name}`).querySelector('svg'), name).not.toBeNull()
+		bridge.dispose()
+	})
+})
+
 describe('the Kbd: a key cap that is content, not a hint', () => {
 	const phone = { viewportId: 'mobile', viewport: { width: 390, height: 844 } }
 	const kbds: readonly Widget[] = [{ type: 'Kbd', id: 'hint', config: { keys: 'K' } }, { type: 'Kbd', id: 'content', config: { keys: 'K', showOnTouch: true } }]
