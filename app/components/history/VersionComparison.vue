@@ -12,6 +12,7 @@ import ResourceChange from './ResourceChange.vue'
 import WbErrorDescription from '../workbench/WbErrorDescription.vue'
 import KitIcon from '~/components/kit/ui/Icon.vue'
 import KitSkeleton from '~/components/kit/ui/Skeleton.vue'
+import KitLinkButton from '~/components/KitLinkButton.vue'
 
 /**
  * A comparison (Rule 01a11a5e-11e0-7f39-84a7-fde3faa43340): the summary of every compared resource
@@ -161,13 +162,13 @@ watch(() => props.address.version, focusHeading)
         </p>
       </div>
       <UTooltip :text="t('history.compare.close')">
-        <UButton
+        <KitLinkButton
           :to="closeTo"
           size="xs"
-          color="neutral"
           variant="ghost"
-          icon="i-lucide-x"
-          :aria-label="t('history.compare.close')"
+          icon="x"
+          icon-only
+          :label="t('history.compare.close')"
           data-comparison-close
         />
       </UTooltip>
@@ -179,13 +180,12 @@ watch(() => props.address.version, focusHeading)
       data-compare-targets
     >
       <span class="text-xs text-muted">{{ t('history.compare.against') }}</span>
-      <UButton
+      <KitLinkButton
         v-for="target in targets"
         :key="target.value"
         :to="linkFor(addressWith({ compare: target.value }))"
         size="xs"
-        color="neutral"
-        :variant="selection.compare === target.value ? 'solid' : 'outline'"
+        :variant="selection.compare === target.value ? 'neutral' : 'outline'"
         :aria-current="selection.compare === target.value ? 'true' : undefined"
         :data-compare-target="target.value === PARENT_COMPARE || target.value === CURRENT_COMPARE ? target.value : 'version'"
         :label="target.label"

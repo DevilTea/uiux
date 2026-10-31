@@ -5,6 +5,7 @@ import type { DropdownMenuItem } from '@nuxt/ui'
 import { useCanvasComments } from '../../../composables/useCanvasComments'
 import type { PinEdgeSide } from '../../../../src/preview/pin-visibility'
 import CommentPin from '~/components/kit/ui/CommentPin.vue'
+import KitIcon from '~/components/kit/ui/Icon.vue'
 
 /**
  * A count cluster (pins within 24 px, decision 7) or an edge indicator (pins whose Widget is
@@ -78,7 +79,7 @@ const items = computed<DropdownMenuItem[][]>(() => !open.value ? NO_ITEMS : [
 	}),
 ])
 
-const EDGE_ICON = { top: 'i-lucide-chevron-up', right: 'i-lucide-chevron-right', bottom: 'i-lucide-chevron-down', left: 'i-lucide-chevron-left' } as const
+const EDGE_ICON = { top: 'chevron-up', right: 'chevron-right', bottom: 'chevron-down', left: 'chevron-left' } as const
 const EDGE_OFFSET = { top: 'translate(-50%, 0)', bottom: 'translate(-50%, -100%)', left: 'translate(0, -50%)', right: 'translate(-100%, -50%)' } as const
 /** Menus open into the canvas, away from the edge they sit on. */
 const EDGE_MENU_SIDE = { top: 'bottom', bottom: 'top', left: 'right', right: 'left' } as const
@@ -115,9 +116,9 @@ const singleLabel = computed(() => {
     :tabindex="dim ? -1 : 0"
     @click="openAndFocus(threadIds[0]!)"
   >
-    <UIcon
+    <KitIcon
       :name="EDGE_ICON[side ?? 'bottom']"
-      class="size-3.5"
+      :size="14"
     />
     <span class="tabular-nums">1</span>
   </button>
@@ -149,9 +150,9 @@ const singleLabel = computed(() => {
       :data-edge-side="side"
       :tabindex="dim ? -1 : 0"
     >
-      <UIcon
+      <KitIcon
         :name="EDGE_ICON[side ?? 'bottom']"
-        class="size-3.5"
+        :size="14"
       />
       <span class="tabular-nums">{{ count }}</span>
     </button>

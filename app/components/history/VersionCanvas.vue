@@ -23,6 +23,7 @@ import CanvasZoomControls from '../workbench/CanvasZoomControls.vue'
 import VersionFrame from './VersionFrame.vue'
 import KitButton from '~/components/kit/ui/Button.vue'
 import KitSkeleton from '~/components/kit/ui/Skeleton.vue'
+import KitLinkButton from '~/components/KitLinkButton.vue'
 
 /**
  * The canvas before/after comparison of the View page (Rules 01a11a5e-11e0-7f39-84a7-fde3faa43340,
@@ -357,18 +358,17 @@ function canvasTo(next: HistoryCanvasMode | undefined) {
           class="flex items-center gap-0.5"
           :aria-label="t('history.canvas.label')"
         >
-          <UButton
+          <KitLinkButton
             v-for="option in (['side', 'highlight'] as const)"
             :key="option"
             :to="canvasTo(option)"
             size="sm"
-            color="neutral"
             :variant="mode === option ? 'soft' : 'ghost'"
-            :icon="option === 'side' ? 'i-lucide-columns-2' : 'i-lucide-scan-search'"
+            :icon="option === 'side' ? 'columns-2' : 'scan-search'"
+            :icon-only="!isDesktop"
             :aria-current="mode === option ? 'true' : undefined"
             :data-canvas-toolbar-mode="option"
-            :label="isDesktop ? t(`history.canvas.mode.${option}`) : undefined"
-            :aria-label="t(`history.canvas.mode.${option}`)"
+            :label="t(`history.canvas.mode.${option}`)"
           />
         </nav>
         <USeparator
@@ -384,13 +384,13 @@ function canvasTo(next: HistoryCanvasMode | undefined) {
           @zoom-to="value => setZoom(value)"
         />
         <UTooltip :text="t('history.canvas.close')">
-          <UButton
+          <KitLinkButton
             :to="canvasTo(undefined)"
             size="sm"
-            color="neutral"
             variant="ghost"
-            icon="i-lucide-x"
-            :aria-label="t('history.canvas.close')"
+            icon="x"
+            icon-only
+            :label="t('history.canvas.close')"
             data-canvas-close
           />
         </UTooltip>

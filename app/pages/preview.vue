@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { definePageMeta, useI18n, useRoute } from '#imports'
+import KitIcon from '~/components/kit/ui/Icon.vue'
 import { useUiuxClient } from '../composables/useUiuxClient'
 import { describeFetchError } from '../utils/fetch-error'
 import { diagnosticText } from '../utils/diagnostic-copy'
@@ -906,9 +907,10 @@ onUnmounted(() => {
         class="space-y-3 text-center"
         role="status"
       >
-        <UIcon
-          name="i-lucide-loader-circle"
-          class="mx-auto size-8 animate-spin text-primary motion-reduce:animate-none"
+        <KitIcon
+          name="loader-circle"
+          :size="32"
+          class="mx-auto animate-spin text-primary motion-reduce:animate-none"
         />
         <p class="text-xs text-muted">
           {{ t('preview.loading') }}

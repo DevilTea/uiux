@@ -243,9 +243,10 @@ const missingWidgetId = computed(() => rootItem.value && selectedWidgetId.value 
               >
                 <span class="sr-only">{{ t(findings.get(item.id) === 'error' ? 'workbench.tree.hasError' : 'workbench.tree.hasWarning') }}</span>
               </span>
-              <UIcon
+              <KitIcon
                 v-if="item.children?.length"
-                name="i-lucide-chevron-down"
+                name="chevron-down"
+                :size="20"
                 :class="ui.linkTrailingIcon()"
               />
             </span>

@@ -957,9 +957,9 @@ export interface ButtonPresentation {
 	hideKbd?: boolean
 }
 
-/** `neutral` is the solid neutral button (the current choice of a group); `soft` is the quiet filled look; `link` is a primary link, `link-muted` a quiet one. */
-type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'outline' | 'danger' | 'annotation' | 'link' | 'link-muted' | 'brand' | 'display' | 'neutral' | 'soft'
-const BUTTON_VARIANTS: readonly ButtonVariant[] = ['primary', 'secondary', 'ghost', 'outline', 'danger', 'annotation', 'link', 'link-muted', 'brand', 'display', 'neutral', 'soft']
+/** `neutral` is the solid neutral button (the current choice of a group); `soft` is the quiet filled look; `warning` is the solid warning button and `warning-soft` its quiet tinted look; `link` is a primary link, `link-muted` a quiet one. */
+type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'outline' | 'danger' | 'annotation' | 'link' | 'link-muted' | 'brand' | 'display' | 'neutral' | 'soft' | 'warning' | 'warning-soft'
+const BUTTON_VARIANTS: readonly ButtonVariant[] = ['primary', 'secondary', 'ghost', 'outline', 'danger', 'annotation', 'link', 'link-muted', 'brand', 'display', 'neutral', 'soft', 'warning', 'warning-soft']
 const isNullableBoolean = (v: unknown): v is boolean | null => v === null || typeof v === 'boolean'
 
 export interface ButtonInterfaces {
@@ -1033,7 +1033,7 @@ export interface ButtonInterfaces {
 }
 
 export const buttonPlugin = createWidgetPlugin('Button')
-	.description('Button with translatable label, Lucide icon, optional trailing icon and shortcut hint, neutral-outline default, one solid primary per region (or the solid neutral for a group\'s current choice), muted or primary link looks, a quiet `soft` fill, an `xs` (24px) size, a loading spinner, a long label that truncates, and 44px targets on touch tiers. Author-writable `disabled`, `visible`, `loading`, `variant`, `pressed` (a toggle, soft while pressed) and `expanded` (a disclosure toggle, whose trailing icon turns 180 degrees) states drive Variants.')
+	.description('Button with translatable label, Lucide icon, optional trailing icon and shortcut hint, neutral-outline default, one solid primary per region (or the solid neutral for a group\'s current choice), muted or primary link looks, a quiet `soft` fill, solid and soft `warning` looks, an `xs` (24px) size, a loading spinner, a long label that truncates, and 44px targets on touch tiers. Author-writable `disabled`, `visible`, `loading`, `variant`, `pressed` (a toggle, soft while pressed) and `expanded` (a disclosure toggle, whose trailing icon turns 180 degrees) states drive Variants.')
 	.interfaces<ButtonInterfaces>()
 	.config({
 		description: 'Button configuration. `label` accepts an `$i18n` binding (lowered to `labelKey`); `{value}`, `{value2}` and `{value3}` interpolate `value`, `value2` and `value3`, and with `valueCode` `{value}` shows as inline code. `icon` and `trailingIcon` take Lucide names. `variant`, `disabled`, `loading`, `pressed` and `expanded` are the initial values of the states of the same name. `size` is `xs` (24px), `sm`, `md` or `lg`; `truncate` ends a long label in an ellipsis.',
