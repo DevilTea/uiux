@@ -10,6 +10,8 @@ import { useHistoryLabels } from '../../composables/useHistoryLabels'
 import { describeFetchError, isTransientError, type FetchErrorDetails } from '../../utils/fetch-error'
 import { focusFirstProblem } from '../../utils/focus-problem'
 import AuthoringErrorAlert from '../workspace/AuthoringErrorAlert.vue'
+import KitButton from '~/components/kit/ui/Button.vue'
+import KitIcon from '~/components/kit/ui/Icon.vue'
 
 /**
  * Create Checkpoint (Rule 01a11a5e-0c71-78d1-9adb-14db6c67ab9c): a name of 1 to 120 characters and
@@ -114,9 +116,9 @@ async function create(): Promise<void> {
                 :key="`${lease.kind}:${lease.key}`"
                 class="flex flex-wrap items-center gap-x-1.5"
               >
-                <UIcon
-                  :name="lease.holder.kind === 'agent' ? 'i-lucide-bot' : 'i-lucide-user'"
-                  class="size-3.5"
+                <KitIcon
+                  :name="lease.holder.kind === 'agent' ? 'bot' : 'user'"
+                  :size="14"
                 />
                 <span class="font-medium">{{ lease.holder.nickname }}</span>
                 <span>{{ labels.kindLabel(lease.kind) }} · {{ labels.resourceName(lease) }}</span>
@@ -175,16 +177,14 @@ async function create(): Promise<void> {
     </template>
     <template #footer>
       <div class="flex w-full justify-end gap-2">
-        <UButton
-          color="neutral"
+        <KitButton
           variant="outline"
           :label="t('common.cancel')"
           @click="open = false"
         />
-        <UButton
-          color="primary"
-          variant="solid"
-          icon="i-lucide-flag"
+        <KitButton
+          variant="primary"
+          icon="flag"
           :loading="creating"
           :label="t('history.checkpoint.submit')"
           data-checkpoint-submit

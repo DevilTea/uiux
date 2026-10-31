@@ -13,6 +13,8 @@ import { restoreSourceVersion } from '../../utils/version-restore'
 import ResourceDiff from './ResourceDiff.vue'
 import RestoreVersionAction from './RestoreVersionAction.vue'
 import WbErrorDescription from '../workbench/WbErrorDescription.vue'
+import KitIcon from '~/components/kit/ui/Icon.vue'
+import KitSkeleton from '~/components/kit/ui/Skeleton.vue'
 
 /**
  * One changed resource of a comparison: its heading and, once opened, its semantic diff, read for
@@ -82,13 +84,15 @@ watch(() => open.value && props.row.kind === 'asset' ? props.row.key : undefined
         data-resource-diff-toggle
         @click="open = !open"
       >
-        <UIcon
-          :name="open ? 'i-lucide-chevron-down' : 'i-lucide-chevron-right'"
-          class="size-4 shrink-0 text-muted"
+        <KitIcon
+          :name="open ? 'chevron-down' : 'chevron-right'"
+          class="shrink-0 text-muted"
+          :size="16"
         />
-        <UIcon
+        <KitIcon
           :name="CHANGE_ICONS[row.status]!"
-          class="size-4 shrink-0 text-muted"
+          class="shrink-0 text-muted"
+          :size="16"
         />
         <span class="shrink-0 text-xs text-muted">{{ t(`history.compare.status.${row.status}`) }}</span>
         <span class="shrink-0 text-xs text-muted">{{ labels.kindLabel(row.kind) }}</span>
@@ -127,10 +131,12 @@ watch(() => open.value && props.row.kind === 'asset' ? props.row.key : undefined
           />
         </template>
       </UAlert>
-      <USkeleton
+      <KitSkeleton
         v-else-if="!change || (row.kind === 'asset' && !currentAsset)"
-        class="h-12 w-full"
-        :aria-label="t('common.loading')"
+        class="wb-skeleton animate-pulse"
+        :height="48"
+        :radius="6"
+        :label="t('common.loading')"
       />
       <template v-else>
         <ResourceDiff

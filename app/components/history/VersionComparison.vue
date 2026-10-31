@@ -10,6 +10,8 @@ import { CURRENT_COMPARE, PARENT_COMPARE, resolveHistorySelection, sameResource,
 import { comparisonRefreshKey } from '../../utils/comparison-refresh'
 import ResourceChange from './ResourceChange.vue'
 import WbErrorDescription from '../workbench/WbErrorDescription.vue'
+import KitIcon from '~/components/kit/ui/Icon.vue'
+import KitSkeleton from '~/components/kit/ui/Skeleton.vue'
 
 /**
  * A comparison (Rule 01a11a5e-11e0-7f39-84a7-fde3faa43340): the summary of every compared resource
@@ -142,9 +144,10 @@ watch(() => props.address.version, focusHeading)
             v-if="result.from && 'at' in result.from"
             :datetime="result.from.at"
           >{{ labels.dateTime(result.from.at) }}</time>
-          <UIcon
-            name="i-lucide-arrow-right"
-            class="size-3.5 shrink-0"
+          <KitIcon
+            name="arrow-right"
+            class="shrink-0"
+            :size="14"
           />
           <span class="sr-only">{{ t('history.compare.to') }}</span>
           <span
@@ -209,11 +212,13 @@ watch(() => props.address.version, focusHeading)
       v-else-if="!result"
       class="space-y-2"
     >
-      <USkeleton
+      <KitSkeleton
         v-for="index in 3"
         :key="index"
-        class="h-8 w-full"
-        :aria-label="t('common.loading')"
+        class="wb-skeleton animate-pulse"
+        :height="32"
+        :radius="6"
+        :label="t('common.loading')"
       />
     </div>
 
@@ -256,9 +261,10 @@ watch(() => props.address.version, focusHeading)
               :class="sameResource(row, selection.resource) ? 'bg-elevated' : ''"
               :aria-current="sameResource(row, selection.resource) ? 'true' : undefined"
             >
-              <UIcon
+              <KitIcon
                 :name="CHANGE_ICONS[row.status]!"
-                class="size-4 shrink-0 text-muted"
+                class="shrink-0 text-muted"
+                :size="16"
               />
               <span class="w-20 shrink-0 text-xs text-muted">{{ t(`history.compare.status.${row.status}`) }}</span>
               <span class="shrink-0 text-xs text-muted">{{ labels.kindLabel(row.kind) }}</span>

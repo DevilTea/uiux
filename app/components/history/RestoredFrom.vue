@@ -5,6 +5,7 @@ import { useI18n } from '#imports'
 import type { VersionRecord } from '../../../src/domain/history/schema'
 import { useHistoryLabels } from '../../composables/useHistoryLabels'
 import { readVersionRecord } from '../../composables/useVersionHistory'
+import KitIcon from '~/components/kit/ui/Icon.vue'
 
 /**
  * A restore's own timeline row names the version it restored from (Rules
@@ -38,9 +39,10 @@ watch(() => props.versionId, async (id) => {
     class="flex min-w-0 items-start gap-1 text-xs text-muted"
     :data-restored-from="versionId"
   >
-    <UIcon
-      name="i-lucide-history"
-      class="mt-px size-3.5 shrink-0"
+    <KitIcon
+      name="history"
+      class="mt-px shrink-0"
+      :size="14"
     />
     <i18n-t
       v-if="typeof source === 'object'"

@@ -6,6 +6,9 @@ import type { HistoryWriteEvent } from '../../../src/domain/history/schema'
 import { readVersionRecord } from '../../composables/useVersionHistory'
 import { CHANGE_ICONS, useHistoryLabels } from '../../composables/useHistoryLabels'
 import { describeFetchError, type FetchErrorDetails } from '../../utils/fetch-error'
+import KitButton from '~/components/kit/ui/Button.vue'
+import KitIcon from '~/components/kit/ui/Icon.vue'
+import KitSkeleton from '~/components/kit/ui/Skeleton.vue'
 
 /**
  * An expanded timeline row (Rule 01a11a5e-1946-7217-aff5-db13df3a2977): the resources the version
@@ -67,9 +70,10 @@ onMounted(load)
           :data-changed-resource="`${resource.kind}:${resource.key}`"
           :data-status="resource.status"
         >
-          <UIcon
+          <KitIcon
             :name="CHANGE_ICONS[resource.status]!"
-            class="size-3.5 shrink-0 text-muted"
+            class="shrink-0 text-muted"
+            :size="14"
           />
           <span class="sr-only">{{ t(`history.compare.status.${resource.status}`) }}</span>
           <span class="shrink-0 text-muted">{{ labels.kindLabel(resource.kind) }}</span>
@@ -87,10 +91,13 @@ onMounted(load)
       <h4 class="text-xs font-medium text-muted">
         {{ t('history.row.events') }}
       </h4>
-      <USkeleton
+      <KitSkeleton
         v-if="loading && !events"
-        class="h-4 w-48"
-        :aria-label="t('common.loading')"
+        class="wb-skeleton animate-pulse"
+        :width="192"
+        :height="16"
+        :radius="6"
+        :label="t('common.loading')"
       />
       <p
         v-else-if="error"
@@ -98,10 +105,10 @@ onMounted(load)
         role="alert"
       >
         {{ error.message }}
-        <UButton
+        <KitButton
+          variant="link-muted"
           size="xs"
-          variant="link"
-          color="error"
+          class="text-error!"
           :label="t('common.retry')"
           @click="load"
         />

@@ -15,23 +15,23 @@ let assetNamesAt = 0
 /** An Asset added since the last read is looked up again, at most this often. */
 const ASSET_NAMES_TTL_MS = 30_000
 
-/** Icon names per version type. */
+/** Kit icon names (Lucide, without prefix) per version type. */
 export const VERSION_TYPE_ICONS: Readonly<Record<HistoryVersionType, string>> = {
-	autosave: 'i-lucide-save',
-	checkpoint: 'i-lucide-flag',
-	external: 'i-lucide-file-pen-line',
-	system: 'i-lucide-cog',
+	autosave: 'save',
+	checkpoint: 'flag',
+	external: 'file-pen-line',
+	system: 'cog',
 }
 
 /** Change statuses are neutral marks with an icon and a word: green and red stay status colors (DESIGN.md). */
 export const CHANGE_ICONS: Readonly<Record<string, string>> = {
-	added: 'i-lucide-plus',
-	removed: 'i-lucide-minus',
-	modified: 'i-lucide-pencil',
-	changed: 'i-lucide-pencil',
-	moved: 'i-lucide-move',
-	reordered: 'i-lucide-arrow-up-down',
-	unchanged: 'i-lucide-equal',
+	added: 'plus',
+	removed: 'minus',
+	modified: 'pencil',
+	changed: 'pencil',
+	moved: 'move',
+	reordered: 'arrow-up-down',
+	unchanged: 'equal',
 }
 
 /** Chrome words for history records: actors, version types, resource kinds and write operations. */
@@ -71,10 +71,10 @@ export function useHistoryLabels() {
 	}
 
 	function actorIcon(actor: HistoryActor): string {
-		if (actor.type === 'agent') return 'i-lucide-bot'
-		if (actor.type === 'system') return 'i-lucide-cog'
-		if (actor.type === 'external') return 'i-lucide-file-pen-line'
-		return 'i-lucide-user'
+		if (actor.type === 'agent') return 'bot'
+		if (actor.type === 'system') return 'cog'
+		if (actor.type === 'external') return 'file-pen-line'
+		return 'user'
 	}
 
 	/**

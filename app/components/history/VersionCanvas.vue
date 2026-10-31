@@ -21,6 +21,8 @@ import { CURRENT_COMPARE, resolveHistorySelection, type HistoryAddress, type His
 import RenderContextControls from '../workbench/RenderContextControls.vue'
 import CanvasZoomControls from '../workbench/CanvasZoomControls.vue'
 import VersionFrame from './VersionFrame.vue'
+import KitButton from '~/components/kit/ui/Button.vue'
+import KitSkeleton from '~/components/kit/ui/Skeleton.vue'
 
 /**
  * The canvas before/after comparison of the View page (Rules 01a11a5e-11e0-7f39-84a7-fde3faa43340,
@@ -332,13 +334,12 @@ function canvasTo(next: HistoryCanvasMode | undefined) {
             v-else
             :content="{ align: 'start', sideOffset: 6 }"
           >
-            <UButton
-              color="neutral"
+            <KitButton
               variant="ghost"
               size="sm"
-              icon="i-lucide-layers"
-              trailing-icon="i-lucide-chevron-down"
-              class="min-w-0 max-w-full"
+              icon="layers"
+              trailing-icon="chevron-down"
+              truncate
               :label="t('ctx.summary', contextSummary)"
               :aria-label="t('ctx.summaryLabel', contextSummary)"
               data-context-summary
@@ -523,10 +524,13 @@ function canvasTo(next: HistoryCanvasMode | undefined) {
                   class="absolute inset-0 flex items-center justify-center rounded-xs border border-dashed border-default bg-default/60 p-4 text-center"
                   :data-frame-placeholder="frame.data.status"
                 >
-                  <USkeleton
+                  <KitSkeleton
                     v-if="frame.data.status === 'loading'"
-                    class="absolute inset-0"
-                    :aria-label="t('common.loading')"
+                    class="absolute inset-0 wb-skeleton animate-pulse"
+                    width="auto"
+                    height="auto"
+                    :radius="6"
+                    :label="t('common.loading')"
                   />
                   <div
                     v-else
@@ -535,12 +539,11 @@ function canvasTo(next: HistoryCanvasMode | undefined) {
                     <p class="text-sm text-muted">
                       {{ frame.data.status === 'none' ? t('history.canvas.nothingBefore') : frame.data.status === 'missing' ? t('history.canvas.viewMissing') : frame.data.status === 'error' ? frame.data.message : '' }}
                     </p>
-                    <UButton
+                    <KitButton
                       v-if="frame.data.status === 'error' && frame.id"
                       size="xs"
-                      color="neutral"
                       variant="outline"
-                      icon="i-lucide-rotate-cw"
+                      icon="refresh-cw"
                       :label="t('common.retry')"
                       data-frame-retry
                       @click="loadVersion(frame.id, true)"
@@ -550,10 +553,13 @@ function canvasTo(next: HistoryCanvasMode | undefined) {
               </div>
             </div>
           </template>
-          <USkeleton
+          <KitSkeleton
             v-else
-            class="absolute inset-8"
-            :aria-label="t('common.loading')"
+            class="absolute inset-8 wb-skeleton animate-pulse"
+            width="auto"
+            height="auto"
+            :radius="6"
+            :label="t('common.loading')"
           />
         </div>
       </div>

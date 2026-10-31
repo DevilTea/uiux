@@ -5,6 +5,7 @@ import type { VersionListItem } from '../../../src/application/services/history-
 import { forgetVersionDiffs, forgetVersionRecord, notifyHistoryChanged } from '../../composables/useVersionHistory'
 import { describeFetchError, type FetchErrorDetails } from '../../utils/fetch-error'
 import WbErrorDescription from '../workbench/WbErrorDescription.vue'
+import KitButton from '~/components/kit/ui/Button.vue'
 
 /**
  * The explicit confirmation of the Activity timeline's Delete row action (Rule
@@ -100,20 +101,18 @@ async function confirm(): Promise<void> {
     </template>
     <template #footer>
       <div class="flex w-full justify-end gap-2">
-        <UButton
+        <KitButton
           ref="cancelButton"
-          color="neutral"
           variant="outline"
           :disabled="deleting"
           :label="t('common.cancel')"
           data-delete-cancel
           @click="open = false"
         />
-        <UButton
+        <KitButton
           v-if="!invalidRecord"
-          color="error"
-          variant="soft"
-          icon="i-lucide-trash-2"
+          variant="danger"
+          icon="trash-2"
           :loading="deleting"
           :label="t('history.delete.confirm')"
           data-delete-confirm
