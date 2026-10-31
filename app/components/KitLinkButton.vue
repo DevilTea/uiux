@@ -26,6 +26,16 @@ defineProps<{
       v-bind="$attrs"
       :href="href ?? undefined"
       @click="navigate"
-    />
+    >
+      <template
+        v-for="(_, name) in $slots"
+        #[name]="slotProps"
+      >
+        <slot
+          :name="name"
+          v-bind="slotProps ?? {}"
+        />
+      </template>
+    </KitButton>
   </NuxtLink>
 </template>

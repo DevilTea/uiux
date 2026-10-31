@@ -124,10 +124,10 @@ describe('The History area uses the Kit components (#380)', () => {
 			expect(await timeline.locator(GLYPHS).count()).toBe(0)
 			expect(await timeline.getByText(/i-lucide/).count()).toBe(0)
 
-			// Compare is a router link: it stays Nuxt UI.
+			// Compare is a router link: a Kit Button link (KitLinkButton).
 			const compare = row.locator('[data-version-compare]')
 			expect(await compare.evaluate(element => element.tagName)).toBe('A')
-			expect(await hasClass(compare, 'kit-btn')).toBe(false)
+			expect(await hasClass(compare, 'kit-btn')).toBe(true)
 
 			const remove = row.locator('[data-version-delete]')
 			expect(await hasClass(remove, 'kit-btn--ghost')).toBe(true)
