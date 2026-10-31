@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
+import { deriveOuterMapping } from '../src/preview/derived-outer-mapping'
 import type { GeometryReport } from '../src/preview/geometry-streams'
-import type { AffineOuterMapping } from '../src/preview/outer-precision'
+import { evaluateRegionPrecision, type AffineOuterMapping } from '../src/preview/outer-precision'
 import {
 	aggregateEdgeIndicators,
 	clusterPins,
@@ -180,5 +181,32 @@ describe('Per-pin visibility (decision 7)', () => {
 			thread('c', 'w3', { variantNames: ['compact'] }),
 		], { viewId })
 		expect(demand).toEqual([{ consumerId: 'pin:a', widgetId: 'w1', tier: 'pin', status: 'resolved', latestActivity: Date.parse('2026-10-01T00:00:00Z') }])
+	})
+})
+
+describe('Pins under a non-affine outer mapping (Rule 01a116f0-1dca)', () => {
+	it('hides every pin although a proven amplification bound still makes the precise highlight eligible', () => {
+		// A perspective-like rendered content quad is not a parallelogram: it is non-affine evidence only.
+		const derived = deriveOuterMapping({ width: 400, height: 300 }, {
+			p1: { x: 0, y: 0 }, p2: { x: 400, y: 20 }, p3: { x: 380, y: 280 }, p4: { x: 10, y: 300 },
+		})
+		expect(derived.status).toBe('non-affine')
+		// The highlight side: a proof of the amplification bound keeps the precise highlight eligible.
+		expect(evaluateRegionPrecision(0.1, { kind: 'non-affine', amplificationUpperBound: 4 })).toMatchObject({ status: 'eligible' })
+		// The pin side: the canvas passes no mapping for a non-affine quad, so no pin is drawn, however many Widgets are in view.
+		const mapping = derived.status === 'affine' ? derived.mapping : undefined
+		const reports = {
+			a: geometry('a', { x: 0, y: 0, width: 200, height: 100 }, [box(0, 0, 200, 100)]),
+			b: geometry('b', { x: 0, y: 120, width: 200, height: 100 }, [box(0, 120, 200, 100)]),
+		}
+		const placements = new PinPlacementEngine().place([thread('t-a', 'a'), thread('t-b', 'b')], inputs(reports, { mapping }))
+		expect(placements).toHaveLength(2)
+		for (const placement of placements) {
+			expect(placement).toMatchObject({ state: 'hidden', reason: 'mapping-unavailable' })
+			expect(placement.point).toBeUndefined()
+		}
+		// The same Widgets are drawn once the mapping is affine.
+		const affine = new PinPlacementEngine().place([thread('t-a', 'a')], inputs(reports))
+		expect(affine[0]!.state).toBe('visible')
 	})
 })

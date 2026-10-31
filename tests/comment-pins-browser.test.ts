@@ -105,7 +105,7 @@ afterAll(async () => {
 	await server?.close()
 })
 
-async function openView(setup: Readonly<{ width?: number; height?: number; recordWire?: boolean; instrument?: boolean }> = {}): Promise<{ context: BrowserContext; page: Page; frame: Frame }> {
+async function openView(setup: Readonly<{ width?: number; height?: number; recordWire?: boolean; instrument?: boolean; query?: string }> = {}): Promise<{ context: BrowserContext; page: Page; frame: Frame }> {
 	const context = await browser.newContext({ viewport: { width: setup.width ?? 1920, height: setup.height ?? 1080 }, colorScheme: 'light' })
 	await context.addInitScript(() => {
 		localStorage.setItem('nuxt-color-mode', 'light')
@@ -115,7 +115,7 @@ async function openView(setup: Readonly<{ width?: number; height?: number; recor
 	if (setup.instrument) await context.addInitScript(MAIN_THREAD_WORK)
 	await context.addCookies([{ ...server.cookie, url: server.origin, httpOnly: true, sameSite: 'Strict' }])
 	const page = await context.newPage()
-	await page.goto(`${server.origin}/views/${VIEW_ID}`, { waitUntil: 'networkidle' })
+	await page.goto(`${server.origin}/views/${VIEW_ID}${setup.query ?? ''}`, { waitUntil: 'networkidle' })
 	const handle = await page.waitForSelector('iframe[src*="/preview"]', { timeout: 15_000 })
 	const frame = (await handle.contentFrame())!
 	await frame.waitForSelector('[data-preview-ready="true"]', { state: 'attached', timeout: 15_000 })
@@ -168,6 +168,114 @@ async function hintedPinErrors(page: Page, frame: Frame): Promise<number[]> {
 	}
 	return errors
 }
+
+describe('Pins in comment mode', () => {
+	const commentTool = (page: Page) => page.locator('[role="toolbar"] [data-tool="comment"]')
+	const inCommentMode = async (page: Page) => (await commentTool(page).getAttribute('aria-pressed')) === 'true'
+	async function enterCommentMode(page: Page): Promise<void> {
+		if (!(await inCommentMode(page))) await page.keyboard.press('c')
+		await expect.poll(() => inCommentMode(page)).toBe(true)
+	}
+
+	it('opens the thread of a clicked pin, cluster or edge indicator instead of starting a comment, while a click elsewhere reaches the Preview (Rule 01a11658-22cb)', async () => {
+		const { context, page, frame } = await openView()
+		try {
+			await settle(page)
+			const { drawn, clustered, edges } = await canvasPins(page)
+			expect(drawn.length).toBeGreaterThan(0)
+			expect(clustered.length).toBeGreaterThan(0)
+			expect(edges.bottom?.length).toBeGreaterThan(0)
+			await enterCommentMode(page)
+			const composer = page.locator('[data-comment-composer]')
+			const bubble = page.locator('[data-thread-bubble]')
+			const menu = page.getByRole('menu')
+
+			async function closeThread(): Promise<void> {
+				await bubble.locator('[data-thread-close]').click()
+				await expect.poll(() => bubble.count()).toBe(0)
+				await enterCommentMode(page)
+			}
+
+			// A pin: its thread opens, and no composer starts.
+			const single = drawn[0]!
+			await page.locator(`[data-comment-pins] .pin-anchor:not([hidden]) [data-pin-thread="${single}"]`).click()
+			await bubble.waitFor({ timeout: 10_000 })
+			expect(await composer.count()).toBe(0)
+			await expect.poll(() => new URL(page.url()).searchParams.get('thread')).toBe(single)
+			await closeThread()
+
+			// A pin cluster: its menu opens, and the pick opens that thread; no composer starts.
+			const cluster = clustered[0]!
+			await page.locator(`[data-pin-cluster-threads="${cluster.join(' ')}"]`).click()
+			await menu.waitFor({ timeout: 10_000 })
+			expect(await composer.count()).toBe(0)
+			await menu.getByRole('menuitem').first().click()
+			await bubble.waitFor({ timeout: 10_000 })
+			expect(await composer.count()).toBe(0)
+			await closeThread()
+
+			// An edge indicator: likewise.
+			await page.locator('[data-edge-side="bottom"]').click()
+			await menu.waitFor({ timeout: 10_000 })
+			expect(await composer.count()).toBe(0)
+			await menu.getByRole('menuitem').first().click()
+			await bubble.waitFor({ timeout: 10_000 })
+			expect(await composer.count()).toBe(0)
+			await closeThread()
+
+			// Elsewhere in the Preview, the same mode still takes the click: it starts a comment on the Widget under it.
+			await frame.locator('[data-widget-id="page-title"]').click({ position: { x: 4, y: 4 } })
+			await composer.waitFor({ timeout: 10_000 })
+			expect(await bubble.count()).toBe(0)
+		}
+		finally { await context.close() }
+	}, 90_000)
+
+	it('keeps pins tracked and visible during comment-range targeting, including mid-gesture, while only the selection highlight is suspended (Rule 01a11658-2655)', async () => {
+		const { context, page, frame } = await openView({ recordWire: true, query: '?panel=inspect&widget=page-title' })
+		try {
+			await settle(page)
+			const highlight = page.locator('[data-overlay-selection]')
+			await highlight.first().waitFor({ state: 'attached', timeout: 20_000 })
+			const before = await canvasPins(page)
+			expect(before.drawn.length).toBeGreaterThan(15)
+			const releasedWidgets = () => frame.evaluate(() => (window as unknown as WireRecorderWindow).__wire.messages.filter(message => message.type === 'geometry.release').map(message => String(message.context.widgetId)))
+			const releasedBefore = (await releasedWidgets()).length
+
+			await enterCommentMode(page)
+			// Only the highlight is suspended: the pins are all still there and no pin stream was released.
+			await expect.poll(() => highlight.count(), { timeout: 10_000 }).toBe(0)
+			expect((await canvasPins(page)).drawn).toEqual(before.drawn)
+			// Suspending the highlight releases the selection's own stream (page-title) and no pin stream.
+			expect((await releasedWidgets()).slice(releasedBefore).filter(widgetId => widgetId !== 'page-title')).toEqual([])
+
+			// A gesture: the pointer rests on a Widget (hover candidate) and is pressed, not yet released.
+			const target = frame.locator('[data-widget-id="page-title"]')
+			const box = (await target.boundingBox())!
+			await page.mouse.move(box.x + 6, box.y + 6)
+			await page.waitForSelector('[data-overlay-hover][data-hover-purpose="comment-range"]', { timeout: 10_000 })
+			await page.mouse.down()
+			expect((await canvasPins(page)).drawn).toEqual(before.drawn)
+			// Pins are still tracked: scrolling the View moves them with their Widgets from fresh reports.
+			await frame.evaluate(() => window.scrollTo(0, 120))
+			await expect.poll(async () => {
+				const errors = await hintedPinErrors(page, frame)
+				return errors.length > 0 && errors.every(error => error < 2)
+			}, { timeout: 10_000 }).toBe(true)
+			expect((await canvasPins(page)).drawn.length).toBeGreaterThan(0)
+			expect((await releasedWidgets()).slice(releasedBefore).filter(widgetId => widgetId !== 'page-title')).toEqual([])
+			await page.mouse.up()
+
+			// The release commits the Widget as the comment target; leave the mode.
+			for (let attempt = 0; attempt < 4 && await inCommentMode(page); attempt++) {
+				await page.keyboard.press('Escape')
+				await page.waitForTimeout(300)
+			}
+			expect(await inCommentMode(page)).toBe(false)
+		}
+		finally { await context.close() }
+	}, 90_000)
+})
 
 describe('All pins at once (R7b)', () => {
 	it('accounts for every in-filter thread as a pin, a cluster member or an edge indicator, and keeps pins on their Widgets while the View scrolls', async () => {

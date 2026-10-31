@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from 'playwright'
-import { provisionToken } from './support/access'
+import { provisionToken, sessionCookieFor } from './support/access'
 import { startWorkbenchServer, type WorkbenchServer } from './support/workbench-server'
 
 /**
@@ -175,6 +175,69 @@ describe('Members and Sign-in use the Kit components (#380)', () => {
 			await page.locator('input[type="password"]').fill('uiux_t_not-a-token')
 			expect(await submit.isDisabled()).toBe(false)
 			expect(await page.locator(UNKNOWN_KIT_TAGS).count()).toBe(0)
+		}
+		finally { await context.close() }
+	}, 90_000)
+})
+
+describe('a session that has ended (Rule 01a11544-08e0)', () => {
+	it('returns the Workbench to /login with the page to come back to when its next request is refused', async () => {
+		const listSessions = async () => (await (await fetch(`${server.origin}/api/access/sessions`, { headers: server.headers })).json() as { sessions: { id: string }[] }).sessions
+		const known = new Set((await listSessions()).map(session => session.id))
+		// The Workbench under test signs in with a session of its own, which the Owner's session then ends.
+		const own = await sessionCookieFor(server.origin, server.token)
+		const ended = (await listSessions()).filter(session => !known.has(session.id))
+		expect(ended).toHaveLength(1)
+
+		const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light' })
+		await context.addInitScript(() => {
+			localStorage.setItem('nuxt-color-mode', 'light')
+			localStorage.setItem('uiux.workbench.locale', 'en-US')
+		})
+		await context.addCookies([{ ...own, url: server.origin, httpOnly: true, sameSite: 'Strict' }])
+		const page = await context.newPage()
+		try {
+			await page.goto(`${server.origin}/members`, { waitUntil: 'networkidle' })
+			await page.locator('[data-members-table] tbody tr').first().waitFor({ timeout: 15_000 })
+			expect(new URL(page.url()).pathname).toBe('/members')
+
+			const revoked = await fetch(`${server.origin}/api/access/sessions/${encodeURIComponent(ended[0]!.id)}`, { method: 'DELETE', headers: { ...server.headers, origin: server.origin } })
+			expect(revoked.status).toBe(200)
+
+			// The next request the Workbench makes is answered 401; it returns to the sign-in page, keeping the page it was on.
+			await page.reload({ waitUntil: 'networkidle' })
+			await page.waitForURL(url => url.pathname === '/login', { timeout: 15_000 })
+			expect(new URL(page.url()).searchParams.get('next')).toBe('/members')
+			await page.getByRole('button', { name: 'Sign in' }).waitFor()
+		}
+		finally { await context.close() }
+	}, 90_000)
+
+	it('returns to /login without a reload when a request of the open page is refused', async () => {
+		const listSessions = async () => (await (await fetch(`${server.origin}/api/access/sessions`, { headers: server.headers })).json() as { sessions: { id: string }[] }).sessions
+		const known = new Set((await listSessions()).map(session => session.id))
+		const own = await sessionCookieFor(server.origin, server.token)
+		const ended = (await listSessions()).filter(session => !known.has(session.id))
+		expect(ended).toHaveLength(1)
+
+		const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light' })
+		await context.addInitScript(() => {
+			localStorage.setItem('nuxt-color-mode', 'light')
+			localStorage.setItem('uiux.workbench.locale', 'en-US')
+		})
+		await context.addCookies([{ ...own, url: server.origin, httpOnly: true, sameSite: 'Strict' }])
+		const page = await context.newPage()
+		try {
+			await page.goto(`${server.origin}/members`, { waitUntil: 'networkidle' })
+			await page.locator('[data-members-table] tbody tr').first().waitFor({ timeout: 15_000 })
+			const revoked = await fetch(`${server.origin}/api/access/sessions/${encodeURIComponent(ended[0]!.id)}`, { method: 'DELETE', headers: { ...server.headers, origin: server.origin } })
+			expect(revoked.status).toBe(200)
+
+			// A request of the open page (here the Workbench's own read of the roster), not a navigation.
+			await page.evaluate(() => fetch('/api/access/members'))
+			await page.waitForURL(url => url.pathname === '/login', { timeout: 15_000 })
+			expect(new URL(page.url()).searchParams.get('next')).toBe('/members')
+			expect(new URL(page.url()).searchParams.get('expired')).toBe('1')
 		}
 		finally { await context.close() }
 	}, 90_000)
