@@ -1,9 +1,43 @@
+import { readdirSync } from 'node:fs'
+import { basename, extname, relative } from 'node:path'
 import js from '@eslint/js'
 import vueI18n from '@intlify/eslint-plugin-vue-i18n'
 import vue from 'eslint-plugin-vue'
 import globals from 'globals'
 import tseslint from 'typescript-eslint'
 import { RAW_TEXT_IGNORE_PATTERN } from './tests/support/i18n-allowlist.mjs'
+
+// Components Nuxt registers without an import: every `app/components/**/*.vue`, named from its path
+// (`access/MemberKeyEditor.vue` -> `AccessMemberKeyEditor`; a leading segment that repeats the folder
+// is dropped, so `kit/ui/Button.vue` -> `KitUiButton`, never `KitButton`), plus a `Lazy` variant.
+function autoImportedComponentNames(dir = 'app/components') {
+	const names = []
+	const walk = (d) => {
+		for (const entry of readdirSync(d, { withFileTypes: true })) {
+			const full = `${d}/${entry.name}`
+			if (entry.isDirectory()) walk(full)
+			else if (extname(entry.name) === '.vue') {
+				const segments = [...relative(dir, d).split('/').filter(Boolean), basename(entry.name, '.vue')]
+				const pascal = segments.map(seg => seg.replace(/(^|[-_])(\w)/g, (_, __, c) => c.toUpperCase()))
+				const parts = []
+				for (const seg of pascal) if (!parts.join('').endsWith(seg) && !(parts.length && seg.startsWith(parts.join('')))) parts.push(seg)
+				names.push(parts.join(''))
+			}
+		}
+	}
+	walk(dir)
+	return names.flatMap(n => [n, `Lazy${n}`])
+}
+
+// Globally registered components: Nuxt UI (`U*`), Nuxt built-ins, Vue built-ins, and the auto-imports above.
+// `ignorePatterns` entries are regular expression sources, matched against the tag as written.
+const GLOBAL_COMPONENT_PATTERNS = [
+	'^U[A-Z]',
+	'^(Nuxt[A-Z][A-Za-z]*|ClientOnly|DevOnly|Icon|ColorScheme|Teleport|Transition|TransitionGroup|KeepAlive|Suspense|Component)$',
+	// @nuxtjs/i18n registers `<i18n-t>` globally.
+	'^i18n-t$',
+	`^(${autoImportedComponentNames().join('|')})$`,
+]
 
 const GLOBAL_OBJECT = '/^(globalThis|global)$/'
 const STDIO = '/^(stdout|stderr)$/'
@@ -65,6 +99,14 @@ export default tseslint.config(
 		},
 		rules: {
 			'vue/multi-word-component-names': 'off',
+		},
+	},
+	{
+		// An un-imported component tag renders as an unknown element and passes typecheck and build
+		// (PR #423, `<KitBadge>` without its import); only globally registered components may go unimported.
+		files: ['app/**/*.vue'],
+		rules: {
+			'vue/no-undef-components': ['error', { ignorePatterns: GLOBAL_COMPONENT_PATTERNS }],
 		},
 	},
 	{
