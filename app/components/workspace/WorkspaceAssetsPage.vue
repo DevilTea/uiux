@@ -397,17 +397,16 @@ const columns = computed<TableColumn<AssetEntry>[]>(() => [
                   {{ t('assets.unused') }}
                 </KitBadge>
                 <UTooltip :text="t('assets.download')">
-                  <UButton
+                  <KitButton
                     v-if="contentUrl(entry)"
-                    :to="contentUrl(entry)"
-                    external
+                    :href="contentUrl(entry)"
                     :download="entry.contentFilename || 'content.bin'"
-                    color="neutral"
                     variant="ghost"
                     size="sm"
-                    icon="i-lucide-download"
+                    icon="download"
+                    icon-only
                     class="ms-auto"
-                    :aria-label="t('assets.downloadName', { name: entry.name || entry.contentFilename })"
+                    :label="t('assets.downloadName', { name: entry.name || entry.contentFilename })"
                   />
                 </UTooltip>
               </div>
@@ -469,16 +468,15 @@ const columns = computed<TableColumn<AssetEntry>[]>(() => [
             </span>
           </template>
           <template #download-cell="{ row }">
-            <UButton
+            <KitButton
               v-if="contentUrl(row.original)"
-              :to="contentUrl(row.original)"
-              external
+              :href="contentUrl(row.original)"
               :download="row.original.contentFilename || 'content.bin'"
-              color="neutral"
               variant="ghost"
               size="sm"
-              icon="i-lucide-download"
-              :aria-label="t('assets.downloadName', { name: row.original.name || row.original.contentFilename })"
+              icon="download"
+              icon-only
+              :label="t('assets.downloadName', { name: row.original.name || row.original.contentFilename })"
             />
           </template>
         </UTable>

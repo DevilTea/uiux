@@ -66,7 +66,8 @@ async function applyVariant(bridge: PreviewRuntimeBridge, name: string): Promise
 async function declarations(selector: string): Promise<string> {
 	const css = (await readFile(join(KIT, 'dist', 'uiux.css'), 'utf8')).replace(/\/\*[\s\S]*?\*\//g, '')
 	for (const [, list, body] of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
-		if (list!.split(',').some(entry => entry.trim() === selector)) return body!.replace(/\s+/g, ' ').trim()
+		// Split the selector list at top-level commas only: `:is(:disabled, [aria-disabled=true])` holds one.
+		if (list!.split(/,(?![^()]*\))/).some(entry => entry.trim() === selector)) return body!.replace(/\s+/g, ' ').trim()
 	}
 	throw new Error(`uiux.css has no rule for ${selector}`)
 }
@@ -122,12 +123,12 @@ describe('the soft look and pressed toggles', () => {
 	})
 
 	it('draws soft and pressed as the elevated fill without a border, moving to the accented step on hover', async () => {
-		const soft = await declarations('.kit-btn.kit-btn--soft:not(:disabled)')
+		const soft = await declarations('.kit-btn.kit-btn--soft:not(:is(:disabled, [aria-disabled=true]))')
 		expect(soft).toMatch(/background-color: var\(--kit-bg-surface-elevated\)/)
 		expect(soft).toMatch(/border-color: transparent/)
 		expect(soft).not.toMatch(/--kit-text-highlighted/)
-		expect(await declarations('.kit-btn.is-pressed:not(:disabled)')).toBe(soft)
-		expect(await declarations('.kit-btn.kit-btn--soft:hover:not(:disabled)')).toMatch(/--kit-bg-accented/)
+		expect(await declarations('.kit-btn.is-pressed:not(:is(:disabled, [aria-disabled=true]))')).toBe(soft)
+		expect(await declarations('.kit-btn.kit-btn--soft:hover:not(:is(:disabled, [aria-disabled=true]))')).toMatch(/--kit-bg-accented/)
 	})
 })
 

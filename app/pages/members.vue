@@ -19,6 +19,7 @@ import KitButton from '~/components/kit/ui/Button.vue'
 import MemberKeyEditor from '../components/access/MemberKeyEditor.vue'
 import WbErrorDescription from '../components/workbench/WbErrorDescription.vue'
 import WorkbenchPage from '../components/workbench/WorkbenchPage.vue'
+import KitLinkButton from '~/components/KitLinkButton.vue'
 
 /**
  * Members (accepted identity decision 12): the served Workspace's roster, for a holder of `members.manage` on a
@@ -409,16 +410,15 @@ const tableUi = { th: 'text-xs font-medium text-muted whitespace-nowrap', td: 't
           >
             {{ t('access.members.unheldAction') }}
           </KitButton>
-          <UButton
+          <KitLinkButton
             to="/workspace/access-presets"
-            color="neutral"
             variant="outline"
             size="sm"
-            icon="i-lucide-key-square"
+            icon="key-square"
             data-unheld-open-presets
           >
             {{ t('access.members.unheldPresetsAction') }}
-          </UButton>
+          </KitLinkButton>
         </template>
       </UAlert>
 

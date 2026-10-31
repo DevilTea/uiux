@@ -4,6 +4,7 @@ import type { RouteLocationRaw } from 'vue-router'
 import { useI18n } from '#imports'
 import { useVersionCanvasAccess } from '../../composables/useVersionCanvasAccess'
 import type { HistoryAddress, HistoryCanvasMode } from '../../utils/version-history'
+import KitLinkButton from '~/components/KitLinkButton.vue'
 
 /**
  * The View diff's canvas choice (Clause 01a11e0d-d7f5-7ef8-ac22-e235d4a00a41): the change list only
@@ -27,7 +28,7 @@ const modes = computed(() => ([undefined, 'side', 'highlight'] as const).map((mo
 	return {
 		value: mode ?? 'list',
 		label: t(`history.canvas.mode.${mode ?? 'list'}`),
-		icon: mode === 'side' ? 'i-lucide-columns-2' : mode === 'highlight' ? 'i-lucide-scan-search' : 'i-lucide-list',
+		icon: mode === 'side' ? 'columns-2' : mode === 'highlight' ? 'scan-search' : 'list',
 		to: props.linkFor(next as HistoryAddress),
 		current: props.address.canvas === mode,
 	}
@@ -42,13 +43,12 @@ const modes = computed(() => ([undefined, 'side', 'highlight'] as const).map((mo
     data-canvas-modes
   >
     <span class="text-xs text-muted">{{ t('history.canvas.label') }}</span>
-    <UButton
+    <KitLinkButton
       v-for="mode in modes"
       :key="mode.value"
       :to="mode.to"
       size="xs"
-      color="neutral"
-      :variant="mode.current ? 'solid' : 'outline'"
+      :variant="mode.current ? 'neutral' : 'outline'"
       :icon="mode.icon"
       :aria-current="mode.current ? 'true' : undefined"
       :data-canvas-mode="mode.value"

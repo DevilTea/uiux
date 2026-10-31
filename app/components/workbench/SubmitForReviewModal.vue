@@ -10,6 +10,7 @@ import type { CitableEvidenceEntry, EvidenceFreshness } from '../../utils/readin
 import { isSubmittable, preselectedCitations, withUsableSelection, type ReviewSubmissionDraft } from '../../utils/review-submission'
 import { viewLocation } from '../../utils/workbench-routes'
 import WbErrorDescription from './WbErrorDescription.vue'
+import KitLinkButton from '~/components/KitLinkButton.vue'
 
 /**
  * "Submit for review…" (brief c, section 12; roadmap R12): a human moves an open thread to
@@ -301,12 +302,11 @@ async function send(): Promise<void> {
             data-submit-no-evidence
           >
             <p>{{ entries.length ? t('submit.noCurrentEvidence') : t('submit.noEvidence') }}</p>
-            <UButton
+            <KitLinkButton
               variant="link"
-              color="primary"
               size="sm"
               class="mt-1 px-0"
-              icon="i-lucide-camera"
+              icon="camera"
               :to="viewLocation(viewId, { panel: 'readiness' })"
               :label="t('submit.captureFirst')"
               @click="open = false"

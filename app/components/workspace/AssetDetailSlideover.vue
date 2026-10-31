@@ -417,15 +417,14 @@ const details = computed(() => [
             @deleted="onDeleted"
           />
           <span v-else />
-          <UButton
+          <KitButton
             v-if="contentUrl"
-            :to="contentUrl"
-            external
+            :href="contentUrl"
             :download="entry.contentFilename || 'content.bin'"
-            icon="i-lucide-download"
+            icon="download"
           >
             {{ t('assets.download') }}
-          </UButton>
+          </KitButton>
         </div>
       </div>
     </template>

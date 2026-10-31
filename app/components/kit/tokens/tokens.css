@@ -120,6 +120,7 @@
   --kit-warning: var(--color-caution-yellow-800);
   --kit-warning-subtle: color-mix(in oklch, var(--color-caution-yellow-800) 10%, transparent);
   --kit-warning-border: color-mix(in oklch, var(--color-caution-yellow-800) 35%, transparent);
+  --kit-warning-hover: color-mix(in oklch, var(--color-caution-yellow-800) 18%, transparent);
   --kit-danger: var(--color-fault-red-700);
   --kit-danger-subtle: color-mix(in oklch, var(--color-fault-red-700) 10%, transparent);
   --kit-danger-border: color-mix(in oklch, var(--color-fault-red-700) 35%, transparent);
@@ -176,6 +177,7 @@
   --kit-warning: var(--color-caution-yellow-400);
   --kit-warning-subtle: color-mix(in oklch, var(--color-caution-yellow-400) 14%, transparent);
   --kit-warning-border: color-mix(in oklch, var(--color-caution-yellow-400) 35%, transparent);
+  --kit-warning-hover: color-mix(in oklch, var(--color-caution-yellow-400) 24%, transparent);
   --kit-danger: var(--color-fault-red-400);
   --kit-danger-subtle: color-mix(in oklch, var(--color-fault-red-400) 14%, transparent);
   --kit-danger-border: color-mix(in oklch, var(--color-fault-red-400) 35%, transparent);
@@ -233,6 +235,7 @@
     --kit-warning: var(--color-caution-yellow-400);
     --kit-warning-subtle: color-mix(in oklch, var(--color-caution-yellow-400) 14%, transparent);
     --kit-warning-border: color-mix(in oklch, var(--color-caution-yellow-400) 35%, transparent);
+    --kit-warning-hover: color-mix(in oklch, var(--color-caution-yellow-400) 24%, transparent);
     --kit-danger: var(--color-fault-red-400);
     --kit-danger-subtle: color-mix(in oklch, var(--color-fault-red-400) 14%, transparent);
     --kit-danger-border: color-mix(in oklch, var(--color-fault-red-400) 35%, transparent);

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import Icon from './Icon.vue'
 import Kbd from './Kbd.vue'
 
@@ -13,6 +14,12 @@ import Kbd from './Kbd.vue'
  * `expanded` turns the trailing icon half a turn for a disclosure toggle; `truncate` ends a long label in an
  * ellipsis (the button then yields to the width its parent gives it, `max-width: 100%`). Buttons placed side by
  * side in a `ButtonGroup` join into one control.
+ *
+ * `warning` is the solid warning button and `warning-soft` its quiet tinted look (a notice that asks for attention, an
+ * acknowledgement the user must give). A `href` makes the root a link (`<a>`, with `target`, `rel` and `download`) with the
+ * same looks; the Kit knows no router, so an app that routes wraps the link and handles `click` itself. A disabled or
+ * loading link has no `href`, is `aria-disabled`, leaves the tab order (`tabindex="-1"`) and swallows its click; it never
+ * carries `type`, `disabled` or `aria-pressed`.
  */
 // `pressed` and `expanded` default to `undefined` on purpose: Vue casts an absent Boolean prop to `false`, which would make every
 // Button a toggle and a disclosure. The other optional props stay unset, as before.
@@ -21,7 +28,7 @@ const props = withDefaults(defineProps<{
   /** The label text, which is also the accessible name of an icon-only button. */
   label?: string
   /** Default `secondary`. */
-  variant?: 'primary' | 'secondary' | 'ghost' | 'outline' | 'danger' | 'annotation' | 'link' | 'link-muted' | 'brand' | 'display' | 'neutral' | 'soft'
+  variant?: 'primary' | 'secondary' | 'ghost' | 'outline' | 'danger' | 'annotation' | 'link' | 'link-muted' | 'brand' | 'display' | 'neutral' | 'soft' | 'warning' | 'warning-soft'
   /** Default `md`. `xs` is 24px, for a dense row. */
   size?: 'xs' | 'sm' | 'md' | 'lg'
   /** Leading Lucide icon name (icons.ts). */
@@ -52,23 +59,51 @@ const props = withDefaults(defineProps<{
    * icon-only button), the button is busy (`aria-busy`) and does not press, and it looks disabled.
    */
   loading?: boolean
-  /** Default `button`. */
+  /** Default `button`. Ignored by a link. */
   type?: 'button' | 'submit' | 'reset'
-}>(), { pressed: undefined, expanded: undefined })
+  /** Makes the root a link (`<a href>`) instead of a button. A disabled or loading link drops it. */
+  href?: string
+  /** Link only: where the link opens (`_blank` adds `rel="noopener"` unless `rel` is given). */
+  target?: string
+  /** Link only. */
+  rel?: string
+  /** Link only: download the target (a file name, or `true` for the server's name). */
+  download?: string | boolean
+}>(), { pressed: undefined, expanded: undefined, download: undefined })
 /* eslint-enable vue/require-default-prop */
+
+const isLink = computed(() => props.href !== undefined)
+const inert = computed(() => Boolean(props.disabled || props.loading))
+const linkRel = computed(() => props.rel ?? (props.target === '_blank' ? 'noopener' : undefined))
+
+/** A disabled link has no `href` to follow, but its click would still reach a router wrapper: stop it here. */
+function onClick(event: MouseEvent): void {
+  if (isLink.value && inert.value) {
+    event.preventDefault()
+    event.stopImmediatePropagation()
+  }
+}
 </script>
 
 <template>
-  <button
+  <component
+    :is="isLink ? 'a' : 'button'"
     class="kit-btn"
-    :class="[`kit-btn--${variant ?? 'secondary'}`, `kit-btn--${size ?? 'md'}`, { 'is-touch': touch, 'is-icon-only': iconOnly, 'is-full-width': fullWidth, 'is-loading': loading, 'is-pressed': pressed, 'is-expanded': expanded, 'is-truncate': truncate }]"
-    :type="type ?? 'button'"
-    :disabled="disabled || loading"
+    :class="[`kit-btn--${variant ?? 'secondary'}`, `kit-btn--${size ?? 'md'}`, { 'is-touch': touch, 'is-icon-only': iconOnly, 'is-full-width': fullWidth, 'is-loading': loading, 'is-pressed': !isLink && pressed, 'is-expanded': expanded, 'is-truncate': truncate }]"
+    :type="isLink ? undefined : (type ?? 'button')"
+    :disabled="isLink ? undefined : inert"
+    :href="isLink && !inert ? href : undefined"
+    :target="isLink ? target : undefined"
+    :rel="isLink ? linkRel : undefined"
+    :download="isLink && !inert ? download : undefined"
+    :aria-disabled="isLink && inert ? 'true' : undefined"
+    :tabindex="isLink && inert ? -1 : undefined"
     :aria-busy="loading ? 'true' : undefined"
-    :aria-pressed="props.pressed"
+    :aria-pressed="isLink ? undefined : props.pressed"
     :aria-expanded="props.expanded"
     :aria-label="iconOnly ? label : undefined"
     :title="iconOnly || truncate ? label : undefined"
+    @click="onClick"
   >
     <slot name="leading">
       <Icon
@@ -100,7 +135,7 @@ const props = withDefaults(defineProps<{
         :size="14"
       />
     </slot>
-  </button>
+  </component>
 </template>
 
 <style>
@@ -111,8 +146,9 @@ const props = withDefaults(defineProps<{
   min-height: var(--kit-target-min, 0px);
   transition: background-color 120ms cubic-bezier(0.2, 0, 0, 1), border-color 120ms cubic-bezier(0.2, 0, 0, 1), color 120ms cubic-bezier(0.2, 0, 0, 1);
 }
+a.kit-btn { text-decoration: none; }
 .kit-btn:focus-visible { outline: 2px solid var(--kit-primary); outline-offset: 2px; }
-.kit-btn:disabled { cursor: not-allowed; color: var(--kit-text-subtle); background-color: var(--kit-bg-surface-elevated); border-color: var(--kit-border); }
+.kit-btn:is(:disabled, [aria-disabled="true"]) { cursor: not-allowed; color: var(--kit-text-subtle); background-color: var(--kit-bg-surface-elevated); border-color: var(--kit-border); }
 .kit-btn.kit-btn--xs { padding: 3px 8px; gap: 4px; font-size: 12px; line-height: 16px; height: 24px; }
 .kit-btn.kit-btn--sm { padding: 3px 8px; font-size: 13px; height: 28px; }
 .kit-btn.kit-btn--md { padding: 5px 10px; font-size: 13px; height: 32px; }
@@ -125,35 +161,41 @@ const props = withDefaults(defineProps<{
 .kit-btn.is-icon-only.is-touch { width: 44px; height: 44px; }
 .kit-btn.is-full-width { width: 100%; }
 .kit-btn.kit-btn--primary { background-color: var(--kit-primary); color: var(--kit-on-primary); border-color: var(--kit-primary); }
-.kit-btn.kit-btn--primary:disabled { opacity: 0.6; }
+.kit-btn.kit-btn--primary:is(:disabled, [aria-disabled="true"]) { opacity: 0.6; }
 .kit-btn.kit-btn--neutral { background-color: var(--kit-text-highlighted); color: var(--kit-text-inverted); border-color: var(--kit-text-highlighted); }
-.kit-btn.kit-btn--neutral:hover:not(:disabled) { opacity: 0.9; }
-.kit-btn.kit-btn--neutral:disabled { opacity: 0.6; }
+.kit-btn.kit-btn--neutral:hover:not(:is(:disabled, [aria-disabled="true"])) { opacity: 0.9; }
+.kit-btn.kit-btn--neutral:is(:disabled, [aria-disabled="true"]) { opacity: 0.6; }
 .kit-btn.is-loading { cursor: progress; }
 .kit-btn .kit-btn__spinner { animation: kit-btn-spin 1s linear infinite; }
 @keyframes kit-btn-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .kit-btn .kit-btn__spinner { animation: none; } }
-.kit-btn.kit-btn--primary:hover:not(:disabled) { background-color: var(--kit-primary-hover); border-color: var(--kit-primary-hover); }
+.kit-btn.kit-btn--primary:hover:not(:is(:disabled, [aria-disabled="true"])) { background-color: var(--kit-primary-hover); border-color: var(--kit-primary-hover); }
 .kit-btn.kit-btn--secondary, .kit-btn.kit-btn--outline { background-color: var(--kit-bg-surface); color: var(--kit-text); border-color: var(--kit-border-control); }
-.kit-btn.kit-btn--secondary:hover:not(:disabled), .kit-btn.kit-btn--outline:hover:not(:disabled) { background-color: var(--kit-bg-surface-elevated); }
+.kit-btn.kit-btn--secondary:hover:not(:is(:disabled, [aria-disabled="true"])), .kit-btn.kit-btn--outline:hover:not(:is(:disabled, [aria-disabled="true"])) { background-color: var(--kit-bg-surface-elevated); }
 .kit-btn.kit-btn--ghost { background-color: transparent; color: var(--kit-text-muted); }
-.kit-btn.kit-btn--ghost:hover:not(:disabled) { background-color: var(--kit-bg-surface-elevated); color: var(--kit-text-highlighted); }
-.kit-btn.kit-btn--ghost:disabled { background-color: transparent; border-color: transparent; color: var(--kit-text-muted); opacity: 0.6; }
+.kit-btn.kit-btn--ghost:hover:not(:is(:disabled, [aria-disabled="true"])) { background-color: var(--kit-bg-surface-elevated); color: var(--kit-text-highlighted); }
+.kit-btn.kit-btn--ghost:is(:disabled, [aria-disabled="true"]) { background-color: transparent; border-color: transparent; color: var(--kit-text-muted); opacity: 0.6; }
 .kit-btn.kit-btn--annotation { background-color: var(--kit-annotation-subtle); color: var(--kit-annotation); border-color: var(--kit-annotation-border); }
-.kit-btn.kit-btn--annotation:hover:not(:disabled) { background-color: var(--kit-annotation-hover); }
+.kit-btn.kit-btn--annotation:hover:not(:is(:disabled, [aria-disabled="true"])) { background-color: var(--kit-annotation-hover); }
 .kit-btn.kit-btn--danger { background-color: var(--kit-danger-subtle); color: var(--kit-danger); border-color: var(--kit-danger-border); }
-.kit-btn.kit-btn--danger:hover:not(:disabled) { background-color: var(--kit-danger-hover); }
+.kit-btn.kit-btn--danger:hover:not(:is(:disabled, [aria-disabled="true"])) { background-color: var(--kit-danger-hover); }
 .kit-btn.kit-btn--link { background: none; border-color: transparent; color: var(--kit-primary); padding-inline: 0; text-decoration: underline; text-underline-offset: 3px; }
 .kit-btn.kit-btn--link-muted { background: none; border-color: transparent; color: var(--kit-text-muted); padding-inline: 0; }
-.kit-btn.kit-btn--link-muted:hover:not(:disabled) { color: var(--kit-text-highlighted); }
-.kit-btn.kit-btn--link:disabled, .kit-btn.kit-btn--link-muted:disabled { background: none; border-color: transparent; opacity: 0.6; }
-.kit-btn.kit-btn--brand:not(:disabled) { background-color: var(--kit-brand); color: var(--kit-on-brand); border-color: var(--kit-brand); }
-.kit-btn.kit-btn--brand:hover:not(:disabled) { background-color: var(--kit-brand-hover); }
+.kit-btn.kit-btn--link-muted:hover:not(:is(:disabled, [aria-disabled="true"])) { color: var(--kit-text-highlighted); }
+.kit-btn.kit-btn--link:is(:disabled, [aria-disabled="true"]), .kit-btn.kit-btn--link-muted:is(:disabled, [aria-disabled="true"]) { background: none; border-color: transparent; opacity: 0.6; }
+.kit-btn.kit-btn--warning { background-color: var(--kit-warning); color: var(--kit-text-inverted); border-color: var(--kit-warning); }
+.kit-btn.kit-btn--warning:hover:not(:is(:disabled, [aria-disabled="true"])) { background-color: color-mix(in oklab, var(--kit-warning) 75%, transparent); border-color: transparent; }
+.kit-btn.kit-btn--warning:is(:disabled, [aria-disabled="true"]) { opacity: 0.6; }
+.kit-btn.kit-btn--warning-soft { background-color: var(--kit-warning-subtle); color: var(--kit-warning); border-color: transparent; }
+.kit-btn.kit-btn--warning-soft:hover:not(:is(:disabled, [aria-disabled="true"])) { background-color: var(--kit-warning-hover); }
+.kit-btn.kit-btn--warning-soft:is(:disabled, [aria-disabled="true"]) { opacity: 0.6; }
+.kit-btn.kit-btn--brand:not(:is(:disabled, [aria-disabled="true"])) { background-color: var(--kit-brand); color: var(--kit-on-brand); border-color: var(--kit-brand); }
+.kit-btn.kit-btn--brand:hover:not(:is(:disabled, [aria-disabled="true"])) { background-color: var(--kit-brand-hover); }
 .kit-btn.kit-btn--display { background: transparent; border-color: transparent; height: auto; min-height: 40px; padding: 0 4px; font-size: 24px; line-height: 32px; font-weight: 600; letter-spacing: -0.012em; color: var(--kit-text-highlighted); white-space: normal; text-align: left; }
-.kit-btn.kit-btn--display:hover:not(:disabled) { text-decoration: underline; text-underline-offset: 4px; text-decoration-thickness: 1px; }
+.kit-btn.kit-btn--display:hover:not(:is(:disabled, [aria-disabled="true"])) { text-decoration: underline; text-underline-offset: 4px; text-decoration-thickness: 1px; }
 .kit-btn.kit-btn--display.is-touch { min-height: 44px; font-size: 18px; line-height: 26px; }
-.kit-btn.kit-btn--soft:not(:disabled), .kit-btn.is-pressed:not(:disabled) { background-color: var(--kit-bg-surface-elevated); color: var(--kit-text); border-color: transparent; }
-.kit-btn.kit-btn--soft:hover:not(:disabled), .kit-btn.is-pressed:hover:not(:disabled) { background-color: color-mix(in oklab, var(--kit-bg-accented) 75%, transparent); }
+.kit-btn.kit-btn--soft:not(:is(:disabled, [aria-disabled="true"])), .kit-btn.is-pressed:not(:is(:disabled, [aria-disabled="true"])) { background-color: var(--kit-bg-surface-elevated); color: var(--kit-text); border-color: transparent; }
+.kit-btn.kit-btn--soft:hover:not(:is(:disabled, [aria-disabled="true"])), .kit-btn.is-pressed:hover:not(:is(:disabled, [aria-disabled="true"])) { background-color: color-mix(in oklab, var(--kit-bg-accented) 75%, transparent); }
 .kit-btn.is-truncate { max-width: 100%; min-width: 0; flex-shrink: 1; }
 .kit-btn.is-truncate .kit-btn__label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .kit-btn .kit-btn__trailing { transition: transform 150ms cubic-bezier(0.2, 0, 0, 1); }

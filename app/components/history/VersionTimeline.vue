@@ -13,6 +13,7 @@ import KitBadge from '~/components/kit/ui/Badge.vue'
 import KitButton from '~/components/kit/ui/Button.vue'
 import KitIcon from '~/components/kit/ui/Icon.vue'
 import KitSkeleton from '~/components/kit/ui/Skeleton.vue'
+import KitLinkButton from '~/components/KitLinkButton.vue'
 
 /**
  * The version timeline (Rule 01a11a5e-1946-7217-aff5-db13df3a2977): newest first, grouped by day,
@@ -198,13 +199,13 @@ function toggle(id: string): void {
                   :text="t('history.row.compareNamed', { name: labels.versionTitle(entry.version) })"
                   :disabled="!compact"
                 >
-                  <UButton
+                  <KitLinkButton
                     :to="linkFor(entry.version.id)"
                     size="xs"
-                    color="neutral"
                     variant="outline"
-                    icon="i-lucide-arrow-left-right"
-                    :label="compact ? undefined : t('history.row.compare')"
+                    icon="arrow-left-right"
+                    :icon-only="compact"
+                    :label="compact ? t('history.row.compareNamed', { name: labels.versionTitle(entry.version) }) : t('history.row.compare')"
                     :aria-label="t('history.row.compareNamed', { name: labels.versionTitle(entry.version) })"
                     data-version-compare
                   />
@@ -213,13 +214,13 @@ function toggle(id: string): void {
                   v-if="compareLinkFor && selected && selected !== entry.version.id && compareLinkFor(entry.version.id)"
                   :text="t('history.row.compareWithSelected', { name: labels.versionTitle(entry.version) })"
                 >
-                  <UButton
-                    :to="compareLinkFor(entry.version.id)"
+                  <KitLinkButton
+                    :to="compareLinkFor(entry.version.id)!"
                     size="xs"
-                    color="neutral"
                     variant="ghost"
-                    icon="i-lucide-diff"
-                    :aria-label="t('history.row.compareWithSelected', { name: labels.versionTitle(entry.version) })"
+                    icon="diff"
+                    icon-only
+                    :label="t('history.row.compareWithSelected', { name: labels.versionTitle(entry.version) })"
                     data-version-compare-with
                   />
                 </UTooltip>

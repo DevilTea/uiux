@@ -328,9 +328,9 @@ describe('the Button (loading, link looks, solid neutral, disabled primary)', ()
 	it('keeps the primary hue when a primary button is disabled, in the built stylesheet', async () => {
 		const css = await readFile(join(KIT, 'dist', 'uiux.css'), 'utf8')
 		// The primary fill no longer depends on `:not(:disabled)`, so the generic disabled gray cannot replace it.
-		expect(css).not.toContain('.kit-btn.kit-btn--primary:not(:disabled)')
+		expect(css).not.toContain('.kit-btn.kit-btn--primary:not(:is(:disabled, [aria-disabled=true]))')
 		expect(css).toMatch(/\.kit-btn\.kit-btn--primary \{[^}]*background-color: var\(--kit-primary\)/)
-		expect(css).toMatch(/\.kit-btn\.kit-btn--primary:disabled \{[^}]*opacity/)
+		expect(css).toMatch(/\.kit-btn\.kit-btn--primary:is\(:disabled, \[aria-disabled=true\]\) \{[^}]*opacity/)
 		const { container, bridge } = await mount([{ type: 'Button', id: 'submit', config: { label: 'Submit', variant: 'primary', disabled: true } }])
 		const button = widget(container, 'submit')
 		expect(button.hasAttribute('disabled')).toBe(true)

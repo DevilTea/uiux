@@ -10,6 +10,7 @@ import KitBadge from '~/components/kit/ui/Badge.vue'
 import KitButton from '~/components/kit/ui/Button.vue'
 import KitIcon from '~/components/kit/ui/Icon.vue'
 import { edgeKey, orderSteps, parseEdgeKey, triggerLabel, type FlowSelection } from '../../utils/flow-graph'
+import KitLinkButton from '~/components/KitLinkButton.vue'
 
 /**
  * Structured editing for the selected step or transition (brief g, section 6), or the Flow itself
@@ -311,12 +312,11 @@ const widgetSearch = computed(() => ({ placeholder: t('flows.inspector.searchWid
         </dl>
 
         <div class="flex flex-wrap gap-2">
-          <UButton
+          <KitLinkButton
             v-if="step.value.target.viewId"
-            color="neutral"
             variant="outline"
             size="sm"
-            icon="i-lucide-app-window"
+            icon="app-window"
             :label="t('flows.inspector.openView')"
             :to="viewLocation(step.value.target.viewId, { variant: step.value.target.variantName })"
           />
