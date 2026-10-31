@@ -2532,7 +2532,7 @@
       "invalid_fallback_locale": "備援 Locale 無效。",
       "invalid_locale_filename": "Locale 檔案以語言標籤命名，例如 zh-TW.json。",
       "invalid_locale_tag": "請使用有效的語言標籤，例如 zh-TW。",
-      "invalid_locale_update": "更新 Locale 時，請提供 messages，或提供 set 與 remove。",
+      "invalid_locale_update": "更新 Locale 時，請擇一提供完整的翻譯，或只提供要新增與要移除的項目。",
       "invalid_parameter_name": "翻譯參數名稱無效。",
       "invalid_requested_locale": "要求的 Locale 無效。",
       "missing_default_locale": "主要 Locale 沒有翻譯檔案。",
