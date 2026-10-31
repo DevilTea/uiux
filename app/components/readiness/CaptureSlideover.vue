@@ -294,6 +294,7 @@ const statusIcon: Record<RowStatus, string> = {
             :class="row.added && row.status === 'idle' ? 'bg-muted' : ''"
             :data-capture-row="row.status"
           >
+            <!-- Stays Nuxt UI: the row has no visible label, and the Kit Checkbox names its input only from `label`; an `aria-label` would land on its wrapper, not the input. -->
             <UCheckbox
               v-model="row.checked"
               :disabled="running || row.status === 'captured'"
