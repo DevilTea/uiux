@@ -240,3 +240,80 @@ describe('the Preview ignores a reveal that does not name an open stream', () =>
 		finally { await context.close() }
 	}, 60_000)
 })
+
+describe('a Checks navigation changes nothing in the render context (Rule 01a11658-1b0a)', () => {
+	async function api<T>(path: string, body: unknown, method = 'POST'): Promise<T> {
+		const response = await fetch(`${server.origin}${path}`, { method, headers: { ...server.headers, 'content-type': 'application/json' }, body: JSON.stringify(body) })
+		if (!response.ok) throw new Error(`${path}: ${response.status} ${await response.text()}`)
+		return await response.json() as T
+	}
+
+	it('keeps the Variant, a hidden Widget hidden, the Widget State and the Runtime when it selects the Widget', async () => {
+		const spec = { intent: 'Navigation leaves the render context alone', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [] }
+		const created = await api<{ key: string }>('/api/views', { name: 'Navigation leaves context', spec })
+		const read = await (await fetch(`${server.origin}/api/resources/view/${created.key}`, { headers: server.headers })).json() as { revision: string }
+		await api(`/api/views/${created.key}/structure`, {
+			expectedRevision: read.revision,
+			ir: { id: 'root', type: 'RootShell', slots: { content: [
+				{ id: 'name-input', type: 'TextInput', config: { label: 'Name' } },
+				{ id: 'hidden-note', type: 'Text', config: { text: 'Never shown', hidden: true } },
+				{ id: 'state-button', type: 'Button', config: { label: 'Pay' } },
+			] } },
+			variants: { quiet: { state: {} }, blocked: { state: { 'state-button': { disabled: true } } } },
+		}, 'PUT')
+
+		const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light' })
+		await context.addInitScript(() => {
+			localStorage.setItem('nuxt-color-mode', 'light')
+			localStorage.setItem('uiux.workbench.locale', 'en-US')
+		})
+		await context.addInitScript(PREVIEW_WIRE_RECORDER)
+		await context.addCookies([{ ...server.cookie, url: server.origin, httpOnly: true, sameSite: 'Strict' }])
+		const page = await context.newPage()
+		// The Workbench's own read of the View carries one finding per Widget, so that its Checks panel lists an entry for each.
+		await page.route(`**/api/resources/view/${created.key}`, async (route) => {
+			if (route.request().frame() !== page.mainFrame()) return route.continue()
+			const response = await route.fetch()
+			const body = await response.json() as { diagnostics?: unknown[] }
+			await route.fulfill({ response, json: { ...body, diagnostics: [...(body.diagnostics ?? []), ...[0, 1, 2].map(index => ({ code: 'test.widget_finding', path: `/ir/slots/content/${index}`, message: `A finding on Widget ${index}.` }))] } })
+		})
+		try {
+			await page.goto(`${server.origin}/views/${created.key}?variant=blocked&panel=readiness`, { waitUntil: 'networkidle' })
+			await page.waitForSelector('[data-session-status][data-status="live"]', { timeout: 30_000 })
+			const frame = (await (await iframe(page).elementHandle())!.contentFrame())!
+			await frame.waitForSelector('[data-widget-id="state-button"]', { state: 'attached', timeout: 20_000 })
+			// The type the Checks panel navigates: the Text and the TextInput. Type into the input, so that the Runtime holds interaction state.
+			await frame.locator('[data-widget-id="name-input"] input').fill('kept')
+			const button = frame.locator('[data-widget-id="state-button"]')
+			await expect.poll(() => button.evaluate(element => (element.matches('button') ? element : element.querySelector('button'))?.hasAttribute('disabled') ?? false)).toBe(true)
+
+			const snapshot = async () => ({
+				variant: new URL(page.url()).searchParams.get('variant'),
+				variantLabel: await page.locator('[data-context="variant"]').innerText(),
+				generation: await iframe(page).getAttribute('data-runtime-generation'),
+				hiddenDisplay: await frame.locator('[data-widget-id="hidden-note"]').evaluate(element => getComputedStyle(element).display),
+				disabled: await button.evaluate(element => (element.matches('button') ? element : element.querySelector('button'))?.hasAttribute('disabled') ?? false),
+				typed: await frame.locator('[data-widget-id="name-input"] input').inputValue(),
+				document: await frame.evaluate(() => (document.documentElement as HTMLElement & { __same?: number }).__same ??= Math.random()),
+			})
+			const before = await snapshot()
+			expect(before).toMatchObject({ variant: 'blocked', hiddenDisplay: 'none', disabled: true, typed: 'kept' })
+			expect(before.variantLabel).toContain('blocked')
+
+			// A Checks navigation to the hidden Widget, then to the Widget whose State the Variant set, then to the Runtime's typed input.
+			for (const widgetId of ['hidden-note', 'state-button', 'name-input']) {
+				const entry = page.locator('[data-facet="validation"] dd button', { hasText: `#${widgetId}` }).first()
+				// Following a finding opens the Inspect panel: come back to Readiness and its findings.
+				if (!(await entry.isVisible())) await page.getByRole('tab', { name: /^Readiness/ }).click()
+				if (!(await entry.isVisible())) await page.locator('[data-facet="validation"] dt button').click()
+				await entry.click()
+				await page.waitForFunction(id => new URL(location.href).searchParams.get('widget') === id, widgetId)
+				// Its stream is open, so the navigation has had every chance to change something.
+				await expect.poll(async () => (await requestsFor(frame, widgetId)).length, { timeout: 20_000 }).toBeGreaterThan(0)
+				await page.waitForTimeout(300)
+				expect(await snapshot(), widgetId).toEqual(before)
+			}
+		}
+		finally { await context.close() }
+	}, 120_000)
+})

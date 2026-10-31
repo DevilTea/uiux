@@ -321,6 +321,34 @@ describe('Workspace pages navigation', () => {
 		finally { await context.close() }
 	}, 60_000)
 
+	it('scrolls to the section every time a link to it is followed, also when the address already names it (Rule 01a116f0-8c1d)', async () => {
+		const { context, page } = await open('/workspace/settings?section=themes', 1920, 600)
+		try {
+			await page.locator('#settings-themes').waitFor()
+			const scroller = () => page.locator('#settings-themes').evaluate(element => element.closest('[role="region"]')?.scrollTop ?? 0)
+			const follow = (target: string) => page.evaluate(async (to) => {
+				// A link of the app navigates through its router, which is what this does.
+				const app = (document.querySelector('[data-v-app]') as unknown as { __vue_app__: { config: { globalProperties: { $router: { push: (to: string) => Promise<unknown> } } } } }).__vue_app__
+				await app.config.globalProperties.$router.push(to)
+			}, target)
+			// The link scrolls smoothly: wait until the scroll has come to rest before judging or moving it.
+			const atRest = async () => { let last = -1; await expect.poll(async () => { const now = await scroller(); const rested = now === last; last = now; return rested }, { timeout: 10_000, interval: 250 }).toBe(true) }
+			await expect.poll(scroller).toBeGreaterThan(0)
+			await atRest()
+
+			// Back to the top by hand: the address still names `themes`, so the router sees a duplicate navigation.
+			for (const attempt of [1, 2]) {
+				await page.evaluate(() => document.querySelector('#settings-themes')?.closest('[role="region"]')?.scrollTo({ top: 0, behavior: 'instant' }))
+				await expect.poll(scroller, { message: `scrolled to the top before attempt ${attempt}` }).toBe(0)
+				await follow('/workspace/settings?section=themes')
+				await expect.poll(scroller, { message: `the link scrolls again, attempt ${attempt}` }).toBeGreaterThan(0)
+				await atRest()
+				expect(new URL(page.url()).searchParams.get('section')).toBe('themes')
+			}
+		}
+		finally { await context.close() }
+	}, 60_000)
+
 	it('brings the Adapters into view from ⌘K "Adapters" while already on the Product Kit page, again at the same address', async () => {
 		const { context, page } = await open('/workspace/product-kit', 1920, 600)
 		try {

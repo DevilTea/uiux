@@ -237,3 +237,44 @@ describe('Review render context in the Workbench (Part 7)', () => {
 		finally { await context.close() }
 	}, 90_000)
 })
+
+describe('a Variant builds a fresh Runtime (Rule 01a1144e-520f)', () => {
+	it('drops the interaction state of the earlier Runtime when a Variant is selected, switched and switched back', async () => {
+		const spec = { intent: 'Type a name', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [] }
+		const created = await api<{ key: string }>('/api/views', { name: 'Fresh Runtime', spec })
+		const read = await api<{ revision: string }>(`/api/resources/view/${created.key}`)
+		await api(`/api/views/${created.key}/structure`, {
+			expectedRevision: read.revision,
+			ir: { id: 'root', type: 'RootShell', slots: { content: [{ id: 'name-input', type: 'TextInput', config: { label: 'Name' } }] } },
+			variants: { one: { state: {} }, two: { state: {} } },
+		}, 'PUT')
+		const { context, page } = await open(`/views/${created.key}`)
+		try {
+			const iframe = page.locator(`iframe[src*="/preview"][src*="viewId=${created.key}"]`)
+			await iframe.waitFor({ timeout: 15_000 })
+			const frame = (await (await iframe.elementHandle())!.contentFrame())!
+			await frame.waitForSelector('[data-preview-ready="true"]', { state: 'attached', timeout: 15_000 })
+			await page.waitForSelector('[data-session-status][data-status="live"]', { timeout: 15_000 })
+			const input = frame.locator('[data-widget-id="name-input"] input')
+
+			async function typeThenSwitchTo(variant: string): Promise<void> {
+				await input.fill('typed before the switch')
+				expect(await input.inputValue()).toBe('typed before the switch')
+				// Mark the mounted Runtime's element: a fresh Runtime renders a new element without the mark.
+				await input.evaluate((element) => { (element as HTMLElement & { __earlierRuntime?: boolean }).__earlierRuntime = true })
+				await page.locator('[data-context="variant"]').click()
+				await page.getByRole('option', { name: variant, exact: true }).click()
+				await expect.poll(() => query(page).variant).toBe(variant)
+				// The Widget is rendered again from the IR and the Variant's overrides, without the typed value.
+				await expect.poll(() => input.inputValue(), { timeout: 15_000 }).toBe('')
+				expect(await input.evaluate(element => (element as HTMLElement & { __earlierRuntime?: boolean }).__earlierRuntime ?? false)).toBe(false)
+			}
+
+			// Selecting a Variant on the base state, switching to another, and switching back: each Runtime is new.
+			await typeThenSwitchTo('one')
+			await typeThenSwitchTo('two')
+			await typeThenSwitchTo('one')
+		}
+		finally { await context.close() }
+	}, 120_000)
+})

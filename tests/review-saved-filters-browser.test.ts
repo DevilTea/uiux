@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright'
+import { bearer, provisionToken } from './support/access'
 import { startWorkbenchServer, type WorkbenchServer } from './support/workbench-server'
 
 /**
@@ -212,4 +213,60 @@ describe('Reviews inbox saved filters (#62)', () => {
 		}
 		finally { await context.close() }
 	}, 60_000)
+})
+
+describe('the inbox address (Rule 01a116f0-8e81)', () => {
+	async function seedThread(headers: Record<string, string>, body: string): Promise<string> {
+		const call = async (path: string, payload: unknown) => {
+			const response = await fetch(`${server.origin}${path}`, { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify(payload) })
+			if (!response.ok) throw new Error(`${path}: ${response.status} ${await response.text()}`)
+			return await response.json() as { key: string; revision: string }
+		}
+		const created = await call('/api/reviews', { anchor: { viewId: VIEW_ID, widgetId: 'app-title' } })
+		await call(`/api/reviews/${created.key}/messages`, { expectedRevision: created.revision, body })
+		return created.key
+	}
+	const rows = (page: Page) => page.locator('[data-review-row]').evaluateAll(nodes => nodes.map(node => node.getAttribute('data-review-row')!).sort())
+
+	it('reopens the same queue and thread from a copied inbox link', async () => {
+		const mine = await seedThread(server.headers, 'My own thread, in my queue.')
+		const agentToken = await provisionToken(server.workspaceRoot, { nickname: 'inbox-agent', kind: 'agent', preset: 'editor' })
+		const theirs = await seedThread(bearer(agentToken), 'Someone else\'s thread, outside my queue.')
+
+		const { context, page } = await openInbox('/reviews')
+		let copied: string
+		let queue: string[]
+		try {
+			await page.locator(`[data-review-row="${theirs}"]`).waitFor()
+			// The queue is narrowed with the inbox's own control, and a thread is opened from it.
+			await page.locator('[data-review-toggle="mine"]').click()
+			await poll(() => search(page)).toMatchObject({ mine: '1' })
+			await page.locator(`[data-review-row="${theirs}"]`).waitFor({ state: 'detached' })
+			await page.locator(`[data-review-row="${mine}"]`).click()
+			await page.locator(`[data-review-detail][data-thread-id="${mine}"]`).waitFor()
+			await poll(() => search(page)).toMatchObject({ mine: '1', thread: mine })
+			queue = await rows(page)
+			expect(queue).toContain(mine)
+			expect(queue).not.toContain(theirs)
+			// The address is all there is to copy.
+			copied = page.url()
+		}
+		finally { await context.close() }
+
+		// A new browser context with nothing but the sign-in and that address.
+		const other = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+		await other.addInitScript(() => localStorage.setItem('uiux.workbench.locale', 'en-US'))
+		await other.addCookies([{ ...server.cookie, url: server.origin, httpOnly: true, sameSite: 'Strict' }])
+		const reopened = await other.newPage()
+		try {
+			await reopened.goto(copied, { waitUntil: 'networkidle' })
+			await reopened.locator('[data-review-inbox]').waitFor()
+			await reopened.locator(`[data-review-detail][data-thread-id="${mine}"]`).waitFor({ timeout: 15_000 })
+			expect(await reopened.locator('[data-review-toggle="mine"]').getAttribute('aria-pressed')).toBe('true')
+			await poll(() => rows(reopened)).toEqual(queue)
+			expect(await reopened.locator(`[data-review-row="${theirs}"]`).count()).toBe(0)
+			expect(search(reopened)).toMatchObject({ mine: '1', thread: mine })
+		}
+		finally { await other.close() }
+	}, 90_000)
 })

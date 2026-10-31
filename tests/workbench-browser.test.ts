@@ -1096,3 +1096,31 @@ describe('Canvas comments (R6 targeting and composer, R7a pins and bubble)', () 
 		finally { await context.close() }
 	}, 60_000)
 })
+
+describe('Select-tool clicks (Rule 01a11658-230d)', () => {
+	it('commits the clicked Widget as the selection and still runs the Widget\'s own handlers in the Preview', async () => {
+		const { context, page } = await openWorkbench(`/views/${VIEW_ID}`, { mode: 'light' })
+		try {
+			const frame = await previewFrame(page)
+			await page.waitForSelector('[data-session-status][data-status="live"]', { timeout: 20_000 })
+			const select = page.locator('[role="toolbar"] [data-tool="select"]')
+			await expect.poll(() => select.getAttribute('aria-pressed')).toBe('true')
+			// The Widget's own handler: a click listener on the Widget's element in the Preview document.
+			await frame.evaluate(() => {
+				const target = document.querySelector('[data-widget-id="btn-run-checks"]')!
+				const win = window as unknown as { __clicks: number }
+				win.__clicks = 0
+				target.addEventListener('click', () => { win.__clicks++ })
+			})
+			expect(new URL(page.url()).searchParams.get('widget')).toBeNull()
+			await frame.locator('[data-widget-id="btn-run-checks"]').click()
+
+			// The selection is committed...
+			await page.waitForFunction(() => new URL(location.href).searchParams.get('widget') === 'btn-run-checks')
+			expect(await page.locator('[data-blueprint="type"]').textContent()).toContain('#btn-run-checks')
+			// ...and the click still reached the Widget in the Preview, once.
+			await expect.poll(() => frame.evaluate(() => (window as unknown as { __clicks: number }).__clicks)).toBe(1)
+		}
+		finally { await context.close() }
+	}, 60_000)
+})

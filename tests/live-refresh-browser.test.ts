@@ -2,7 +2,7 @@ import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/cli
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
-import { bearer, provisionToken } from './support/access'
+import { bearer, provisionToken, sessionCookieFor } from './support/access'
 import { startWorkbenchServer, type WorkbenchServer } from './support/workbench-server'
 
 /**
@@ -146,4 +146,58 @@ describe('Live refresh in the Workbench (Rules 01a11485-f414-7882-b94f-cd4236c26
 			await context.close()
 		}
 	}, 60_000)
+})
+
+describe('a change of the member\'s access (Rule 01a116f0-963f)', () => {
+	it('is read again by the open Workbench, which then offers what the new keys allow, without a reload', async () => {
+		const token = await provisionToken(server.workspaceRoot, { nickname: 'ivy', kind: 'human', preset: 'viewer' })
+		const cookie = await sessionCookieFor(server.origin, token)
+		const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light' })
+		await context.addInitScript(() => {
+			localStorage.setItem('nuxt-color-mode', 'light')
+			localStorage.setItem('uiux.workbench.locale', 'en-US')
+		})
+		await context.addCookies([{ ...cookie, url: server.origin, httpOnly: true, sameSite: 'Strict' }])
+		const page = await context.newPage()
+		const sessionReads: number[] = []
+		page.on('request', (request) => { if (request.method() === 'GET' && new URL(request.url()).pathname === '/api/session') sessionReads.push(Date.now()) })
+		let streams = 0
+		page.on('response', (response) => { if (new URL(response.url()).pathname === '/api/events' && response.ok()) streams += 1 })
+		try {
+			await page.goto(`${server.origin}/views/${VIEW_ID}`, { waitUntil: 'networkidle' })
+			await page.evaluate(() => { (window as unknown as { liveMarker: number }).liveMarker = 1 })
+			// A Viewer: the Comment tool is there, disabled, and names the missing key.
+			const comment = page.locator('[role="toolbar"] [data-tool="comment"]')
+			await comment.waitFor({ timeout: 20_000 })
+			expect(await comment.getAttribute('aria-disabled')).toBe('true')
+			await poll(() => streams, 20_000).toBe(1)
+			const readsBefore = sessionReads.length
+
+			// The Owner grants the key: an access change, from another session.
+			const members = await (await fetch(`${server.origin}/api/access/members`, { headers: server.headers })).json() as { members: { id: string; nickname: string }[] }
+			const ivy = members.members.find(member => member.nickname === 'ivy')!
+			const granted = await fetch(`${server.origin}/api/access/members/${encodeURIComponent(ivy.id)}`, {
+				method: 'PATCH',
+				headers: { ...server.headers, 'content-type': 'application/json', origin: server.origin },
+				body: JSON.stringify({ grant: ['reviews.write'] }),
+			})
+			expect(granted.status).toBe(200)
+
+			// The Workbench re-reads its session on its own and now offers the Comment tool.
+			await poll(() => sessionReads.length, 20_000).toBeGreaterThan(readsBefore)
+			await poll(() => comment.getAttribute('aria-disabled'), 20_000).not.toBe('true')
+			expect(await marker(page)).toBe(1)
+
+			// And the other way: the key is taken away, and the offer goes with it.
+			const revoked = await fetch(`${server.origin}/api/access/members/${encodeURIComponent(ivy.id)}`, {
+				method: 'PATCH',
+				headers: { ...server.headers, 'content-type': 'application/json', origin: server.origin },
+				body: JSON.stringify({ revoke: ['reviews.write'] }),
+			})
+			expect(revoked.status).toBe(200)
+			await poll(() => comment.getAttribute('aria-disabled'), 20_000).toBe('true')
+			expect(await marker(page)).toBe(1)
+		}
+		finally { await context.close() }
+	}, 90_000)
 })
