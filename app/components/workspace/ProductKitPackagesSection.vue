@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useI18n } from '#imports'
+import KitBadge from '~/components/kit/ui/Badge.vue'
 import type { ProductKitPackage } from '../../../src/application/services/product-kit-authoring'
 
 /**
@@ -63,34 +64,28 @@ const FIELD = 'designSystems'
             class="font-mono text-xs text-muted"
             translate="no"
           >{{ item.version }}</span>
-          <UBadge
+          <KitBadge
             v-if="item.linked"
-            color="info"
-            variant="subtle"
-            size="sm"
-            icon="i-lucide-link"
+            tone="info"
+            icon="link"
             data-package-linked
           >
             {{ t('productKit.packages.linked') }}
-          </UBadge>
-          <UBadge
-            color="success"
-            variant="subtle"
-            size="sm"
-            icon="i-lucide-check"
+          </KitBadge>
+          <KitBadge
+            tone="success"
+            icon="check"
           >
             {{ t('productKit.packages.installed') }}
-          </UBadge>
+          </KitBadge>
         </template>
-        <UBadge
+        <KitBadge
           v-else
-          color="error"
-          variant="subtle"
-          size="sm"
-          icon="i-lucide-circle-alert"
+          tone="danger"
+          icon="circle-alert"
         >
           {{ t('productKit.packages.missing') }}
-        </UBadge>
+        </KitBadge>
       </li>
     </ul>
     <p

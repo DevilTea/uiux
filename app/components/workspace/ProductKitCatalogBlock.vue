@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from '#imports'
+import KitIcon from '~/components/kit/ui/Icon.vue'
+import KitSkeleton from '~/components/kit/ui/Skeleton.vue'
 import KitBadge from '~/components/kit/ui/Badge.vue'
 import { useWidgetCatalog } from '../../composables/useWidgetCatalog'
 import { configProperties, filterCatalogRows, type CatalogRow } from '../../utils/catalog-view'
@@ -68,8 +70,14 @@ const prettySchema = (schema: unknown) => JSON.stringify(schema, null, 2)
       data-catalog-loading
     >
       <span class="sr-only">{{ t('common.loading') }}</span>
-      <USkeleton class="h-8 w-full" />
-      <USkeleton class="h-8 w-full" />
+      <KitSkeleton
+        class="wb-skeleton animate-pulse"
+        :height="32"
+      />
+      <KitSkeleton
+        class="wb-skeleton animate-pulse"
+        :height="32"
+      />
     </div>
 
     <UAlert
@@ -167,9 +175,9 @@ const prettySchema = (schema: unknown) => JSON.stringify(schema, null, 2)
                 :data-catalog-toggle="row.entry.type"
                 @click="toggle(row.key)"
               >
-                <UIcon
-                  :name="open.has(row.key) ? 'i-lucide-chevron-down' : 'i-lucide-chevron-right'"
-                  class="size-4 shrink-0 text-muted rtl:rotate-180"
+                <KitIcon
+                  :name="open.has(row.key) ? 'chevron-down' : 'chevron-right'"
+                  class="shrink-0 text-muted rtl:rotate-180"
                   aria-hidden="true"
                 />
                 <span

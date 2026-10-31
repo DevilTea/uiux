@@ -2,6 +2,10 @@
 import { computed, h, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import type { TableColumn } from '@nuxt/ui'
 import { useI18n, useRoute } from '#imports'
+import KitBadge from '~/components/kit/ui/Badge.vue'
+import KitButton from '~/components/kit/ui/Button.vue'
+import KitIcon from '~/components/kit/ui/Icon.vue'
+import KitSkeleton from '~/components/kit/ui/Skeleton.vue'
 import { useWorkbench } from '../../composables/useWorkbench'
 import { touchesKinds, useLiveEvents } from '../../composables/useLiveEvents'
 import { useUiuxClient } from '../../composables/useUiuxClient'
@@ -206,9 +210,9 @@ const diffs = computed(() => others.value.map(state => ({
 })))
 
 const MARKERS: Record<Exclude<LocaleCellState, 'value'>, { icon: string; key: string; variant: 'subtle' | 'outline' }> = {
-	missing: { icon: 'i-lucide-circle-off', key: 'locales.missing', variant: 'outline' },
-	empty: { icon: 'i-lucide-circle-dashed', key: 'locales.empty', variant: 'subtle' },
-	whitespace: { icon: 'i-lucide-space', key: 'locales.whitespace', variant: 'subtle' },
+	missing: { icon: 'circle-off', key: 'locales.missing', variant: 'outline' },
+	empty: { icon: 'circle-dashed', key: 'locales.empty', variant: 'subtle' },
+	whitespace: { icon: 'space', key: 'locales.whitespace', variant: 'subtle' },
 }
 
 function isEdited(state: LocaleState, key: string): boolean {
@@ -467,19 +471,19 @@ const diagnosticStates = computed(() => ordered.value.filter(state => state.diag
             v-if="canEdit"
             class="flex shrink-0 gap-2"
           >
-            <UButton
-              icon="i-lucide-plus"
+            <KitButton
+              icon="plus"
               :disabled="!states.length"
               @click="openAddKey"
             >
               {{ t('locales.addKey') }}
-            </UButton>
-            <UButton
-              icon="i-lucide-plus"
+            </KitButton>
+            <KitButton
+              icon="plus"
               @click="openCreate()"
             >
               {{ t('locales.newLocale') }}
-            </UButton>
+            </KitButton>
           </div>
         </div>
         <AuthoringAccessNotice
@@ -589,53 +593,47 @@ const diagnosticStates = computed(() => ordered.value.filter(state => state.diag
                 v-if="!diff.missing.length && !diff.extra.length"
                 class="flex items-center gap-1.5 text-sm text-muted"
               >
-                <UIcon
-                  name="i-lucide-check"
-                  class="size-4 text-success"
+                <KitIcon
+                  name="check"
+                  class="text-success"
                 />{{ t('locales.diff.match', { n: primaryState ? Object.keys(primaryState.draft).length : 0 }) }}
               </span>
               <template v-else>
-                <UBadge
+                <KitBadge
                   v-if="diff.missing.length"
-                  color="warning"
-                  variant="subtle"
-                  size="sm"
-                  icon="i-lucide-circle-off"
+                  tone="warning"
+                  icon="circle-off"
                 >
                   {{ t('locales.diff.missing', { n: diff.missing.length }, diff.missing.length) }}
-                </UBadge>
-                <UBadge
+                </KitBadge>
+                <KitBadge
                   v-if="diff.extra.length"
-                  color="neutral"
                   variant="outline"
-                  size="sm"
-                  icon="i-lucide-circle-plus"
+                  icon="circle-plus"
                 >
                   {{ t('locales.diff.extra', { n: diff.extra.length }, diff.extra.length) }}
-                </UBadge>
+                </KitBadge>
                 <span class="min-w-0 flex-1 truncate font-mono text-xs text-muted">{{ [...diff.missing, ...diff.extra].slice(0, 4).join(', ') }}{{ diff.missing.length + diff.extra.length > 4 ? '…' : '' }}</span>
                 <div
                   v-if="canEdit"
                   class="flex gap-1"
                 >
-                  <UButton
+                  <KitButton
                     v-if="diff.missing.length"
-                    size="sm"
-                    color="neutral"
                     variant="ghost"
+                    size="sm"
                     @click="addMissing(diff.locale)"
                   >
                     {{ t('locales.diff.addMissing') }}
-                  </UButton>
-                  <UButton
+                  </KitButton>
+                  <KitButton
                     v-if="diff.extra.length"
-                    size="sm"
-                    color="neutral"
                     variant="ghost"
+                    size="sm"
                     @click="removeExtra(diff.locale)"
                   >
                     {{ t('locales.diff.removeExtra') }}
-                  </UButton>
+                  </KitButton>
                 </div>
               </template>
             </li>
@@ -688,19 +686,17 @@ const diagnosticStates = computed(() => ordered.value.filter(state => state.diag
             />
           </UFormField>
           <div class="flex gap-2 pt-6">
-            <UButton
+            <KitButton
               type="submit"
-              color="neutral"
             >
               {{ t('common.add') }}
-            </UButton>
-            <UButton
-              color="neutral"
+            </KitButton>
+            <KitButton
               variant="ghost"
               @click="addingKey = false"
             >
               {{ t('common.cancel') }}
-            </UButton>
+            </KitButton>
           </div>
         </form>
       </header>
@@ -730,11 +726,12 @@ const diagnosticStates = computed(() => ordered.value.filter(state => state.diag
         class="flex flex-col gap-2 pb-6"
         aria-hidden="true"
       >
-        <USkeleton
+        <KitSkeleton
           v-for="n in 12"
           :key="n"
-          class="h-8 w-full"
-          :aria-label="t('common.loading')"
+          class="wb-skeleton animate-pulse"
+          :height="32"
+          :label="t('common.loading')"
         />
       </div>
 
@@ -766,12 +763,10 @@ const diagnosticStates = computed(() => ordered.value.filter(state => state.diag
         >
           <span class="flex items-center gap-2">
             <code class="min-w-0 truncate font-mono text-xs text-highlighted">{{ row.key }}</code>
-            <UBadge
+            <KitBadge
               v-if="rowIsExtra(row.key)"
-              color="neutral"
               variant="outline"
-              size="sm"
-            >{{ t('locales.extraBadge', { locale: primary }) }}</UBadge>
+            >{{ t('locales.extraBadge', { locale: primary }) }}</KitBadge>
           </span>
           <dl class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
             <template
@@ -782,15 +777,14 @@ const diagnosticStates = computed(() => ordered.value.filter(state => state.diag
                 {{ state.key }}
               </dt>
               <dd class="min-w-0 break-words">
-                <UBadge
+                <KitBadge
                   v-if="localeCellState(state.draft[row.key]) !== 'value'"
-                  color="warning"
+                  tone="warning"
                   :variant="MARKERS[localeCellState(state.draft[row.key]) as Exclude<LocaleCellState, 'value'>].variant"
-                  size="sm"
                   :icon="MARKERS[localeCellState(state.draft[row.key]) as Exclude<LocaleCellState, 'value'>].icon"
                 >
                   {{ t(MARKERS[localeCellState(state.draft[row.key]) as Exclude<LocaleCellState, 'value'>].key) }}
-                </UBadge>
+                </KitBadge>
                 <span v-else>{{ state.draft[row.key] }}</span>
               </dd>
             </template>
@@ -825,20 +819,16 @@ const diagnosticStates = computed(() => ordered.value.filter(state => state.diag
         >
           <span class="flex items-center gap-2">
             <code class="font-mono text-xs text-highlighted">{{ locale }}</code>
-            <UBadge
+            <KitBadge
               v-if="locale === primary"
-              color="neutral"
               variant="soft"
-              size="sm"
-              icon="i-lucide-star"
-            >{{ t('locales.primary') }}</UBadge>
-            <UBadge
+              icon="star"
+            >{{ t('locales.primary') }}</KitBadge>
+            <KitBadge
               v-if="byKey.get(locale) && countMessageChanges(byKey.get(locale)!.saved, byKey.get(locale)!.draft)"
-              color="neutral"
               variant="outline"
-              size="sm"
-              icon="i-lucide-pencil"
-            >{{ t('locales.editedCount', { n: countMessageChanges(byKey.get(locale)!.saved, byKey.get(locale)!.draft) }) }}</UBadge>
+              icon="pencil"
+            >{{ t('locales.editedCount', { n: countMessageChanges(byKey.get(locale)!.saved, byKey.get(locale)!.draft) }) }}</KitBadge>
           </span>
         </template>
 
@@ -846,26 +836,25 @@ const diagnosticStates = computed(() => ordered.value.filter(state => state.diag
           <div class="flex min-w-0 items-start gap-1 px-4 py-2">
             <div class="flex min-w-0 flex-1 flex-col items-start gap-1">
               <code class="max-w-full font-mono text-xs break-all text-highlighted">{{ row.original.key }}</code>
-              <UBadge
+              <KitBadge
                 v-if="rowIsExtra(row.original.key)"
-                color="neutral"
                 variant="outline"
-                size="sm"
               >
                 {{ t('locales.extraBadge', { locale: primary }) }}
-              </UBadge>
+              </KitBadge>
             </div>
             <UTooltip
               v-if="canEdit"
               :text="t('locales.removeKey')"
             >
-              <UButton
-                color="neutral"
+              <KitButton
                 variant="ghost"
                 size="sm"
-                icon="i-lucide-x"
+                icon="x"
+                icon-only
+                :label="t('locales.removeKeyLabel', { key: row.original.key })"
+                title=""
                 class="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 pointer-coarse:opacity-100"
-                :aria-label="t('locales.removeKeyLabel', { key: row.original.key })"
                 @click="removeKey(row.original.key)"
               />
             </UTooltip>
@@ -908,25 +897,29 @@ const diagnosticStates = computed(() => ordered.value.filter(state => state.diag
             @click="startEdit(row.original.key, locale)"
             @keydown="canEditLocale(locale) && onCellKeydown($event, row.original.key, locale)"
           >
-            <UBadge
+            <KitBadge
               v-if="localeCellState(byKey.get(locale)?.draft[row.original.key]) !== 'value'"
-              color="warning"
+              tone="warning"
               :variant="MARKERS[localeCellState(byKey.get(locale)?.draft[row.original.key]) as Exclude<LocaleCellState, 'value'>].variant"
-              size="sm"
               :icon="MARKERS[localeCellState(byKey.get(locale)?.draft[row.original.key]) as Exclude<LocaleCellState, 'value'>].icon"
             >
               {{ t(MARKERS[localeCellState(byKey.get(locale)?.draft[row.original.key]) as Exclude<LocaleCellState, 'value'>].key) }}
-            </UBadge>
+            </KitBadge>
             <span
               v-else
               class="min-w-0 flex-1 break-words whitespace-pre-wrap text-default"
             >{{ byKey.get(locale)?.draft[row.original.key] }}</span>
-            <UIcon
+            <span
               v-if="byKey.get(locale) && isEdited(byKey.get(locale)!, row.original.key)"
-              name="i-lucide-pencil"
-              class="mt-0.5 ms-auto size-3.5 shrink-0 text-muted"
+              role="img"
+              class="mt-0.5 ms-auto shrink-0 text-muted"
               :aria-label="t('locales.edited')"
-            />
+            >
+              <KitIcon
+                name="pencil"
+                :size="14"
+              />
+            </span>
           </component>
         </template>
       </UTable>

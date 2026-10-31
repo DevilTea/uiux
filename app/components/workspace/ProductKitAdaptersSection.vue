@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from 'vue'
 import { useI18n, useToast } from '#imports'
+import KitBadge from '~/components/kit/ui/Badge.vue'
+import KitButton from '~/components/kit/ui/Button.vue'
+import KitIcon from '~/components/kit/ui/Icon.vue'
 import type { ProductKit } from '../../../src/domain/product-kit/schema'
 import { isPortableAdapterModuleSpecifier } from '../../../src/domain/workspace/schema'
 import type { Diagnostic } from '../../composables/workbench-types'
@@ -127,10 +130,10 @@ function statusOf(row: AdapterRow): RowStatus {
 }
 
 const STATUS = {
-	loaded: { color: 'success', icon: 'i-lucide-check', key: 'adapters.status.loaded' },
-	failed: { color: 'error', icon: 'i-lucide-circle-alert', key: 'adapters.status.failed' },
-	unsaved: { color: 'neutral', icon: 'i-lucide-circle-dashed', key: 'adapters.status.unsaved' },
-	unknown: { color: 'neutral', icon: 'i-lucide-circle-help', key: 'adapters.status.unknown' },
+	loaded: { tone: 'success', icon: 'check', key: 'adapters.status.loaded' },
+	failed: { tone: 'danger', icon: 'circle-alert', key: 'adapters.status.failed' },
+	unsaved: { tone: 'neutral', icon: 'circle-dashed', key: 'adapters.status.unsaved' },
+	unknown: { tone: 'neutral', icon: 'circle-help', key: 'adapters.status.unknown' },
 } as const
 
 /** Set-level diagnostics that no single Adapter row owns (e.g. registry conflicts). */
@@ -246,9 +249,10 @@ defineExpose({ save })
           data-access-notice="adapters"
           :data-missing-key="missingKey"
         >
-          <UIcon
-            name="i-lucide-user-lock"
-            class="size-3.5 shrink-0"
+          <KitIcon
+            name="user-lock"
+            :size="14"
+            class="shrink-0"
           />
           {{ t('access.requiresKey', { key: missingKey }) }}
         </p>
@@ -258,21 +262,21 @@ defineExpose({ save })
           data-access-notice="compose"
           data-missing-key="product-kit.compose"
         >
-          <UIcon
-            name="i-lucide-user-lock"
-            class="size-3.5 shrink-0"
+          <KitIcon
+            name="user-lock"
+            :size="14"
+            class="shrink-0"
           />
           {{ t('access.requiresKey', { key: 'product-kit.compose' }) }}
         </p>
       </div>
-      <UButton
+      <KitButton
         v-if="canComposeHere"
-        icon="i-lucide-plus"
-        class="shrink-0"
+        icon="plus"
         @click="add"
       >
         {{ t('adapters.add') }}
-      </UButton>
+      </KitButton>
     </header>
 
     <AuthoringConflictAlert
@@ -327,11 +331,11 @@ defineExpose({ save })
             >
               <template v-if="item.repair.kind === 'command'">
                 <code class="min-w-0 flex-1 truncate rounded-md border border-default bg-default px-2 py-1 font-mono text-xs text-highlighted">{{ item.repair.command }}</code>
-                <UButton
-                  color="neutral"
+                <KitButton
                   variant="ghost"
-                  icon="i-lucide-copy"
-                  :aria-label="t('adapters.copyCommand', { command: item.repair.command })"
+                  icon="copy"
+                  icon-only
+                  :label="t('adapters.copyCommand', { command: item.repair.command })"
                   @click="copy(item.repair.command)"
                 />
               </template>
@@ -393,10 +397,10 @@ defineExpose({ save })
         @dragend="onDragEnd"
       >
         <div class="flex shrink-0 flex-col items-center gap-1 pt-1.5">
-          <UIcon
+          <KitIcon
             v-if="canComposeHere"
-            name="i-lucide-grip-vertical"
-            class="size-4 cursor-grab text-dimmed"
+            name="grip-vertical"
+            class="cursor-grab text-dimmed"
             aria-hidden="true"
           />
           <span class="font-mono text-xs text-muted">{{ index + 1 }}</span>
@@ -424,15 +428,13 @@ defineExpose({ save })
               v-else
               class="min-w-0 flex-1 truncate py-1 font-mono text-xs text-highlighted"
             >{{ row.moduleSpecifier }}</code>
-            <UBadge
-              :color="STATUS[statusOf(row)].color"
-              variant="subtle"
-              size="sm"
+            <KitBadge
+              :tone="STATUS[statusOf(row)].tone"
               :icon="STATUS[statusOf(row)].icon"
-              class="mt-1.5 shrink-0"
+              class="mt-1.5"
             >
               {{ t(STATUS[statusOf(row)].key) }}
-            </UBadge>
+            </KitBadge>
           </div>
 
           <dl
@@ -517,9 +519,10 @@ defineExpose({ save })
               :key="diagnostic.code + diagnosticIndex"
               class="flex items-start gap-1 break-words"
             >
-              <UIcon
-                name="i-lucide-triangle-alert"
-                class="mt-0.5 size-3.5 shrink-0"
+              <KitIcon
+                name="triangle-alert"
+                :size="14"
+                class="mt-0.5 shrink-0"
               />
               <span><code class="me-1 font-mono">{{ diagnostic.code }}</code>{{ diagnosticText(diagnostic) }}</span>
             </li>
@@ -534,9 +537,10 @@ defineExpose({ save })
               :key="diagnostic.code + diagnostic.path"
               class="flex items-start gap-1 break-words"
             >
-              <UIcon
-                name="i-lucide-circle-alert"
-                class="mt-0.5 size-3.5 shrink-0"
+              <KitIcon
+                name="circle-alert"
+                :size="14"
+                class="mt-0.5 shrink-0"
               />
               <span><code class="me-1 font-mono">{{ diagnostic.code }}</code>{{ diagnosticText(diagnostic) }}</span>
             </li>
@@ -546,15 +550,15 @@ defineExpose({ save })
             v-if="canEdit || row.configText"
             :default-open="!!row.configText"
           >
-            <UButton
-              color="neutral"
-              variant="link"
-              trailing-icon="i-lucide-chevron-down"
-              class="px-0"
-              :ui="{ trailingIcon: 'group-data-[state=open]:rotate-180 transition-transform' }"
-            >
-              {{ t('adapters.config') }}
-            </UButton>
+            <template #default="{ open }">
+              <KitButton
+                variant="link-muted"
+                trailing-icon="chevron-down"
+                :expanded="open"
+              >
+                {{ t('adapters.config') }}
+              </KitButton>
+            </template>
             <template #content>
               <UFormField
                 :label="t('adapters.configLabel', { name: displayName(row) })"
@@ -588,33 +592,36 @@ defineExpose({ save })
           class="flex shrink-0 items-start gap-0.5"
         >
           <UTooltip :text="t('adapters.moveUp')">
-            <UButton
-              color="neutral"
+            <KitButton
               variant="ghost"
-              icon="i-lucide-arrow-up"
+              icon="arrow-up"
+              icon-only
+              :label="t('adapters.moveUpLabel', { name: displayName(row) })"
+              title=""
               :disabled="index === 0"
-              :aria-label="t('adapters.moveUpLabel', { name: displayName(row) })"
               :data-adapter-move="`${row.uid}-up`"
               @click="move(index, index - 1, 'up')"
             />
           </UTooltip>
           <UTooltip :text="t('adapters.moveDown')">
-            <UButton
-              color="neutral"
+            <KitButton
               variant="ghost"
-              icon="i-lucide-arrow-down"
+              icon="arrow-down"
+              icon-only
+              :label="t('adapters.moveDownLabel', { name: displayName(row) })"
+              title=""
               :disabled="index === rows.length - 1"
-              :aria-label="t('adapters.moveDownLabel', { name: displayName(row) })"
               :data-adapter-move="`${row.uid}-down`"
               @click="move(index, index + 1, 'down')"
             />
           </UTooltip>
           <UTooltip :text="t('common.remove')">
-            <UButton
-              color="neutral"
+            <KitButton
               variant="ghost"
-              icon="i-lucide-trash-2"
-              :aria-label="t('adapters.removeLabel', { name: displayName(row) })"
+              icon="trash-2"
+              icon-only
+              :label="t('adapters.removeLabel', { name: displayName(row) })"
+              title=""
               @click="remove(row)"
             />
           </UTooltip>

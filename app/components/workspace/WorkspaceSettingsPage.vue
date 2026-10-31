@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import type { NavigationMenuItem } from '@nuxt/ui'
 import { useI18n, useRoute, useRouter } from '#imports'
+import KitSkeleton from '~/components/kit/ui/Skeleton.vue'
 import { useWorkbench } from '../../composables/useWorkbench'
 import { useUiuxClient } from '../../composables/useUiuxClient'
 import { useWorkbenchFeedback } from '../../composables/useWorkbenchFeedback'
@@ -391,21 +392,27 @@ const viewportDiagnostics = computed(() => workspace.value?.diagnostics ?? [])
             class="flex flex-col gap-3"
             aria-hidden="true"
           >
-            <USkeleton
-              class="h-5 w-40"
-              :aria-label="t('common.loading')"
+            <KitSkeleton
+              class="wb-skeleton animate-pulse"
+              :width="160"
+              :height="20"
+              :label="t('common.loading')"
             />
-            <USkeleton
-              class="h-8 w-full"
-              :aria-label="t('common.loading')"
+            <KitSkeleton
+              class="wb-skeleton animate-pulse"
+              :height="32"
+              :label="t('common.loading')"
             />
-            <USkeleton
-              class="h-8 w-full"
-              :aria-label="t('common.loading')"
+            <KitSkeleton
+              class="wb-skeleton animate-pulse"
+              :height="32"
+              :label="t('common.loading')"
             />
-            <USkeleton
-              class="h-8 w-2/3"
-              :aria-label="t('common.loading')"
+            <KitSkeleton
+              class="wb-skeleton animate-pulse"
+              width="66.67%"
+              :height="32"
+              :label="t('common.loading')"
             />
           </div>
         </div>

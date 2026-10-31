@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from '#imports'
+import KitButton from '~/components/kit/ui/Button.vue'
 import { describeFetchError, type FetchErrorDetails } from '../../utils/fetch-error'
 import { blobToBase64, stripExtension } from '../../utils/workspace-authoring'
 import AuthoringErrorAlert from './AuthoringErrorAlert.vue'
@@ -145,22 +146,20 @@ async function upload(): Promise<void> {
     </template>
     <template #footer>
       <div class="flex w-full justify-end gap-2">
-        <UButton
-          color="neutral"
+        <KitButton
           variant="outline"
           @click="open = false"
         >
           {{ t('common.cancel') }}
-        </UButton>
-        <UButton
-          color="primary"
-          variant="solid"
-          icon="i-lucide-upload"
+        </KitButton>
+        <KitButton
+          variant="primary"
+          icon="upload"
           :loading="uploading"
           @click="upload"
         >
           {{ t('assets.upload') }}
-        </UButton>
+        </KitButton>
       </div>
     </template>
   </UModal>

@@ -33,6 +33,17 @@
       },
       "target": "app/components/kit"
     },
+    "checkbox": {
+      "componentDigest": "sha256:ab2e68eb8fd562ae67fea2db578bb8722c8e928ffa0492771a1b3d7e2c7ad29e",
+      "exportedAt": "2026-10-31T01:45:54.108Z",
+      "files": {
+        "app/components/kit/ui/Checkbox.vue": {
+          "digest": "sha256:f461c86dae4340891ed2c5ad672b80daa551b39a7f847269624115ac659f3e5a",
+          "source": "src/ui/Checkbox.vue"
+        }
+      },
+      "target": "app/components/kit"
+    },
     "comment-pin": {
       "componentDigest": "sha256:f133a0977644d0778a7830943bfc6ada7954585ed54a9dad57029574379735a4",
       "exportedAt": "2026-10-30T23:12:11.457Z",

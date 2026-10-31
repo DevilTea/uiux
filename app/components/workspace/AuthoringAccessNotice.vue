@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from '#imports'
+import KitIcon from '~/components/kit/ui/Icon.vue'
 import type { AuthoringAccess } from '../../composables/useAuthoringAccess'
 
 /**
@@ -14,11 +15,11 @@ const { t } = useI18n()
 
 const notice = computed(() => {
 	if (props.access === 'tablet' || props.access === 'mobile')
-		return { icon: 'i-lucide-monitor', title: t('common.editOnDesktop'), description: t('authoring.access.device') }
+		return { icon: 'monitor', title: t('common.editOnDesktop'), description: t('authoring.access.device') }
 	if (props.access === 'unsupported')
-		return { icon: 'i-lucide-lock', title: t('common.readOnly'), description: t('authoring.access.unsupported') }
+		return { icon: 'lock', title: t('common.readOnly'), description: t('authoring.access.unsupported') }
 	if (props.access === 'key')
-		return { icon: 'i-lucide-user-lock', title: t('common.readOnly'), description: t('access.requiresKey', { key: props.writeKey }) }
+		return { icon: 'user-lock', title: t('common.readOnly'), description: t('access.requiresKey', { key: props.writeKey }) }
 	return undefined
 })
 </script>
@@ -30,9 +31,9 @@ const notice = computed(() => {
     data-access-notice
     :data-missing-key="access === 'key' ? writeKey : undefined"
   >
-    <UIcon
+    <KitIcon
       :name="notice.icon"
-      class="mt-0.5 size-4 shrink-0"
+      class="mt-0.5 shrink-0"
     />
     <span><span class="font-medium text-default">{{ notice.title }}</span> · {{ notice.description }}</span>
   </p>
