@@ -541,6 +541,7 @@ const unknownHelp = (preset: AccessPreset) => t('access.presets.unknownKeysHelp'
             <KitButton
               variant="link-muted"
               size="sm"
+              class="min-w-(--wb-target)"
               data-preset-key-count
               :aria-label="canEdit ? t('access.presets.editTitle', { name: row.original.preset.name }) : t('access.presets.viewTitle', { name: row.original.preset.name })"
               @click="openPreset(row.original.index)"
