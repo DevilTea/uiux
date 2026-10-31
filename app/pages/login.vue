@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { definePageMeta, navigateTo, useI18n, useRoute } from '#imports'
+import KitButton from '~/components/kit/ui/Button.vue'
+import KitIcon from '~/components/kit/ui/Icon.vue'
 import { mayHaveSession, useAccess } from '../composables/useAccess'
 
 /**
@@ -123,9 +125,10 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', onHashChange))
         class="flex items-center gap-2 text-sm text-muted"
         role="status"
       >
-        <UIcon
-          name="i-lucide-loader-circle"
-          class="size-4 animate-spin"
+        <KitIcon
+          name="loader-circle"
+          :size="16"
+          class="animate-spin"
         />
         {{ t('access.login.signingIn') }}
       </div>
@@ -157,16 +160,15 @@ onBeforeUnmount(() => window.removeEventListener('hashchange', onHashChange))
             placeholder="uiux_t_…"
           />
         </UFormField>
-        <UButton
+        <KitButton
           type="submit"
-          color="primary"
-          variant="solid"
-          block
+          variant="primary"
+          full-width
           :loading="submitting"
           :disabled="!token.trim()"
         >
           {{ t('access.login.submit') }}
-        </UButton>
+        </KitButton>
       </form>
 
       <USeparator />

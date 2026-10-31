@@ -5,6 +5,9 @@ import type { DropdownMenuItem } from '@nuxt/ui'
 import { isCatalogKey, isHumanOnlyKey, keyRequirements, type PermissionKey } from '../../../src/application/access/keys'
 import { memberLabel, type LabelPreset } from '../../../src/application/access/labels'
 import type { MemberKind } from '../../../src/application/access/principal'
+import KitBadge from '~/components/kit/ui/Badge.vue'
+import KitButton from '~/components/kit/ui/Button.vue'
+import KitIcon from '~/components/kit/ui/Icon.vue'
 import { applyPreset, catalogByDomain, toggleKey } from '../../utils/member-keys'
 import { memberLabelText } from '../../utils/member-label'
 
@@ -82,14 +85,14 @@ const presetItems = computed<DropdownMenuItem[]>(() => props.presets.map(preset 
           v-if="subject === 'member'"
           class="text-muted"
         >{{ t('access.keys.resultingLabel') }}</span>
-        <UBadge
+        <KitBadge
           v-if="subject === 'member'"
-          color="neutral"
+          tone="neutral"
           variant="soft"
           data-key-editor-label
         >
           {{ label }}
-        </UBadge>
+        </KitBadge>
         <span
           class="text-xs text-muted"
           data-key-editor-count
@@ -100,15 +103,14 @@ const presetItems = computed<DropdownMenuItem[]>(() => props.presets.map(preset 
         :items="presetItems"
         :content="{ align: 'end' }"
       >
-        <UButton
-          color="neutral"
+        <KitButton
           variant="outline"
           size="sm"
-          trailing-icon="i-lucide-chevron-down"
+          trailing-icon="chevron-down"
           data-key-editor-preset
         >
           {{ t('access.keys.startFromPreset') }}
-        </UButton>
+        </KitButton>
       </UDropdownMenu>
     </div>
 
@@ -158,16 +160,15 @@ const presetItems = computed<DropdownMenuItem[]>(() => props.presets.map(preset 
                   class="font-mono text-xs text-highlighted"
                   translate="no"
                 >{{ key }}</code>
-                <UBadge
+                <KitBadge
                   v-if="isHumanOnlyKey(key)"
-                  color="neutral"
+                  tone="neutral"
                   variant="outline"
-                  size="sm"
-                  icon="i-lucide-user-round"
+                  icon="user-round"
                   data-key-human-only
                 >
                   {{ t('access.keys.humanOnly') }}
-                </UBadge>
+                </KitBadge>
               </span>
             </template>
             <template #description>
@@ -181,9 +182,10 @@ const presetItems = computed<DropdownMenuItem[]>(() => props.presets.map(preset 
                 class="flex items-center gap-1 text-xs text-warning"
                 data-key-missing
               >
-                <UIcon
-                  name="i-lucide-triangle-alert"
-                  class="size-3.5 shrink-0"
+                <KitIcon
+                  name="triangle-alert"
+                  :size="14"
+                  class="shrink-0"
                 />
                 <i18n-t
                   keypath="access.keys.missing"
