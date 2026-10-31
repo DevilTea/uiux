@@ -377,10 +377,10 @@ const emptyKind = computed<'none' | 'caught-up' | 'no-match' | undefined>(() => 
           :text="t('inbox.mineHint')"
         >
           <KitButton
-            size="sm"
-            :variant="inbox.filter.value.mine ? 'neutral' : 'ghost'"
+            size="xs"
+            variant="ghost"
             :icon="inbox.filter.value.mine ? 'check' : 'user-round'"
-            :aria-pressed="inbox.filter.value.mine"
+            :pressed="inbox.filter.value.mine"
             :label="t('inbox.mine')"
             data-review-toggle="mine"
             @click="inbox.setFilter({ mine: !inbox.filter.value.mine })"
@@ -388,10 +388,10 @@ const emptyKind = computed<'none' | 'caught-up' | 'no-match' | undefined>(() => 
         </UTooltip>
         <UTooltip :text="t('inbox.updatedHint')">
           <KitButton
-            size="sm"
-            :variant="inbox.filter.value.unread ? 'neutral' : 'ghost'"
+            size="xs"
+            variant="ghost"
             :icon="inbox.filter.value.unread ? 'check' : 'bell-dot'"
-            :aria-pressed="inbox.filter.value.unread"
+            :pressed="inbox.filter.value.unread"
             :label="t('inbox.updated')"
             data-review-toggle="unread"
             @click="inbox.setFilter({ unread: !inbox.filter.value.unread })"
@@ -403,24 +403,22 @@ const emptyKind = computed<'none' | 'caught-up' | 'no-match' | undefined>(() => 
             class="mx-1 h-4 w-px bg-accented"
             aria-hidden="true"
           />
-          <UButton
+          <KitButton
             v-for="chip in chips"
             :key="chip.key"
             size="xs"
-            color="neutral"
             variant="outline"
-            trailing-icon="i-lucide-x"
+            trailing-icon="x"
+            truncate
             :label="chip.label"
             :aria-label="t('inbox.removeFilter', { filter: chip.label })"
-            class="max-w-full"
-            :ui="{ label: 'truncate' }"
             data-review-chip
             @click="chip.remove()"
           />
         </template>
         <KitButton
           v-if="hasNarrowing"
-          size="sm"
+          size="xs"
           variant="link-muted"
           :label="t('inbox.clearAll')"
           data-review-clear
@@ -450,10 +448,10 @@ const emptyKind = computed<'none' | 'caught-up' | 'no-match' | undefined>(() => 
       <KitButton
         v-for="resolution in resolutionChips"
         :key="resolution"
-        size="sm"
-        :variant="inbox.filter.value.resolution.includes(resolution) ? 'neutral' : 'ghost'"
+        size="xs"
+        variant="ghost"
         :icon="inbox.filter.value.resolution.includes(resolution) ? 'check' : undefined"
-        :aria-pressed="inbox.filter.value.resolution.includes(resolution)"
+        :pressed="inbox.filter.value.resolution.includes(resolution)"
         :label="t(`comments.resolution.${resolution}`)"
         :data-review-resolution-filter="resolution"
         @click="toggleResolution(resolution)"

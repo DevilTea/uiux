@@ -191,16 +191,16 @@ const readiness = computed(() => {
               v-if="item.evidence.length"
               class="mt-1"
             >
-              <UButton
-                color="neutral"
-                variant="link"
-                size="xs"
-                trailing-icon="i-lucide-chevron-down"
-                class="-ms-0.5 px-0.5 text-muted"
-                :ui="{ trailingIcon: 'group-data-[state=open]:rotate-180 transition-transform duration-150' }"
-                :label="t('comments.evidenceCount', item.evidence.length)"
-                data-submission-evidence-toggle
-              />
+              <template #default="{ open }">
+                <KitButton
+                  variant="link-muted"
+                  size="xs"
+                  trailing-icon="chevron-down"
+                  :expanded="open"
+                  :label="t('comments.evidenceCount', item.evidence.length)"
+                  data-submission-evidence-toggle
+                />
+              </template>
               <template #content>
                 <ul class="mt-1.5 grid gap-1 rounded-md border border-default p-2">
                   <li
@@ -219,7 +219,7 @@ const readiness = computed(() => {
                     >{{ shortDigest(ref.evidence) }}</span>
                     <KitButton
                       variant="ghost"
-                      size="sm"
+                      size="xs"
                       icon="copy"
                       icon-only
                       class="ms-auto"

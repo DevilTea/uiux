@@ -157,17 +157,14 @@ const editedTime = computed(() => props.item.editedAt ? fmt.dateTime(props.item.
         v-if="item.editedAt"
         :content="{ align: 'start', side: 'bottom' }"
       >
-        <UButton
-          color="neutral"
-          variant="link"
+        <KitButton
+          variant="link-muted"
           size="xs"
-          class="p-0 text-xs text-dimmed hover:text-highlighted"
+          :label="`· ${t('comments.edited')}`"
           :aria-label="t('comments.editedLabel', { time: editedTime })"
           :title="editedTime"
           data-message-edited-toggle
-        >
-          · {{ t('comments.edited') }}
-        </UButton>
+        />
         <template #content>
           <div
             class="grid w-80 max-w-[calc(100vw-2rem)] gap-2 p-3"
@@ -217,7 +214,7 @@ const editedTime = computed(() => props.item.editedAt ? fmt.dateTime(props.item.
       >
         <KitButton
           variant="ghost"
-          size="sm"
+          size="xs"
           icon="ellipsis"
           icon-only
           :label="t('comments.messageActions')"
@@ -246,7 +243,7 @@ const editedTime = computed(() => props.item.editedAt ? fmt.dateTime(props.item.
       <div class="flex justify-end gap-2">
         <KitButton
           variant="ghost"
-          size="sm"
+          size="xs"
           :label="t('common.cancel')"
           :kbd="kbdHint.cancel.value"
           data-message-edit-cancel
@@ -254,7 +251,7 @@ const editedTime = computed(() => props.item.editedAt ? fmt.dateTime(props.item.
         />
         <KitButton
           variant="primary"
-          size="sm"
+          size="xs"
           :label="t('comments.editSave')"
           :kbd="kbdHint.submit.value"
           :loading="saving"

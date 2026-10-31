@@ -79,16 +79,14 @@ function apply(id: string): void {
       v-model:open="open"
       :content="{ align: 'start' }"
     >
-      <UButton
+      <KitButton
         size="xs"
-        color="neutral"
         :variant="active ? 'soft' : 'ghost'"
-        icon="i-lucide-bookmark"
-        trailing-icon="i-lucide-chevron-down"
+        icon="bookmark"
+        trailing-icon="chevron-down"
+        truncate
         :label="active ? active.name : t('inbox.saved.menu')"
         :aria-label="triggerLabel"
-        class="max-w-full pointer-coarse:min-h-11"
-        :ui="{ label: 'truncate' }"
         data-review-saved-trigger
       />
       <template #content>
@@ -107,16 +105,15 @@ function apply(id: string): void {
               class="flex items-center gap-0.5"
               :data-review-saved-item="item.name"
             >
-              <UButton
+              <KitButton
                 size="sm"
-                color="neutral"
-                :variant="item.id === inbox.activeSavedId.value ? 'soft' : 'ghost'"
-                :icon="item.id === inbox.activeSavedId.value ? 'i-lucide-check' : 'i-lucide-bookmark'"
+                variant="ghost"
+                :icon="item.id === inbox.activeSavedId.value ? 'check' : 'bookmark'"
+                truncate
                 :label="item.name"
                 :aria-label="t('inbox.saved.apply', { name: item.name })"
-                :aria-pressed="item.id === inbox.activeSavedId.value"
-                class="min-w-0 flex-1 justify-start pointer-coarse:min-h-11"
-                :ui="{ label: 'truncate' }"
+                :pressed="item.id === inbox.activeSavedId.value"
+                class="flex-1 justify-start!"
                 data-review-saved-apply
                 @click="apply(item.id)"
               />

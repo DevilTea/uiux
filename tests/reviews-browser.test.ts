@@ -298,12 +298,18 @@ describe('Reviews inbox (R8)', () => {
 			expect(await isKit(page.locator('[data-review-new-comment]'), 'kit-btn')).toBe(true)
 			expect(await isKit(page.locator('[data-review-detail] [data-review-status]'), 'kit-badge')).toBe(true)
 			expect(await page.locator('[data-review-keys] .kit-kbd').count()).toBe(5)
-			// A toggle is still a pressed button; its on state is the Kit's neutral variant.
+			// A toggle is still a pressed button; its on state is the Kit's pressed (soft) look, at the xs size.
 			const mine = page.locator('[data-review-toggle="mine"]')
 			expect(await mine.getAttribute('aria-pressed')).toBe('false')
+			expect(await isKit(mine, 'kit-btn--xs')).toBe(true)
+			expect(await isKit(mine, 'is-pressed')).toBe(false)
 			await mine.click()
 			await poll(() => mine.getAttribute('aria-pressed')).toBe('true')
-			expect(await isKit(mine, 'kit-btn--neutral')).toBe(true)
+			expect(await isKit(mine, 'is-pressed')).toBe(true)
+			// The resolve split button is one Kit group; its menu trigger names itself and reports its menu.
+			const group = page.locator('[data-review-detail] .kit-btn-group')
+			expect(await group.locator('[data-review-resolve]').count()).toBe(1)
+			expect(await group.locator('[data-review-resolve-menu]').getAttribute('aria-label')).toBe('More ways to resolve')
 			// Reply keeps its shortcut hint on a keyboard device.
 			expect(await page.locator('[data-review-send] .kit-btn__kbd').count()).toBe(1)
 		}

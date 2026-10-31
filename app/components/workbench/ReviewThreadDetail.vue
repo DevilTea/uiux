@@ -3,6 +3,7 @@ import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from '#imports'
 import KitBadge from '~/components/kit/ui/Badge.vue'
 import KitButton from '~/components/kit/ui/Button.vue'
+import KitButtonGroup from '~/components/kit/ui/ButtonGroup.vue'
 import KitIcon from '~/components/kit/ui/Icon.vue'
 import KitSkeleton from '~/components/kit/ui/Skeleton.vue'
 import { useKbdHints } from '../../composables/useKbdHints'
@@ -558,20 +559,19 @@ defineExpose({ focusReply, focusHeading, openResolveMenu, resolvePrimary })
           data-review-reopen
           @click="ask('reopen')"
         />
-        <UFieldGroup
+        <KitButtonGroup
           v-if="thread.status !== 'resolved' && inbox.canResolve.value"
-          :class="compact && thread.status === 'open' ? 'col-span-2 flex' : 'flex'"
+          :class="compact && thread.status === 'open' ? 'col-span-2' : ''"
         >
-          <UButton
-            color="primary"
-            variant="solid"
+          <KitButton
+            variant="primary"
             :size="compact ? 'md' : 'sm'"
-            icon="i-lucide-check"
+            icon="check"
             :label="thread.status === 'ready-for-review' && !compact ? t('inbox.acceptResolve') : t('thread.resolve')"
             :loading="inbox.busy.value === 'resolve'"
             :disabled="thread.status === 'ready-for-review' && !activeSubmission"
             :aria-describedby="`review-resolve-hint-${thread.id}`"
-            :class="compact ? 'min-w-0 flex-1 justify-center' : ''"
+            :class="compact ? 'min-w-0 flex-1' : ''"
             data-review-resolve
             @click="resolvePrimary"
           />
@@ -580,16 +580,16 @@ defineExpose({ focusReply, focusHeading, openResolveMenu, resolvePrimary })
             :items="resolveMenu"
             :content="{ align: 'end', side: compact ? 'top' : 'bottom' }"
           >
-            <UButton
-              color="primary"
-              variant="solid"
+            <KitButton
+              variant="primary"
               :size="compact ? 'md' : 'sm'"
-              icon="i-lucide-chevron-down"
-              :aria-label="t('comments.resolveOptions')"
+              icon="chevron-down"
+              icon-only
+              :label="t('comments.resolveOptions')"
               data-review-resolve-menu
             />
           </UDropdownMenu>
-        </UFieldGroup>
+        </KitButtonGroup>
       </div>
       <p
         v-if="thread.status !== 'resolved' && inbox.canResolve.value && !pendingAction && !confirmingDelete"

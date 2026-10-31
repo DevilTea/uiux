@@ -22,6 +22,17 @@
       },
       "target": "app/components/kit"
     },
+    "button-group": {
+      "componentDigest": "sha256:49058b3468ae27a3dd08e7897233b8fa8269fe9fe63a8e78e506802326401cf7",
+      "exportedAt": "2026-10-31T00:06:59.897Z",
+      "files": {
+        "app/components/kit/ui/ButtonGroup.vue": {
+          "digest": "sha256:bad01946ffd83362818e4fbf5ec5b4120b42df87d9b6e1b771e5809980fa53a5",
+          "source": "src/ui/ButtonGroup.vue"
+        }
+      },
+      "target": "app/components/kit"
+    },
     "comment-pin": {
       "componentDigest": "sha256:f133a0977644d0778a7830943bfc6ada7954585ed54a9dad57029574379735a4",
       "exportedAt": "2026-10-30T23:12:11.457Z",
