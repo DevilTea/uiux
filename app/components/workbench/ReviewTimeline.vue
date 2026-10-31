@@ -2,6 +2,8 @@
 import { computed, onBeforeUnmount, shallowRef, watch } from 'vue'
 import { useI18n } from '#imports'
 import KitBadge from '~/components/kit/ui/Badge.vue'
+import KitButton from '~/components/kit/ui/Button.vue'
+import KitIcon from '~/components/kit/ui/Icon.vue'
 import { anchorViewId, isWorkspaceAnchor, type ReviewActor, type ReviewAnchor, type ReviewResolution, type ReviewThread } from '../../../src/domain/reviews/schema'
 import { buildReviewTimeline } from '../../utils/review-timeline'
 import { isDismissal } from '../../utils/review-inbox'
@@ -136,9 +138,9 @@ const readiness = computed(() => {
           :class="item.kind === 'resolved' && !isDismissal(item.resolution) ? 'text-success' : 'text-muted'"
           aria-hidden="true"
         >
-          <UIcon
-            :name="item.kind === 'submission' ? 'i-lucide-git-pull-request-arrow' : item.kind === 'resolved' ? (isDismissal(item.resolution) ? 'i-lucide-circle-slash' : 'i-lucide-circle-check') : item.kind === 'reopened' ? 'i-lucide-rotate-ccw' : 'i-lucide-crosshair'"
-            class="size-3.5"
+          <KitIcon
+            :name="item.kind === 'submission' ? 'git-pull-request-arrow' : item.kind === 'resolved' ? (isDismissal(item.resolution) ? 'circle-slash' : 'circle-check') : item.kind === 'reopened' ? 'rotate-ccw' : 'crosshair'"
+            :size="14"
           />
         </span>
         <div class="min-w-0 pt-1 text-sm text-muted">
@@ -189,16 +191,16 @@ const readiness = computed(() => {
               v-if="item.evidence.length"
               class="mt-1"
             >
-              <UButton
-                color="neutral"
-                variant="link"
-                size="xs"
-                trailing-icon="i-lucide-chevron-down"
-                class="-ms-0.5 px-0.5 text-muted"
-                :ui="{ trailingIcon: 'group-data-[state=open]:rotate-180 transition-transform duration-150' }"
-                :label="t('comments.evidenceCount', item.evidence.length)"
-                data-submission-evidence-toggle
-              />
+              <template #default="{ open }">
+                <KitButton
+                  variant="link-muted"
+                  size="xs"
+                  trailing-icon="chevron-down"
+                  :expanded="open"
+                  :label="t('comments.evidenceCount', item.evidence.length)"
+                  data-submission-evidence-toggle
+                />
+              </template>
               <template #content>
                 <ul class="mt-1.5 grid gap-1 rounded-md border border-default p-2">
                   <li
@@ -206,24 +208,22 @@ const readiness = computed(() => {
                     :key="`${ref.kind}-${ref.evidence}`"
                     class="flex min-w-0 items-center gap-2 text-xs"
                   >
-                    <UBadge
-                      color="neutral"
+                    <KitBadge
                       variant="outline"
-                      size="sm"
-                      class="shrink-0 font-mono"
+                      class="font-mono"
                       :label="ref.kind"
                     />
                     <span
                       class="min-w-0 truncate font-mono text-default"
                       :title="ref.evidence"
                     >{{ shortDigest(ref.evidence) }}</span>
-                    <UButton
-                      color="neutral"
+                    <KitButton
                       variant="ghost"
                       size="xs"
-                      icon="i-lucide-copy"
-                      class="ms-auto shrink-0"
-                      :aria-label="t('inbox.timeline.copyDigest')"
+                      icon="copy"
+                      icon-only
+                      class="ms-auto"
+                      :label="t('inbox.timeline.copyDigest')"
                       @click="copy(ref.evidence)"
                     />
                   </li>
@@ -258,11 +258,10 @@ const readiness = computed(() => {
           <template v-else-if="item.kind === 'resolved'">
             <p class="flex flex-wrap items-center gap-x-1.5 gap-y-1">
               <!-- A dismissal is closed, not a success: neutral, never green (DESIGN.md, Green Means Done). -->
-              <UBadge
-                :color="isDismissal(item.resolution) ? 'neutral' : 'success'"
+              <KitBadge
+                :tone="isDismissal(item.resolution) ? 'neutral' : 'success'"
                 :variant="isDismissal(item.resolution) ? 'soft' : 'subtle'"
-                size="sm"
-                :icon="isDismissal(item.resolution) ? 'i-lucide-circle-slash' : 'i-lucide-circle-check'"
+                :icon="isDismissal(item.resolution) ? 'circle-slash' : 'circle-check'"
                 :label="item.resolution === 'verified'
                   ? t('inbox.timeline.verifiedChip', { id: shortId(item.submissionId) })
                   : t(isDismissal(item.resolution) ? 'inbox.timeline.dismissedChip' : 'inbox.timeline.resolvedChip', { resolution: resolutionLabel(item.resolution) })"

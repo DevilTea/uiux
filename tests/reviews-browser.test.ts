@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { chromium, type Browser, type BrowserContext, type Page } from 'playwright'
+import { chromium, type Browser, type BrowserContext, type Locator, type Page } from 'playwright'
 import { startWorkbenchServer, type WorkbenchServer } from './support/workbench-server'
 import { bearer, provisionToken } from './support/access'
 import { putEvidenceRecordInWorkspace } from './support/evidence-record'
@@ -287,6 +287,45 @@ describe('Reviews inbox (R8)', () => {
 			await page.locator('[data-review-thread-missing]').waitFor({ timeout: 10_000 })
 		}
 		finally { await context.close() }
+	}, 60_000)
+
+	it('builds its controls from the Kit components and keeps pressed state, shortcut hints and touch targets (#380)', async () => {
+		const isKit = (locator: Locator, name: string) => locator.evaluate((element, expected) => element.classList.contains(expected), name)
+		const desktop = await openInbox(`/reviews?thread=${seeded.openOld}`)
+		try {
+			const { page } = desktop
+			await page.locator('[data-review-detail] [data-review-send]').waitFor()
+			expect(await isKit(page.locator('[data-review-new-comment]'), 'kit-btn')).toBe(true)
+			expect(await isKit(page.locator('[data-review-detail] [data-review-status]'), 'kit-badge')).toBe(true)
+			expect(await page.locator('[data-review-keys] .kit-kbd').count()).toBe(5)
+			// A toggle is still a pressed button; its on state is the Kit's pressed (soft) look, at the xs size.
+			const mine = page.locator('[data-review-toggle="mine"]')
+			expect(await mine.getAttribute('aria-pressed')).toBe('false')
+			expect(await isKit(mine, 'kit-btn--xs')).toBe(true)
+			expect(await isKit(mine, 'is-pressed')).toBe(false)
+			await mine.click()
+			await poll(() => mine.getAttribute('aria-pressed')).toBe('true')
+			expect(await isKit(mine, 'is-pressed')).toBe(true)
+			// The resolve split button is one Kit group; its menu trigger names itself and reports its menu.
+			const group = page.locator('[data-review-detail] .kit-btn-group')
+			expect(await group.locator('[data-review-resolve]').count()).toBe(1)
+			expect(await group.locator('[data-review-resolve-menu]').getAttribute('aria-label')).toBe('More ways to resolve')
+			// Reply keeps its shortcut hint on a keyboard device.
+			expect(await page.locator('[data-review-send] .kit-btn__kbd').count()).toBe(1)
+		}
+		finally { await desktop.context.close() }
+
+		// A touch screen has no keyboard to hint at, and an icon-only button is as wide as the 44px target is high.
+		const touch = await openInbox(`/reviews?thread=${seeded.openOld}`, { width: 1920, height: 1080, touch: true })
+		try {
+			const { page } = touch
+			await page.locator('[data-review-detail] [data-review-send]').waitFor()
+			expect(await page.locator('[data-review-send] .kit-btn__kbd').count()).toBe(0)
+			const more = page.locator('[data-review-detail] button[aria-label="More"]')
+			expect(await isKit(more, 'is-icon-only')).toBe(true)
+			expect((await more.boundingBox())?.width).toBeGreaterThanOrEqual(44)
+		}
+		finally { await touch.context.close() }
 	}, 60_000)
 
 	it('is the phone home: read, reply and resolve in a bottom sheet', async () => {

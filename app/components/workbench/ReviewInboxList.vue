@@ -2,6 +2,11 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { navigateTo, useI18n } from '#imports'
 import type { TabsItem } from '@nuxt/ui'
+import KitBadge from '~/components/kit/ui/Badge.vue'
+import KitButton from '~/components/kit/ui/Button.vue'
+import KitIcon from '~/components/kit/ui/Icon.vue'
+import KitKbd from '~/components/kit/ui/Kbd.vue'
+import KitSkeleton from '~/components/kit/ui/Skeleton.vue'
 import type { ReviewResolution } from '../../../src/domain/reviews/schema'
 import { useReviewInbox } from '../../composables/useReviewInbox'
 import { useWorkbenchFormat } from '../../composables/useWorkbenchFormat'
@@ -154,10 +159,10 @@ const hasNarrowing = computed(() => {
 // ---------------------------------------------------------------------------------------------
 
 const STATUS_ICON = {
-	'open': { name: 'i-lucide-circle-dot', class: 'text-annotation' },
-	'ready-for-review': { name: 'i-lucide-eye', class: 'text-info' },
-	'resolved': { name: 'i-lucide-circle-check', class: 'text-success' },
-	'dismissed': { name: 'i-lucide-circle-slash', class: 'text-muted' },
+	'open': { name: 'circle-dot', class: 'text-annotation' },
+	'ready-for-review': { name: 'eye', class: 'text-info' },
+	'resolved': { name: 'circle-check', class: 'text-success' },
+	'dismissed': { name: 'circle-slash', class: 'text-muted' },
 } as const
 
 function groupLabel(status: InboxStatus): string {
@@ -279,12 +284,11 @@ const emptyKind = computed<'none' | 'caught-up' | 'no-match' | undefined>(() => 
           :title="waitingSummary"
         >{{ waitingSummary }}</span>
         <span class="flex-1" />
-        <UButton
+        <KitButton
           v-if="inbox.canReply.value"
-          color="neutral"
           variant="outline"
           size="sm"
-          icon="i-lucide-message-square-plus"
+          icon="message-square-plus"
           :label="t('inbox.newComment')"
           data-review-new-comment
           @click="emit('compose')"
@@ -308,7 +312,7 @@ const emptyKind = computed<'none' | 'caught-up' | 'no-match' | undefined>(() => 
             v-if="keyboard && !search"
             #trailing
           >
-            <UKbd value="/" />
+            <KitKbd keys="/" />
           </template>
         </UInput>
         <UDrawer
@@ -317,21 +321,19 @@ const emptyKind = computed<'none' | 'caught-up' | 'no-match' | undefined>(() => 
           :title="t('inbox.filters')"
           :ui="{ body: 'pb-[max(1rem,env(safe-area-inset-bottom))]' }"
         >
-          <UButton
-            color="neutral"
+          <KitButton
             variant="outline"
-            icon="i-lucide-list-filter"
+            icon="list-filter"
+            :icon-only="!facetCount"
             :aria-label="facetCount ? t('inbox.filtersActive', { n: facetCount }) : t('inbox.filters')"
             data-review-filters-toggle
           >
-            <UBadge
+            <KitBadge
               v-if="facetCount"
-              color="neutral"
-              variant="soft"
-              size="sm"
+              variant="count"
               :label="String(facetCount)"
             />
-          </UButton>
+          </KitButton>
           <template #body>
             <ReviewInboxFilters />
           </template>
@@ -341,10 +343,9 @@ const emptyKind = computed<'none' | 'caught-up' | 'no-match' | undefined>(() => 
           v-model:open="filtersOpen"
           :content="{ align: 'end' }"
         >
-          <UButton
-            color="neutral"
+          <KitButton
             variant="outline"
-            icon="i-lucide-list-filter"
+            icon="list-filter"
             :label="t('inbox.filters')"
             data-review-filters-toggle
           >
@@ -352,14 +353,12 @@ const emptyKind = computed<'none' | 'caught-up' | 'no-match' | undefined>(() => 
               v-if="facetCount"
               #trailing
             >
-              <UBadge
-                color="neutral"
-                variant="soft"
-                size="sm"
+              <KitBadge
+                variant="count"
                 :label="String(facetCount)"
               />
             </template>
-          </UButton>
+          </KitButton>
           <template #content>
             <div class="w-80 max-w-[calc(100vw-2rem)] p-3">
               <ReviewInboxFilters />
@@ -377,24 +376,22 @@ const emptyKind = computed<'none' | 'caught-up' | 'no-match' | undefined>(() => 
           v-if="inbox.me.value"
           :text="t('inbox.mineHint')"
         >
-          <UButton
+          <KitButton
             size="xs"
-            color="neutral"
-            :variant="inbox.filter.value.mine ? 'soft' : 'ghost'"
-            :icon="inbox.filter.value.mine ? 'i-lucide-check' : 'i-lucide-user-round'"
-            :aria-pressed="inbox.filter.value.mine"
+            variant="ghost"
+            :icon="inbox.filter.value.mine ? 'check' : 'user-round'"
+            :pressed="inbox.filter.value.mine"
             :label="t('inbox.mine')"
             data-review-toggle="mine"
             @click="inbox.setFilter({ mine: !inbox.filter.value.mine })"
           />
         </UTooltip>
         <UTooltip :text="t('inbox.updatedHint')">
-          <UButton
+          <KitButton
             size="xs"
-            color="neutral"
-            :variant="inbox.filter.value.unread ? 'soft' : 'ghost'"
-            :icon="inbox.filter.value.unread ? 'i-lucide-check' : 'i-lucide-bell-dot'"
-            :aria-pressed="inbox.filter.value.unread"
+            variant="ghost"
+            :icon="inbox.filter.value.unread ? 'check' : 'bell-dot'"
+            :pressed="inbox.filter.value.unread"
             :label="t('inbox.updated')"
             data-review-toggle="unread"
             @click="inbox.setFilter({ unread: !inbox.filter.value.unread })"
@@ -406,26 +403,23 @@ const emptyKind = computed<'none' | 'caught-up' | 'no-match' | undefined>(() => 
             class="mx-1 h-4 w-px bg-accented"
             aria-hidden="true"
           />
-          <UButton
+          <KitButton
             v-for="chip in chips"
             :key="chip.key"
             size="xs"
-            color="neutral"
             variant="outline"
-            trailing-icon="i-lucide-x"
+            trailing-icon="x"
+            truncate
             :label="chip.label"
             :aria-label="t('inbox.removeFilter', { filter: chip.label })"
-            class="max-w-full"
-            :ui="{ label: 'truncate' }"
             data-review-chip
             @click="chip.remove()"
           />
         </template>
-        <UButton
+        <KitButton
           v-if="hasNarrowing"
           size="xs"
-          color="neutral"
-          variant="link"
+          variant="link-muted"
           :label="t('inbox.clearAll')"
           data-review-clear
           @click="inbox.clearFilters()"
@@ -451,14 +445,13 @@ const emptyKind = computed<'none' | 'caught-up' | 'no-match' | undefined>(() => 
       :aria-label="t('inbox.resolutionLabel')"
       data-review-resolutions
     >
-      <UButton
+      <KitButton
         v-for="resolution in resolutionChips"
         :key="resolution"
         size="xs"
-        color="neutral"
-        :variant="inbox.filter.value.resolution.includes(resolution) ? 'soft' : 'ghost'"
-        :icon="inbox.filter.value.resolution.includes(resolution) ? 'i-lucide-check' : undefined"
-        :aria-pressed="inbox.filter.value.resolution.includes(resolution)"
+        variant="ghost"
+        :icon="inbox.filter.value.resolution.includes(resolution) ? 'check' : undefined"
+        :pressed="inbox.filter.value.resolution.includes(resolution)"
         :label="t(`comments.resolution.${resolution}`)"
         :data-review-resolution-filter="resolution"
         @click="toggleResolution(resolution)"
@@ -503,22 +496,32 @@ const emptyKind = computed<'none' | 'caught-up' | 'no-match' | undefined>(() => 
           :key="index"
           class="grid grid-cols-[16px_24px_minmax(0,1fr)] items-start gap-x-2"
         >
-          <USkeleton
-            class="mt-1 size-4 rounded-full"
-            :aria-label="t('common.loading')"
+          <KitSkeleton
+            class="wb-skeleton mt-1 animate-pulse"
+            :width="16"
+            :height="16"
+            radius="9999px"
+            :label="t('common.loading')"
           />
-          <USkeleton
-            class="size-6 rounded-full"
-            :aria-label="t('common.loading')"
+          <KitSkeleton
+            class="wb-skeleton animate-pulse"
+            :width="24"
+            :height="24"
+            radius="9999px"
+            :label="t('common.loading')"
           />
           <div class="grid gap-1.5">
-            <USkeleton
-              class="h-4 w-4/5"
-              :aria-label="t('common.loading')"
+            <KitSkeleton
+              class="wb-skeleton animate-pulse"
+              width="80%"
+              :height="16"
+              :label="t('common.loading')"
             />
-            <USkeleton
-              class="h-3 w-1/2"
-              :aria-label="t('common.loading')"
+            <KitSkeleton
+              class="wb-skeleton animate-pulse"
+              width="50%"
+              :height="12"
+              :label="t('common.loading')"
             />
           </div>
         </div>
@@ -563,11 +566,11 @@ const emptyKind = computed<'none' | 'caught-up' | 'no-match' | undefined>(() => 
               class="absolute inset-y-1.5 start-0 w-0.5 rounded-full bg-primary"
               aria-hidden="true"
             />
-            <UIcon
+            <KitIcon
               :name="STATUS_ICON[item.inboxStatus].name"
-              class="mt-0.5 size-4"
+              :size="16"
+              class="mt-0.5"
               :class="STATUS_ICON[item.inboxStatus].class"
-              aria-hidden="true"
             />
             <UAvatar
               :text="item.author && item.author.type === 'human' ? memberInitials(authorName(item)) : undefined"
@@ -591,10 +594,10 @@ const emptyKind = computed<'none' | 'caught-up' | 'no-match' | undefined>(() => 
               </span>
               <span class="mt-0.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-muted">
                 <span class="inline-flex min-w-0 items-center gap-1 truncate">{{ authorName(item) }} ·
-                  <UIcon
+                  <KitIcon
                     v-if="item.scope === 'workspace'"
-                    name="i-lucide-globe"
-                    class="size-3.5 shrink-0"
+                    name="globe"
+                    :size="14"
                     data-review-workspace-icon
                   />{{ placeText(item) }}{{ item.variantNames.length ? ` › ${scopeText(item)}` : '' }}</span>
                 <span
@@ -607,9 +610,9 @@ const emptyKind = computed<'none' | 'caught-up' | 'no-match' | undefined>(() => 
                   class="inline-flex items-center gap-0.5 text-warning"
                   data-review-anchor-warning
                 >
-                  <UIcon
-                    :name="item.anchorState === 'missing' ? 'i-lucide-unlink' : 'i-lucide-history'"
-                    class="size-3.5"
+                  <KitIcon
+                    :name="item.anchorState === 'missing' ? 'unlink' : 'history'"
+                    :size="14"
                   />{{ item.anchorState === 'missing' ? t('inbox.anchorMissing') : t('comments.staleWord') }}
                 </span>
                 <template v-if="item.status === 'ready-for-review'">
@@ -625,9 +628,9 @@ const emptyKind = computed<'none' | 'caught-up' | 'no-match' | undefined>(() => 
                   :class="isDismissal(item.resolution) ? 'text-muted' : 'text-success'"
                   :data-row-resolution="item.resolution"
                 >
-                  <UIcon
-                    :name="isDismissal(item.resolution) ? 'i-lucide-circle-slash' : 'i-lucide-circle-check'"
-                    class="size-3.5"
+                  <KitIcon
+                    :name="isDismissal(item.resolution) ? 'circle-slash' : 'circle-check'"
+                    :size="14"
                   />{{ isDismissal(item.resolution) ? t('inbox.timeline.dismissedChip', { resolution: t(`comments.resolution.${item.resolution}`) }) : t(`comments.resolution.${item.resolution}`) }}
                 </span>
               </span>
@@ -642,9 +645,9 @@ const emptyKind = computed<'none' | 'caught-up' | 'no-match' | undefined>(() => 
                 :title="fmt.dateTime(item.latestActivityAt)"
               >{{ relativeTime(item.latestActivityAt, locale) }}</time>
               <span class="inline-flex items-center gap-0.5 tabular-nums">
-                <UIcon
-                  name="i-lucide-message-circle"
-                  class="size-3"
+                <KitIcon
+                  name="message-circle"
+                  :size="12"
                 />{{ item.messageCount }}
               </span>
             </span>
@@ -657,9 +660,10 @@ const emptyKind = computed<'none' | 'caught-up' | 'no-match' | undefined>(() => 
         class="grid justify-items-start gap-2 px-4 py-8"
         data-review-empty="caught-up"
       >
-        <UIcon
-          name="i-lucide-circle-check"
-          class="size-5 text-success"
+        <KitIcon
+          name="circle-check"
+          :size="20"
+          class="text-success"
         />
         <p class="text-title font-semibold text-highlighted">
           {{ t('inbox.caughtUp') }}
@@ -667,9 +671,8 @@ const emptyKind = computed<'none' | 'caught-up' | 'no-match' | undefined>(() => 
         <p class="text-sm text-muted">
           {{ [inbox.totals.value.resolved ? t('inbox.resolvedCount', inbox.totals.value.resolved) : '', inbox.totals.value.dismissed ? t('inbox.dismissedCount', { n: inbox.totals.value.dismissed }) : ''].filter(Boolean).join(' · ') }}
         </p>
-        <UButton
+        <KitButton
           size="sm"
-          color="neutral"
           variant="outline"
           :label="t('comments.showResolved')"
           @click="tab = 'resolved'"
@@ -703,10 +706,10 @@ const emptyKind = computed<'none' | 'caught-up' | 'no-match' | undefined>(() => 
       class="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-default px-4 py-2 text-xs text-muted"
       data-review-keys
     >
-      <span class="inline-flex items-center gap-1"><UKbd value="J" /><UKbd value="K" />{{ t('inbox.keys.move') }}</span>
-      <span class="inline-flex items-center gap-1"><UKbd value="R" />{{ t('inbox.keys.reply') }}</span>
-      <span class="inline-flex items-center gap-1"><UKbd value="E" />{{ t('inbox.keys.resolve') }}</span>
-      <span class="inline-flex items-center gap-1"><UKbd value="O" />{{ t('inbox.keys.open') }}</span>
+      <span class="inline-flex items-center gap-1"><KitKbd keys="J" /><KitKbd keys="K" />{{ t('inbox.keys.move') }}</span>
+      <span class="inline-flex items-center gap-1"><KitKbd keys="R" />{{ t('inbox.keys.reply') }}</span>
+      <span class="inline-flex items-center gap-1"><KitKbd keys="E" />{{ t('inbox.keys.resolve') }}</span>
+      <span class="inline-flex items-center gap-1"><KitKbd keys="O" />{{ t('inbox.keys.open') }}</span>
     </p>
   </div>
 </template>

@@ -147,6 +147,12 @@
   }
 }
 
+/* Kit icon-only buttons are as wide as the Workbench target is high (24px, 44px on touch), as Nuxt UI's
+   square buttons were (`button.variants.square` in app.config.ts). The Kit sets the height hook only. */
+.kit-btn.is-icon-only {
+  min-width: var(--kit-target-min, 0px);
+}
+
 /* Skeletons (brief h, section 7): hidden for the first 150ms so fast loads never flash, then a
    soft pulse; with reduced motion they appear as a static fill. Space is reserved throughout. */
 @keyframes wb-skeleton-delay {

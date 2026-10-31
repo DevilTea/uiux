@@ -1,6 +1,12 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from '#imports'
+import KitBadge from '~/components/kit/ui/Badge.vue'
+import KitButton from '~/components/kit/ui/Button.vue'
+import KitButtonGroup from '~/components/kit/ui/ButtonGroup.vue'
+import KitIcon from '~/components/kit/ui/Icon.vue'
+import KitSkeleton from '~/components/kit/ui/Skeleton.vue'
+import { useKbdHints } from '../../composables/useKbdHints'
 import { useReviewInbox } from '../../composables/useReviewInbox'
 import { useWorkbench } from '../../composables/useWorkbench'
 import { useUiuxClient } from '../../composables/useUiuxClient'
@@ -41,17 +47,18 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const inbox = useReviewInbox()
 const workbench = useWorkbench()
+const kbdHint = useKbdHints()
 
 const thread = computed<InboxThread | undefined>(() => inbox.selected.value)
 const detail = computed(() => thread.value?.detail)
 const compact = computed(() => props.layout === 'sheet')
 
 const STATUS = {
-	'open': { icon: 'i-lucide-circle-dot', color: 'annotation', label: 'thread.status.open' },
-	'ready-for-review': { icon: 'i-lucide-eye', color: 'info', label: 'thread.status.ready' },
-	'resolved': { icon: 'i-lucide-circle-check', color: 'success', label: 'thread.status.resolved' },
+	'open': { icon: 'circle-dot', tone: 'annotation', label: 'thread.status.open' },
+	'ready-for-review': { icon: 'eye', tone: 'info', label: 'thread.status.ready' },
+	'resolved': { icon: 'circle-check', tone: 'success', label: 'thread.status.resolved' },
 	// A dismissal is closed without a change: neutral, never green.
-	'dismissed': { icon: 'i-lucide-circle-slash', color: 'neutral', label: 'inbox.group.dismissed' },
+	'dismissed': { icon: 'circle-slash', tone: 'neutral', label: 'inbox.group.dismissed' },
 } as const
 
 function shortId(id: string | undefined): string {
@@ -254,13 +261,11 @@ defineExpose({ focusReply, focusHeading, openResolveMenu, resolvePrimary })
           :text="t('inbox.openInCanvas')"
           :kbds="['o']"
         >
-          <UButton
-            color="neutral"
+          <KitButton
             variant="outline"
             size="sm"
-            icon="i-lucide-app-window"
+            icon="app-window"
             :label="t('inbox.openInCanvas')"
-            class="shrink-0"
             data-review-open-canvas
             @click="inbox.openInCanvas(thread)"
           />
@@ -269,41 +274,36 @@ defineExpose({ focusReply, focusHeading, openResolveMenu, resolvePrimary })
           :items="overflow"
           :content="{ align: 'end', onCloseAutoFocus: keepConfirmFocus }"
         >
-          <UButton
-            color="neutral"
+          <KitButton
             variant="ghost"
             size="sm"
-            icon="i-lucide-ellipsis"
-            class="shrink-0"
-            :aria-label="t('comments.more')"
+            icon="ellipsis"
+            icon-only
+            :label="t('comments.more')"
           />
         </UDropdownMenu>
-        <UButton
+        <KitButton
           v-if="layout !== 'pane'"
-          color="neutral"
           variant="ghost"
           size="sm"
-          icon="i-lucide-x"
-          class="shrink-0"
-          :aria-label="t('common.close')"
+          icon="x"
+          icon-only
+          :label="t('common.close')"
           data-review-close
           @click="emit('close')"
         />
       </div>
       <div class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5 text-xs text-muted">
-        <UBadge
-          :color="STATUS[thread.inboxStatus].color"
+        <KitBadge
+          :tone="STATUS[thread.inboxStatus].tone"
           :variant="thread.inboxStatus === 'dismissed' ? 'soft' : 'subtle'"
-          size="sm"
           :icon="STATUS[thread.inboxStatus].icon"
           :label="t(STATUS[thread.inboxStatus].label)"
           data-review-status
         />
-        <UBadge
+        <KitBadge
           v-if="thread.status === 'resolved' && thread.resolution"
-          color="neutral"
           variant="outline"
-          size="sm"
           :label="t(`comments.resolution.${thread.resolution}`)"
           :data-review-resolution="thread.resolution"
         />
@@ -312,10 +312,9 @@ defineExpose({ focusReply, focusHeading, openResolveMenu, resolvePrimary })
           class="inline-flex min-w-0 items-center gap-1 truncate"
           data-review-workspace
         >
-          <UIcon
-            name="i-lucide-globe"
-            class="size-3.5 shrink-0"
-            aria-hidden="true"
+          <KitIcon
+            name="globe"
+            :size="14"
           />{{ t('comments.workspaceComment') }}
         </span>
         <template v-else>
@@ -326,13 +325,11 @@ defineExpose({ focusReply, focusHeading, openResolveMenu, resolvePrimary })
             :title="thread.widgetId"
           >{{ thread.anchorState === 'missing' ? `#${thread.widgetId}` : `${thread.widgetType ?? 'Widget'} · #${thread.widgetId}` }}</span>
           <RecordedContextLabel :context="thread.renderContext" />
-          <UButton
+          <KitButton
             v-if="thread.renderContext && viewExists && !compact"
-            color="neutral"
-            variant="link"
-            size="xs"
-            class="p-0"
-            icon="i-lucide-app-window"
+            variant="link-muted"
+            size="sm"
+            icon="app-window"
             :label="t('threadContext.openInCurrent')"
             :title="t('threadContext.openInCurrentHint')"
             data-thread-open-current
@@ -442,11 +439,12 @@ defineExpose({ focusReply, focusHeading, openResolveMenu, resolvePrimary })
           class="grid gap-4"
           aria-hidden="true"
         >
-          <USkeleton
+          <KitSkeleton
             v-for="index in 3"
             :key="index"
-            class="h-12 w-full"
-            :aria-label="t('common.loading')"
+            class="wb-skeleton animate-pulse"
+            :height="48"
+            :label="t('common.loading')"
           />
         </div>
       </div>
@@ -497,15 +495,14 @@ defineExpose({ focusReply, focusHeading, openResolveMenu, resolvePrimary })
           data-review-reply
           @keydown="onReplyKeydown"
         />
-        <UButton
+        <KitButton
           v-if="compact"
-          color="neutral"
           variant="outline"
-          icon="i-lucide-send-horizontal"
+          icon="send-horizontal"
+          icon-only
           :loading="inbox.busy.value === 'reply'"
           :disabled="!reply.trim()"
-          :aria-label="t('comments.replyAction')"
-          class="shrink-0"
+          :label="t('comments.replyAction')"
           data-review-send
           @click="sendReply"
         />
@@ -531,64 +528,50 @@ defineExpose({ focusReply, focusHeading, openResolveMenu, resolvePrimary })
         :class="compact ? 'grid grid-cols-2 gap-2' : 'flex flex-wrap items-center justify-end gap-2'"
         data-review-lifecycle
       >
-        <UButton
+        <KitButton
           v-if="thread.status !== 'resolved' && !compact"
-          color="neutral"
           variant="outline"
           size="sm"
+          :label="t('comments.replyAction')"
+          :kbd="kbdHint.submit.value"
           :loading="inbox.busy.value === 'reply'"
           :disabled="!reply.trim()"
           class="me-auto"
           data-review-send
           @click="sendReply"
-        >
-          {{ t('comments.replyAction') }}
-          <UKbd
-            value="meta"
-            size="sm"
-            class="pointer-coarse:hidden"
-          />
-          <UKbd
-            value="enter"
-            size="sm"
-            class="-ms-1 pointer-coarse:hidden"
-          />
-        </UButton>
-        <UButton
+        />
+        <KitButton
           v-if="canSubmit"
-          color="neutral"
           variant="ghost"
           size="sm"
-          icon="i-lucide-eye"
+          icon="eye"
           :label="t('thread.submit')"
           data-review-submit
           @click="submitOpen = true"
         />
-        <UButton
+        <KitButton
           v-if="thread.status !== 'open' && inbox.canSubmit.value"
-          color="neutral"
           variant="outline"
           :size="compact ? 'md' : 'sm'"
-          icon="i-lucide-rotate-ccw"
+          icon="rotate-ccw"
           :label="t('thread.reopen')"
-          :class="compact ? ['justify-center', thread.status === 'resolved' || !inbox.canResolve.value ? 'col-span-2' : ''] : ''"
+          :class="compact && (thread.status === 'resolved' || !inbox.canResolve.value) ? 'col-span-2' : ''"
           data-review-reopen
           @click="ask('reopen')"
         />
-        <UFieldGroup
+        <KitButtonGroup
           v-if="thread.status !== 'resolved' && inbox.canResolve.value"
-          :class="compact && thread.status === 'open' ? 'col-span-2 flex' : 'flex'"
+          :class="compact && thread.status === 'open' ? 'col-span-2' : ''"
         >
-          <UButton
-            color="primary"
-            variant="solid"
+          <KitButton
+            variant="primary"
             :size="compact ? 'md' : 'sm'"
-            icon="i-lucide-check"
+            icon="check"
             :label="thread.status === 'ready-for-review' && !compact ? t('inbox.acceptResolve') : t('thread.resolve')"
             :loading="inbox.busy.value === 'resolve'"
             :disabled="thread.status === 'ready-for-review' && !activeSubmission"
             :aria-describedby="`review-resolve-hint-${thread.id}`"
-            :class="compact ? 'min-w-0 flex-1 justify-center' : ''"
+            :class="compact ? 'min-w-0 flex-1' : ''"
             data-review-resolve
             @click="resolvePrimary"
           />
@@ -597,16 +580,16 @@ defineExpose({ focusReply, focusHeading, openResolveMenu, resolvePrimary })
             :items="resolveMenu"
             :content="{ align: 'end', side: compact ? 'top' : 'bottom' }"
           >
-            <UButton
-              color="primary"
-              variant="solid"
+            <KitButton
+              variant="primary"
               :size="compact ? 'md' : 'sm'"
-              icon="i-lucide-chevron-down"
-              :aria-label="t('comments.resolveOptions')"
+              icon="chevron-down"
+              icon-only
+              :label="t('comments.resolveOptions')"
               data-review-resolve-menu
             />
           </UDropdownMenu>
-        </UFieldGroup>
+        </KitButtonGroup>
       </div>
       <p
         v-if="thread.status !== 'resolved' && inbox.canResolve.value && !pendingAction && !confirmingDelete"

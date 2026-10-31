@@ -22,6 +22,17 @@
       },
       "target": "app/components/kit"
     },
+    "button-group": {
+      "componentDigest": "sha256:49058b3468ae27a3dd08e7897233b8fa8269fe9fe63a8e78e506802326401cf7",
+      "exportedAt": "2026-10-31T00:06:59.897Z",
+      "files": {
+        "app/components/kit/ui/ButtonGroup.vue": {
+          "digest": "sha256:bad01946ffd83362818e4fbf5ec5b4120b42df87d9b6e1b771e5809980fa53a5",
+          "source": "src/ui/ButtonGroup.vue"
+        }
+      },
+      "target": "app/components/kit"
+    },
     "comment-pin": {
       "componentDigest": "sha256:f133a0977644d0778a7830943bfc6ada7954585ed54a9dad57029574379735a4",
       "exportedAt": "2026-10-30T23:12:11.457Z",
@@ -66,6 +77,17 @@
         "app/components/kit/ui/Kbd.vue": {
           "digest": "sha256:724e9d380bd6d912cdc984edc38c1140ba06ccc6023e852f1a683a342012f66f",
           "source": "src/ui/Kbd.vue"
+        }
+      },
+      "target": "app/components/kit"
+    },
+    "skeleton": {
+      "componentDigest": "sha256:c439c23eb10f281bd2b571fd175ff58e30461a1ff37100fba873cc69e0e9d0c0",
+      "exportedAt": "2026-10-30T15:03:22.676Z",
+      "files": {
+        "app/components/kit/ui/Skeleton.vue": {
+          "digest": "sha256:64b59b2ade48fe59e281193c7e2d4625fd6584a5861081bacf1960be14d63894",
+          "source": "src/ui/Skeleton.vue"
         }
       },
       "target": "app/components/kit"
