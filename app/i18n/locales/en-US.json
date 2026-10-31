@@ -2532,6 +2532,7 @@
       "invalid_fallback_locale": "The fallback Locale is not valid.",
       "invalid_locale_filename": "Locale files are named by their language tag, such as zh-TW.json.",
       "invalid_locale_tag": "Use a valid language tag, such as zh-TW.",
+      "invalid_locale_update": "Give either messages, or set and remove, to update a Locale.",
       "invalid_parameter_name": "A translation parameter name is not valid.",
       "invalid_requested_locale": "The requested Locale is not valid.",
       "missing_default_locale": "The primary Locale has no translation file.",

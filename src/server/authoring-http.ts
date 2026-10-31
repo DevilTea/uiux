@@ -159,7 +159,9 @@ const createLocaleHttpSchema = z.object({
 
 const updateLocaleHttpSchema = z.object({
 	expectedRevision: z.string(),
-	messages: z.record(z.string(), z.string()),
+	messages: z.record(z.string(), z.string()).optional(),
+	set: z.record(z.string(), z.string()).optional(),
+	remove: z.array(z.string()).optional(),
 }).strict()
 
 const flowStepSchema = z.object({
@@ -613,7 +615,9 @@ export async function updateLocaleForHttp(app: ScopedWorkspaceSession, locale: s
 	const result = await app.updateLocale({
 		locale,
 		expectedRevision: data.expectedRevision,
-		messages: data.messages as I18nResource,
+		...(data.messages === undefined ? {} : { messages: data.messages as I18nResource }),
+		...(data.set === undefined ? {} : { set: data.set }),
+		...(data.remove === undefined ? {} : { remove: data.remove }),
 	})
 	return { status: mapAuthoringResultToHttpStatus(result.status, resultCode(result)), body: result }
 }
