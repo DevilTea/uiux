@@ -75,6 +75,16 @@ describe('the Evidence a change domain affects (Clause 01a14e30-2e43-…)', () =
 		expect(changeAffectsFlowEvidence(scope(['ir'], { flows: new Set([FLOW]) }), FLOW)).toBe(false)
 	})
 
+	// Clause 01a14e30-2e43-…: a reference-only Flow edit affects no Flow Evidence; its digest equals the trace's.
+	it('flow affects no trace whose recorded Flow input digest equals the Flow\'s current one, and any other', () => {
+		const change = scope(['flow'], { flows: new Set([FLOW]) })
+		expect(changeAffectsFlowEvidence(change, FLOW, { recordedFlowInputDigest: 'sha256:a', currentFlowInputDigest: 'sha256:a' })).toBe(false)
+		expect(changeAffectsFlowEvidence(change, FLOW, { recordedFlowInputDigest: 'sha256:a', currentFlowInputDigest: 'sha256:b' })).toBe(true)
+		// A trace without a recorded digest, or a Flow whose digest is unknown, stays affected.
+		expect(changeAffectsFlowEvidence(change, FLOW, { currentFlowInputDigest: 'sha256:a' })).toBe(true)
+		expect(changeAffectsFlowEvidence(change, FLOW, { recordedFlowInputDigest: 'sha256:a' })).toBe(true)
+	})
+
 	it('interaction affects only the interaction Evidence of the change\'s Views and no formal capture', () => {
 		const change = scope(['interaction'])
 		expect(affected(change)).toEqual([])

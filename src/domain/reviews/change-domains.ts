@@ -105,9 +105,23 @@ function domainAffectsFormalCapture(domain: string, scope: ChangeScope, capture:
 	}
 }
 
-/** Clause 01a14e30-2e43-…: only `flow` affects Flow Evidence, and only that of the change's Flows. */
-export function changeAffectsFlowEvidence(scope: ChangeScope, flowId: string): boolean {
-	return scope.domains.includes('flow') && named(scope.flows, flowId)
+/**
+ * The Flow input digests of one Flow trace (Rule 01a1814f-8256-…, Clause 01a1814f-81c2-…): the one it
+ * recorded and the Flow's current one. Either is absent when unknown, which counts as changed.
+ */
+export type FlowTraceDigests = Readonly<{ recordedFlowInputDigest?: string; currentFlowInputDigest?: string }>
+
+/**
+ * Clause 01a14e30-2e43-…: only `flow` affects Flow Evidence, only that of the change's Flows, and a change
+ * to a Flow's requirement references alone affects none. A submission records no such distinction, so
+ * a trace is judged as its staleness is: when its recorded digest equals the Flow's current input digest
+ * (which leaves out `requirements`), the change did not touch what the trace recorded and it is not
+ * affected. Without both digests the trace counts as affected, the conservative reading.
+ */
+export function changeAffectsFlowEvidence(scope: ChangeScope, flowId: string, trace?: FlowTraceDigests): boolean {
+	if (!scope.domains.includes('flow') || !named(scope.flows, flowId)) return false
+	const { recordedFlowInputDigest: recorded, currentFlowInputDigest: current } = trace ?? {}
+	return !(recorded !== undefined && current !== undefined && recorded === current)
 }
 
 /**
