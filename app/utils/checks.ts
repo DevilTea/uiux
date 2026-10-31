@@ -86,6 +86,8 @@ export type Finding = Readonly<{
 	widgetType?: string
 	/** The result Property a Preview translation warning was evaluated in, or the Property whose evaluation failed. */
 	property?: string
+	/** The Catalog field (the Adapter Catalog `i18n.fields` key) the result Property derives from, when the Catalog mapping names it. */
+	catalogField?: string
 	/** The Variant a Product Kit capture finding or a Preview finding concerns; absent for the base state. */
 	variantName?: string
 	/** The registry component a Product Kit finding concerns. */
@@ -464,6 +466,8 @@ type PreviewFindingInput = Readonly<{
 	resource: FindingResource
 	/** The Widget types of that View, when its tree is known. */
 	widgetTypes?: ReadonlyMap<string, string>
+	/** The Catalog mapping: Widget type, then result Property, to the Catalog field that declares it (Rule 01a115cd-b91d-7230-9041-b56ff70b814b). */
+	catalogFields?: ReadonlyMap<string, ReadonlyMap<string, string>>
 	text: PreviewFindingText
 	checkState?: CheckState
 }>
@@ -487,6 +491,7 @@ export function previewTranslationFindings(report: LivePreviewChecks, input: Pre
 	const checkState = input.checkState ?? 'completed'
 	return report.translationWarnings.map(({ widgetId, resultProperty, warning }) => {
 		const widgetType = input.widgetTypes?.get(widgetId)
+		const catalogField = widgetType ? input.catalogFields?.get(widgetType)?.get(resultProperty) : undefined
 		const code = WARNING_FINDING_CODE[warning.code]
 		const message = input.text.warning(warning)
 		const problem = JSON.stringify([warning.key, warning.code === 'missing-parameter' ? warning.parameter : null])
@@ -502,6 +507,7 @@ export function previewTranslationFindings(report: LivePreviewChecks, input: Pre
 			widgetId,
 			...(widgetType ? { widgetType } : {}),
 			property: resultProperty,
+			...(catalogField ? { catalogField } : {}),
 			problem,
 			group: { key: `${code}:${problem}`, title: message },
 		}

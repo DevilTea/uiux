@@ -204,6 +204,7 @@
     },
     "preview": {
       "property": "屬性 {name}",
+      "catalogField": "編寫欄位 {name}",
       "warning": {
         "missingTranslation": "「{key}」在 {locale} 沒有翻譯，改顯示 {fallback} 的文字。",
         "unresolvedKey": "「{key}」不在任何 Locale 檔案中，會顯示為「⟦missing:{key}⟧」標記。",

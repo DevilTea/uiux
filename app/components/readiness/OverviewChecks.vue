@@ -473,6 +473,29 @@ const previewView = computed(() => {
 })
 
 /**
+ * The Catalog mapping the Workbench reads to name a warning's Catalog field (Rule
+ * 01a115cd-b91d-7230-9041-b56ff70b814b): Widget type, then result Property, to the Catalog field.
+ * It is read once a report carries a translation warning, and not read again for the same report.
+ */
+const catalogFields = shallowRef<ReadonlyMap<string, ReadonlyMap<string, string>>>()
+let catalogFieldsTicket = 0
+watch(() => {
+	const live = preview.liveChecks.value
+	return live.state === 'completed' || live.state === 'stale' ? live.report : undefined
+}, async (report) => {
+	if (!report?.translationWarnings.length) return
+	const ticket = ++catalogFieldsTicket
+	try {
+		const response = await uiux.previewCatalog()
+		if (ticket !== catalogFieldsTicket || response.state !== 'valid') return
+		catalogFields.value = new Map(response.entries.map(entry => [entry.type, new Map(entry.i18n.map(field => [field.resultProperty, field.authorField] as const))] as const))
+	}
+	catch {
+		// Without the mapping the row names its Widget and result Property only.
+	}
+}, { immediate: true })
+
+/**
  * The Preview's findings, from the report the live Preview made last (never from a read Checks makes,
  * and never forcing a Property to evaluate or invoking `t`): its translation warnings of the Properties
  * it evaluated, and its current load and Runtime errors. Each is attributed to its View, Variant,
@@ -486,7 +509,7 @@ const previewFindings = computed<readonly Finding[]>(() => {
 	const widgetTypes = selectedViewId.value === report.viewId && widgetTreeResult.value?.status === 'valid'
 		? new Map(flattenWidgetTree(widgetTreeResult.value.root).map(widget => [widget.id, widget.type] as const))
 		: undefined
-	const input = { resource: { kind: 'view', key: view.key, name: view.name } satisfies FindingResource, ...(widgetTypes ? { widgetTypes } : {}), text: previewText }
+	const input = { resource: { kind: 'view', key: view.key, name: view.name } satisfies FindingResource, ...(widgetTypes ? { widgetTypes } : {}), ...(catalogFields.value ? { catalogFields: catalogFields.value } : {}), text: previewText }
 	return [
 		...previewTranslationFindings(report, { ...input, checkState: previewStates.value.translation }),
 		...runtimeErrorFindings(report, { ...input, checkState: previewStates.value.runtime }),
@@ -710,6 +733,7 @@ function findingDetail(finding: Finding): string {
 	const parts = [
 		...(finding.variantName ? [t('checks.kit.variant', { name: finding.variantName })] : []),
 		...(finding.property ? [t('checks.preview.property', { name: finding.property })] : []),
+		...(finding.catalogField ? [t('checks.preview.catalogField', { name: finding.catalogField })] : []),
 		...(finding.component ? [t('checks.kit.component', { name: finding.component })] : []),
 	]
 	// A Runtime error's sentence is the Preview's own account of what failed, after its Variant.
