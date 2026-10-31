@@ -2,6 +2,9 @@
 import { computed, ref, watch } from 'vue'
 import { useI18n, useToast } from '#imports'
 import type { BreadcrumbItem, TableColumn } from '@nuxt/ui'
+import KitBadge from '~/components/kit/ui/Badge.vue'
+import KitButton from '~/components/kit/ui/Button.vue'
+import KitIcon from '~/components/kit/ui/Icon.vue'
 import { useWorkbench } from '../../composables/useWorkbench'
 import { useMediaQuery, WORKBENCH_BREAKPOINTS } from '../../composables/useMediaQuery'
 import { useWidgetInspection, type WidgetThreadRow } from '../../composables/useWidgetInspection'
@@ -89,9 +92,9 @@ const rawState = computed(() => {
 })
 
 function statusIcon(status: WidgetThreadRow['status']): string {
-	if (status === 'resolved') return 'i-lucide-circle-check'
-	if (status === 'ready-for-review') return 'i-lucide-eye'
-	return 'i-lucide-circle-dot'
+	if (status === 'resolved') return 'circle-check'
+	if (status === 'ready-for-review') return 'eye'
+	return 'circle-dot'
 }
 
 function statusClass(status: WidgetThreadRow['status']): string {
@@ -164,9 +167,10 @@ function onKeydown(event: KeyboardEvent): void {
     <template v-else>
       <!-- What: type, label, and the two things a reviewer does with a Widget. -->
       <header class="grid grid-cols-[auto_minmax(0,1fr)_auto] items-start gap-x-2 border-b border-default p-3">
-        <UIcon
+        <KitIcon
           :name="widgetTypeIcon(node.type, node.children.length > 0)"
-          class="mt-0.5 size-5 text-muted"
+          :size="20"
+          class="mt-0.5 text-muted"
         />
         <div class="min-w-0">
           <h2
@@ -191,12 +195,11 @@ function onKeydown(event: KeyboardEvent): void {
           </p>
         </div>
         <div class="flex items-center gap-1">
-          <UButton
+          <KitButton
             v-if="!reviewReadOnly && !isPhone"
-            color="annotation"
-            variant="soft"
+            variant="annotation"
             size="sm"
-            icon="i-lucide-message-circle-plus"
+            icon="message-circle-plus"
             :label="t('tool.comment')"
             data-inspector-comment
             @click="emit('comment', node.id)"
@@ -205,12 +208,12 @@ function onKeydown(event: KeyboardEvent): void {
             :text="t('inspect.copyId')"
             :kbds="['meta', 'c']"
           >
-            <UButton
-              color="neutral"
+            <KitButton
               variant="ghost"
               size="sm"
-              icon="i-lucide-copy"
-              :aria-label="t('inspect.copyId')"
+              icon="copy"
+              icon-only
+              :label="t('inspect.copyId')"
               data-inspector-copy
               @click="copyWidgetId"
             />
@@ -221,10 +224,7 @@ function onKeydown(event: KeyboardEvent): void {
           class="col-span-3 mt-2 flex items-center gap-1.5 text-sm text-muted"
           data-widget-not-visible
         >
-          <UIcon
-            name="i-lucide-eye-off"
-            class="size-4 shrink-0"
-          />
+          <KitIcon name="eye-off" />
           {{ t('canvas.notVisible') }}
         </p>
         <!-- Not "not visible": the region could not be established, so precise highlighting is unavailable (issue #106). -->
@@ -233,10 +233,7 @@ function onKeydown(event: KeyboardEvent): void {
           class="col-span-3 mt-2 flex items-center gap-1.5 text-sm text-muted"
           data-widget-precision-unavailable
         >
-          <UIcon
-            name="i-lucide-scan-line"
-            class="size-4 shrink-0"
-          />
+          <KitIcon name="scan-line" />
           {{ t('canvas.precisionUnavailable') }}
         </p>
       </header>
@@ -250,14 +247,12 @@ function onKeydown(event: KeyboardEvent): void {
           {{ t('inspect.identity') }}
         </dt>
         <dd class="min-w-0">
-          <UBadge
-            color="neutral"
-            variant="soft"
-            class="max-w-full font-mono"
+          <KitBadge
+            variant="mono"
+            truncate
+            :label="`#${node.id}`"
             translate="no"
-          >
-            <span class="truncate">#{{ node.id }}</span>
-          </UBadge>
+          />
         </dd>
 
         <template v-if="slotItems.length > 1">
@@ -342,14 +337,12 @@ function onKeydown(event: KeyboardEvent): void {
           class="flex min-w-0 items-center gap-2 text-sm font-semibold text-highlighted"
         >
           {{ t('inspect.inVariant') }}
-          <UBadge
-            color="neutral"
-            variant="soft"
-            class="min-w-0 font-mono"
+          <KitBadge
+            variant="mono"
+            truncate
+            :label="variantName"
             translate="no"
-          >
-            <span class="truncate">{{ variantName }}</span>
-          </UBadge>
+          />
         </h3>
         <UAlert
           v-if="variantInvalid || variantFaults.length"
@@ -416,13 +409,12 @@ function onKeydown(event: KeyboardEvent): void {
           class="flex items-center gap-2 text-sm font-semibold text-highlighted"
         >
           {{ t('inspect.findings') }}
-          <UBadge
+          <KitBadge
             v-if="findings.length"
-            color="warning"
-            variant="soft"
-          >
-            {{ findings.length }}
-          </UBadge>
+            tone="warning"
+            variant="count"
+            :label="String(findings.length)"
+          />
         </h3>
         <ul
           v-if="findings.length"
@@ -433,30 +425,29 @@ function onKeydown(event: KeyboardEvent): void {
             :key="finding.code + finding.path"
             class="min-w-0"
           >
-            <UButton
-              color="neutral"
+            <KitButton
               variant="ghost"
-              block
-              class="h-auto min-w-0 items-start justify-start px-1.5 py-1.5 text-start font-normal"
+              full-width
+              class="h-auto! min-w-0 items-start! justify-start! px-1.5! py-1.5! text-start font-normal! whitespace-normal! [&>span]:min-w-0 [&>span]:flex-1"
               :aria-label="t('inspect.openFinding', { code: finding.code })"
               @click="emit('openChecks')"
             >
               <span class="grid w-full grid-cols-[1rem_minmax(0,1fr)_1rem] gap-x-2 gap-y-0.5">
-                <UIcon
-                  name="i-lucide-triangle-alert"
-                  class="mt-0.5 size-4 text-warning"
+                <KitIcon
+                  name="triangle-alert"
+                  class="mt-0.5 text-warning"
                 />
                 <span
                   class="truncate font-mono text-xs/5 text-default"
                   translate="no"
                 >{{ finding.code }}</span>
-                <UIcon
-                  name="i-lucide-chevron-right"
-                  class="mt-0.5 size-4 text-dimmed rtl:rotate-180"
+                <KitIcon
+                  name="chevron-right"
+                  class="mt-0.5 text-dimmed rtl:rotate-180"
                 />
                 <span class="col-start-2 text-sm text-muted">{{ diagnosticText(finding) }}</span>
               </span>
-            </UButton>
+            </KitButton>
           </li>
         </ul>
         <p
@@ -478,13 +469,12 @@ function onKeydown(event: KeyboardEvent): void {
           class="flex items-center gap-2 text-sm font-semibold text-highlighted"
         >
           {{ t('inspect.commentsHere') }}
-          <UBadge
+          <KitBadge
             v-if="threads.length"
-            color="annotation"
-            variant="soft"
-          >
-            {{ threads.length }}
-          </UBadge>
+            tone="annotation"
+            variant="count"
+            :label="String(threads.length)"
+          />
         </h3>
         <ul
           v-if="threads.length"
@@ -495,17 +485,16 @@ function onKeydown(event: KeyboardEvent): void {
             :key="thread.key"
             class="min-w-0"
           >
-            <UButton
-              color="neutral"
+            <KitButton
               variant="ghost"
-              block
-              class="h-auto min-w-0 justify-start gap-2 px-1.5 py-1.5 text-start font-normal"
+              full-width
+              class="h-auto! min-w-0 justify-start! gap-2 px-1.5! py-1.5! text-start font-normal!"
               :aria-label="t('inspect.openThread', { excerpt: thread.excerpt || t('inspect.noMessage') })"
               @click="emit('openThread', thread.key)"
             >
-              <UIcon
+              <KitIcon
                 :name="statusIcon(thread.status)"
-                :class="['size-4 shrink-0', statusClass(thread.status)]"
+                :class="statusClass(thread.status)"
               />
               <span class="sr-only">{{ statusLabel(thread.status) }}</span>
               <UAvatar
@@ -520,7 +509,7 @@ function onKeydown(event: KeyboardEvent): void {
                 :datetime="thread.at"
                 class="shrink-0 text-xs text-dimmed"
               >{{ relativeTime(thread.at, locale) }}</time>
-            </UButton>
+            </KitButton>
           </li>
         </ul>
         <p
@@ -529,12 +518,11 @@ function onKeydown(event: KeyboardEvent): void {
         >
           {{ t('inspect.noComments') }}
         </p>
-        <UButton
+        <KitButton
           v-if="threads.length > THREAD_ROWS"
-          color="neutral"
-          variant="link"
+          variant="link-muted"
           size="sm"
-          class="justify-self-start px-0"
+          class="justify-self-start"
           :label="t('inspect.allInComments')"
           @click="emit('openThread', '')"
         />
@@ -546,13 +534,12 @@ function onKeydown(event: KeyboardEvent): void {
         class="border-b border-default"
         :ui="{ content: 'px-3 pb-3' }"
       >
-        <UButton
-          color="neutral"
+        <KitButton
           variant="ghost"
-          block
-          class="justify-start rounded-none px-3 py-2 text-muted"
+          full-width
+          class="justify-start! rounded-none! px-3!"
           :label="t('inspect.details')"
-          :icon="detailsOpen ? 'i-lucide-chevron-down' : 'i-lucide-chevron-right'"
+          :icon="detailsOpen ? 'chevron-down' : 'chevron-right'"
           data-inspector-details-toggle
         />
         <template #content>
@@ -577,12 +564,12 @@ function onKeydown(event: KeyboardEvent): void {
                   v-if="item.copy"
                   :text="t('inspect.copyValue', { label: item.label })"
                 >
-                  <UButton
-                    color="neutral"
+                  <KitButton
                     variant="ghost"
                     size="xs"
-                    icon="i-lucide-copy"
-                    :aria-label="t('inspect.copyValue', { label: item.label })"
+                    icon="copy"
+                    icon-only
+                    :label="t('inspect.copyValue', { label: item.label })"
                     @click="copy(item.value, t('inspect.copiedValue', { label: item.label }))"
                   />
                 </UTooltip>

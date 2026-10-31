@@ -5,6 +5,7 @@ import type { SelectItem } from '@nuxt/ui'
 import type { SpecDraft, SpecEditor } from '../../composables/useSpecEditor'
 import type { ReferenceDraft } from '../../utils/widget-inspection'
 import { diagnosticText } from '../../utils/diagnostic-copy'
+import KitButton from '~/components/kit/ui/Button.vue'
 import LockedSaveAlert from './LockedSaveAlert.vue'
 
 /**
@@ -167,11 +168,10 @@ const conflictActions = computed(() => [
         v-if="conflict.latest"
         class="flex flex-wrap items-center gap-2"
       >
-        <UButton
-          color="neutral"
+        <KitButton
           variant="outline"
           size="sm"
-          icon="i-lucide-pencil"
+          icon="pencil"
           :label="t('spec.keepMine')"
           data-spec-keep-mine
           @click="editor.keepMine()"
@@ -250,11 +250,11 @@ const conflictActions = computed(() => [
                 />
               </UFormField>
               <UTooltip :text="t('spec.ref.remove', { n: index + 1 })">
-                <UButton
-                  color="neutral"
+                <KitButton
                   variant="ghost"
-                  icon="i-lucide-x"
-                  :aria-label="t('spec.ref.remove', { n: index + 1 })"
+                  icon="x"
+                  icon-only
+                  :label="t('spec.ref.remove', { n: index + 1 })"
                   @click="removeReference(index)"
                 />
               </UTooltip>
@@ -324,11 +324,10 @@ const conflictActions = computed(() => [
             </div>
           </li>
         </ol>
-        <UButton
-          color="neutral"
+        <KitButton
           variant="ghost"
           size="sm"
-          icon="i-lucide-plus"
+          icon="plus"
           class="justify-self-start"
           :label="t('spec.ref.add')"
           @click="addReference"
@@ -353,21 +352,20 @@ const conflictActions = computed(() => [
               :lang="lang"
             />
             <UTooltip :text="t('spec.removeItem', { n: index + 1 })">
-              <UButton
-                color="neutral"
+              <KitButton
                 variant="ghost"
-                icon="i-lucide-x"
-                :aria-label="t('spec.removeItem', { n: index + 1 })"
+                icon="x"
+                icon-only
+                :label="t('spec.removeItem', { n: index + 1 })"
                 @click="removeItem(index)"
               />
             </UTooltip>
           </li>
         </ol>
-        <UButton
-          color="neutral"
+        <KitButton
           variant="ghost"
           size="sm"
-          icon="i-lucide-plus"
+          icon="plus"
           class="justify-self-start"
           :label="t('spec.addItem')"
           @click="addItem"
@@ -379,8 +377,7 @@ const conflictActions = computed(() => [
           :text="t('common.cancel')"
           :kbds="['escape']"
         >
-          <UButton
-            color="neutral"
+          <KitButton
             variant="outline"
             size="sm"
             :label="t('common.cancel')"
@@ -393,10 +390,9 @@ const conflictActions = computed(() => [
           :text="t('common.save')"
           :kbds="['meta', 'enter']"
         >
-          <UButton
+          <KitButton
             type="submit"
-            color="primary"
-            variant="solid"
+            variant="primary"
             size="sm"
             :label="saving ? t('common.saving') : t('common.save')"
             :loading="saving"

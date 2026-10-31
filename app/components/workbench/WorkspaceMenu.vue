@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { useI18n } from '#imports'
 import type { DropdownMenuItem } from '@nuxt/ui'
+import KitButton from '~/components/kit/ui/Button.vue'
 import { useWorkbench } from '../../composables/useWorkbench'
 import { useWorkbenchFeedback } from '../../composables/useWorkbenchFeedback'
 import { copyText } from '../../utils/copy-text'
@@ -45,12 +46,11 @@ const items = computed<DropdownMenuItem[][]>(() => {
     :content="{ align: 'start' }"
     :ui="{ itemDescription: 'font-mono' }"
   >
-    <UButton
-      color="neutral"
+    <KitButton
       variant="ghost"
-      trailing-icon="i-lucide-chevron-down"
+      trailing-icon="chevron-down"
       :aria-label="t('workspaceMenu.label')"
-      class="gap-2 px-1.5"
+      class="gap-2 px-1.5! pointer-coarse:min-w-11 [&>span]:inline-flex [&>span]:items-center [&>span]:gap-2"
     >
       <!-- The favicon mark keeps its near-black square; the hairline keeps it visible on dark chrome. -->
       <svg
@@ -70,6 +70,6 @@ const items = computed<DropdownMenuItem[][]>(() => {
         />
       </svg>
       <span class="hidden font-semibold text-highlighted sm:inline">{{ t('nav.workspace') }}</span>
-    </UButton>
+    </KitButton>
   </UDropdownMenu>
 </template>

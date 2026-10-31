@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { useI18n } from '#imports'
+import KitButton from '~/components/kit/ui/Button.vue'
 import KitField from '~/components/kit/ui/Field.vue'
 import type { FetchErrorDetails } from '../../utils/fetch-error'
 import type { PromoteForm } from '../../composables/useThreadActions'
@@ -95,16 +96,14 @@ async function onSubmit(): Promise<void> {
           :rows="2"
         />
         <div class="flex justify-end gap-2">
-          <UButton
-            color="neutral"
+          <KitButton
             variant="ghost"
             :label="t('common.cancel')"
             @click="open = false"
           />
-          <UButton
+          <KitButton
             type="submit"
-            color="primary"
-            variant="solid"
+            variant="primary"
             :loading="busy"
             :disabled="!form.question.trim() || !form.summary.trim()"
             :label="another ? t('reviews.promote.anotherSubmit') : t('reviews.promote.submit')"

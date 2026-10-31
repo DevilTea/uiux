@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from '#imports'
+import KitButton from '~/components/kit/ui/Button.vue'
+import KitIcon from '~/components/kit/ui/Icon.vue'
 import { useWorkbench } from '../../composables/useWorkbench'
 import { previewFailureCopyKeys } from '../../../src/preview/failure-diagnostic'
 
@@ -55,10 +57,9 @@ function retry(): void {
     :data-category="failure.category"
     :data-reason="failure.reason"
   >
-    <UIcon
-      name="i-lucide-octagon-alert"
-      class="mt-0.5 size-4 shrink-0 text-error"
-      aria-hidden="true"
+    <KitIcon
+      name="octagon-alert"
+      class="mt-0.5 text-error"
     />
     <div class="grid min-w-0 flex-1 gap-1.5">
       <div
@@ -80,11 +81,10 @@ function retry(): void {
         </p>
       </div>
       <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <UButton
-          color="neutral"
+        <KitButton
           variant="outline"
           size="xs"
-          :icon="disabled ? 'i-lucide-loader-circle' : 'i-lucide-rotate-ccw'"
+          :icon="disabled ? 'loader-circle' : 'rotate-ccw'"
           :class="disabled ? 'cursor-not-allowed opacity-75 [&_svg]:animate-spin motion-reduce:[&_svg]:animate-none' : ''"
           :aria-disabled="disabled ? 'true' : undefined"
           :label="t('previewFailure.retry')"
@@ -102,12 +102,11 @@ function retry(): void {
         class="text-start"
         data-preview-failure-details
       >
-        <UButton
-          color="neutral"
-          variant="link"
+        <KitButton
+          variant="link-muted"
           size="xs"
-          class="px-0"
-          :trailing-icon="detailsOpen ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'"
+          trailing-icon="chevron-down"
+          :expanded="detailsOpen"
           :label="t('previewFailure.details')"
         />
         <template #content>

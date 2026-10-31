@@ -2,6 +2,8 @@
 import { computed, ref } from 'vue'
 import { useI18n } from '#imports'
 import type { RequirementCoverageEntry, RequirementReferrer, RequirementState } from '../../../src/application/services/requirements'
+import KitBadge from '~/components/kit/ui/Badge.vue'
+import KitButton from '~/components/kit/ui/Button.vue'
 import { useRequirements } from '../../composables/useRequirements'
 import { useWorkbench } from '../../composables/useWorkbench'
 import { coverageShare, referrerLocation } from '../../utils/requirements'
@@ -34,10 +36,10 @@ const filters = computed(() => [
 	{ value: 'noUi' as const, label: t('requirements.state.noUi'), count: counts.value?.noUi ?? 0 },
 ])
 
-const STATE_BADGE: Record<RequirementState, { color: 'success' | 'warning' | 'neutral'; icon: string }> = {
-	referenced: { color: 'success', icon: 'i-lucide-circle-check' },
-	unreferenced: { color: 'warning', icon: 'i-lucide-circle-dashed' },
-	noUi: { color: 'neutral', icon: 'i-lucide-ban' },
+const STATE_BADGE: Record<RequirementState, { tone: 'success' | 'warning' | 'neutral'; icon: string }> = {
+	referenced: { tone: 'success', icon: 'circle-check' },
+	unreferenced: { tone: 'warning', icon: 'circle-dashed' },
+	noUi: { tone: 'neutral', icon: 'ban' },
 }
 
 function viewName(viewId: string | undefined): string {
@@ -111,19 +113,19 @@ function rowAttributes(entry: RequirementCoverageEntry): Record<string, string> 
         :aria-label="t('requirements.filter.label')"
         class="flex flex-wrap items-center gap-1.5"
       >
-        <UButton
+        <KitButton
           v-for="item in filters"
           :key="item.value"
           size="sm"
-          color="neutral"
-          :variant="filter === item.value ? 'soft' : 'outline'"
-          :aria-pressed="filter === item.value"
+          variant="outline"
+          :pressed="filter === item.value"
+          class="[&>span]:inline-flex [&>span]:items-center [&>span]:gap-1.5"
           :data-requirements-filter="item.value"
           @click="filter = item.value"
         >
           {{ item.label }}
           <span class="tabular-nums text-muted">{{ item.count }}</span>
-        </UButton>
+        </KitButton>
         <span
           v-if="coverage.counts.unresolved"
           class="ms-auto text-sm text-warning tabular-nums"
@@ -143,13 +145,11 @@ function rowAttributes(entry: RequirementCoverageEntry): Record<string, string> 
           v-bind="rowAttributes(entry)"
         >
           <span class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-            <UBadge
-              :color="STATE_BADGE[entry.state].color"
+            <KitBadge
+              :tone="STATE_BADGE[entry.state].tone"
               :icon="STATE_BADGE[entry.state].icon"
-              variant="subtle"
-            >
-              {{ t(`requirements.state.${entry.state}`) }}
-            </UBadge>
+              :label="t(`requirements.state.${entry.state}`)"
+            />
             <span
               class="min-w-0 break-all font-mono text-xs text-muted"
               translate="no"

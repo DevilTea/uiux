@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { useI18n } from '#imports'
 import type { DropdownMenuItem } from '@nuxt/ui'
+import KitButton from '~/components/kit/ui/Button.vue'
 import { MAX_ZOOM, MIN_ZOOM, ZOOM_MENU_STEPS } from '../../utils/canvas-zoom'
 
 /**
@@ -40,13 +41,13 @@ const items = computed<DropdownMenuItem[][]>(() => [
       :text="t('zoom.out')"
       :kbds="['meta', '-']"
     >
-      <UButton
-        color="neutral"
+      <KitButton
         variant="ghost"
         size="sm"
-        icon="i-lucide-zoom-out"
-        class="max-sm:hidden"
-        :aria-label="t('zoom.out')"
+        icon="zoom-out"
+        icon-only
+        class="max-sm:hidden!"
+        :label="t('zoom.out')"
         :disabled="disabled || scale <= MIN_ZOOM + 0.001"
         @click="emit('zoomOut')"
       />
@@ -56,30 +57,29 @@ const items = computed<DropdownMenuItem[][]>(() => [
       :content="{ align: 'end' }"
       :ui="{ content: 'min-w-40' }"
     >
-      <UButton
-        color="neutral"
+      <KitButton
         variant="ghost"
         size="sm"
-        trailing-icon="i-lucide-chevron-down"
+        trailing-icon="chevron-down"
         class="min-w-16 justify-center font-mono text-xs tabular-nums"
         :aria-label="t('zoom.menuLabel', { percent })"
         :disabled="disabled"
         data-zoom-percent
       >
         {{ t('zoom.percent', { percent }) }}
-      </UButton>
+      </KitButton>
     </UDropdownMenu>
     <UTooltip
       :text="t('zoom.in')"
       :kbds="['meta', '=']"
     >
-      <UButton
-        color="neutral"
+      <KitButton
         variant="ghost"
         size="sm"
-        icon="i-lucide-zoom-in"
-        class="max-sm:hidden"
-        :aria-label="t('zoom.in')"
+        icon="zoom-in"
+        icon-only
+        class="max-sm:hidden!"
+        :label="t('zoom.in')"
         :disabled="disabled || scale >= MAX_ZOOM - 0.001"
         @click="emit('zoomIn')"
       />
@@ -88,20 +88,18 @@ const items = computed<DropdownMenuItem[][]>(() => [
       :text="t('zoom.fitHint')"
       :kbds="['shift', '1']"
     >
-      <UButton
-        color="neutral"
+      <KitButton
         variant="ghost"
         size="sm"
-        icon="i-lucide-scan"
+        icon="scan"
         :aria-pressed="fitted"
         :disabled="disabled"
-        class="max-lg:px-1.5"
-        :ui="{ label: 'max-lg:sr-only' }"
+        class="max-lg:px-1.5! max-lg:[&>span]:sr-only"
         data-zoom-fit
         @click="emit('fit')"
       >
         {{ t('zoom.fit') }}
-      </UButton>
+      </KitButton>
     </UTooltip>
   </div>
 </template>

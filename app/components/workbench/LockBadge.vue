@@ -2,6 +2,8 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from '#imports'
 import type { LockableKind } from '../../../src/application/access/leases'
+import KitBadge from '~/components/kit/ui/Badge.vue'
+import KitButton from '~/components/kit/ui/Button.vue'
 import { useAccess } from '../../composables/useAccess'
 import { useWorkbenchFeedback } from '../../composables/useWorkbenchFeedback'
 
@@ -53,25 +55,22 @@ async function release(): Promise<void> {
     role="status"
   >
     <UTooltip :text="t('access.lock.tooltip', { nickname: lease.holder.nickname, kind: t(`access.kind.${lease.holder.kind}`) })">
-      <UBadge
-        color="warning"
-        variant="subtle"
-        icon="i-lucide-lock"
-        size="md"
+      <KitBadge
+        tone="warning"
+        icon="lock"
       >
         {{ t('access.lock.badge', { nickname: lease.holder.nickname, time: until }) }}
-      </UBadge>
+      </KitBadge>
     </UTooltip>
-    <UButton
+    <KitButton
       v-if="access.can('locks.force-release')"
-      color="neutral"
       variant="outline"
       size="xs"
-      icon="i-lucide-lock-open"
+      icon="lock-open"
       :loading="releasing"
       @click="release"
     >
       {{ t('access.lock.release') }}
-    </UButton>
+    </KitButton>
   </div>
 </template>

@@ -9,6 +9,7 @@ import { useMediaQuery, WORKBENCH_BREAKPOINTS } from '../../composables/useMedia
 import type { ViewPanelTab } from '../../composables/workbench-types'
 import { parseThread, parseViewPanel, parseViewRouteContext, sameQuery, viewQuery, VIEWS_LOCATION } from '../../utils/workbench-routes'
 import { parseHistoryAddress, type HistoryAddress } from '../../utils/version-history'
+import KitButton from '~/components/kit/ui/Button.vue'
 import PreviewCanvas from '../../components/workbench/PreviewCanvas.vue'
 import ViewRightPanel from '../../components/workbench/ViewRightPanel.vue'
 import ViewHeader from '../../components/workbench/ViewHeader.vue'
@@ -286,13 +287,13 @@ onBeforeUnmount(() => {
           >
             <template #actions>
               <UTooltip :text="isDesktop ? t('shell.togglePanel') : t('shell.openPanel')">
-                <UButton
-                  color="neutral"
+                <KitButton
                   variant="ghost"
                   size="sm"
-                  :icon="isDesktop ? 'i-lucide-panel-right' : 'i-lucide-panel-right-open'"
-                  :aria-label="isDesktop ? t('shell.togglePanel') : t('shell.openPanel')"
-                  :aria-expanded="isDesktop ? !panelHidden : panelOpen"
+                  :icon="isDesktop ? 'panel-right' : 'panel-right-open'"
+                  icon-only
+                  :label="isDesktop ? t('shell.togglePanel') : t('shell.openPanel')"
+                  :expanded="isDesktop ? !panelHidden : panelOpen"
                   @click="togglePanel"
                 />
               </UTooltip>
@@ -304,13 +305,13 @@ onBeforeUnmount(() => {
           >
             <template #actions>
               <UTooltip :text="isDesktop ? t('shell.togglePanel') : t('shell.openPanel')">
-                <UButton
-                  color="neutral"
+                <KitButton
                   variant="ghost"
                   size="sm"
-                  :icon="isDesktop ? 'i-lucide-panel-right' : 'i-lucide-panel-right-open'"
-                  :aria-label="isDesktop ? t('shell.togglePanel') : t('shell.openPanel')"
-                  :aria-expanded="isDesktop ? !panelHidden : panelOpen"
+                  :icon="isDesktop ? 'panel-right' : 'panel-right-open'"
+                  icon-only
+                  :label="isDesktop ? t('shell.togglePanel') : t('shell.openPanel')"
+                  :expanded="isDesktop ? !panelHidden : panelOpen"
                   @click="togglePanel"
                 />
               </UTooltip>

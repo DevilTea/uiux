@@ -15,17 +15,17 @@ function isRecord(value: unknown): value is JsonRecord {
 /** Lucide icon for a Widget type from the reference Catalog; unknown types get a neutral glyph. */
 export function widgetTypeIcon(type: string, hasChildren = false): string {
 	switch (type) {
-		case 'RootShell': return 'i-lucide-frame'
-		case 'Stack': return 'i-lucide-rows-3'
-		case 'Panel': return 'i-lucide-panel-top'
-		case 'Text': return 'i-lucide-type'
-		case 'Badge': return 'i-lucide-tag'
-		case 'Button': return 'i-lucide-rectangle-horizontal'
-		case 'Divider': return 'i-lucide-minus'
-		case 'NavItem': return 'i-lucide-link'
-		case 'TextInput': return 'i-lucide-text-cursor-input'
-		case 'Image': return 'i-lucide-image'
-		default: return hasChildren ? 'i-lucide-box' : 'i-lucide-square'
+		case 'RootShell': return 'frame'
+		case 'Stack': return 'rows-3'
+		case 'Panel': return 'panel-top'
+		case 'Text': return 'type'
+		case 'Badge': return 'tag'
+		case 'Button': return 'rectangle-horizontal'
+		case 'Divider': return 'minus'
+		case 'NavItem': return 'link'
+		case 'TextInput': return 'text-cursor-input'
+		case 'Image': return 'image'
+		default: return hasChildren ? 'box' : 'square'
 	}
 }
 

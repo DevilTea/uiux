@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { reactive, watch } from 'vue'
 import { useI18n } from '#imports'
+import KitButton from '~/components/kit/ui/Button.vue'
 import type { DecideForm } from '../../composables/useDecisionActions'
 
 /**
@@ -72,16 +73,14 @@ async function onSubmit(): Promise<void> {
           />
         </UFormField>
         <div class="flex justify-end gap-2">
-          <UButton
-            color="neutral"
+          <KitButton
             variant="ghost"
             :label="t('common.cancel')"
             @click="open = false"
           />
-          <UButton
+          <KitButton
             type="submit"
-            color="primary"
-            variant="solid"
+            variant="primary"
             :loading="busy"
             :disabled="!form.summary.trim()"
             :label="t('decision.decide.submit')"

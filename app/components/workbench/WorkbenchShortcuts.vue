@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { useI18n } from '#imports'
+import { useI18n, useKbd } from '#imports'
+import KitKbd from '~/components/kit/ui/Kbd.vue'
 import { useWorkbenchShell } from '../../composables/useWorkbenchShell'
 
 /** The `?` dialog listing the Workbench keyboard shortcuts (brief a, section 9). */
 const { t } = useI18n()
 const shell = useWorkbenchShell()
+// The Kit shortcut hint takes literal text, where Nuxt UI's `UKbd` resolved key names such as `meta` itself.
+const { getKbdKey } = useKbd()
 
 const rows = computed(() => [
 	{ keys: [['meta', 'K']], label: t('shortcuts.search') },
@@ -58,10 +61,10 @@ const rows = computed(() => [
               :key="index"
               class="inline-flex items-center gap-0.5"
             >
-              <UKbd
+              <KitKbd
                 v-for="key in combo"
                 :key="key"
-                :value="key"
+                :keys="getKbdKey(key)"
               />
             </span>
           </dd>

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from '#imports'
+import KitBadge from '~/components/kit/ui/Badge.vue'
 import { useWorkbench } from '../../composables/useWorkbench'
 import { useViewFlowUsage } from '../../composables/useViewFlowUsage'
 import { flowStepLocation } from '../../utils/workbench-routes'
@@ -90,15 +91,11 @@ const flowName = (name: string | undefined) => name || t('flowUsage.unnamed')
                 data-flow-usage-step
               >
                 <span class="shrink-0 font-mono text-xs text-dimmed tabular-nums">{{ t('flowUsage.step', { n: step.ordinal }) }}</span>
-                <UBadge
+                <KitBadge
                   v-if="step.variantName"
-                  color="neutral"
-                  variant="soft"
-                  size="sm"
-                  class="font-mono"
-                >
-                  {{ step.variantName }}
-                </UBadge>
+                  variant="mono"
+                  :label="step.variantName"
+                />
                 <span
                   v-else
                   class="text-xs text-muted"

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from '#imports'
+import KitButton from '~/components/kit/ui/Button.vue'
 import type { ReplyConflictChange } from '../../utils/reply-conflict'
 import type { InboxStatus } from '../../utils/review-inbox'
 
@@ -56,11 +57,10 @@ const title = computed(() => {
       :data-status="change.status"
     >
       <template #actions>
-        <UButton
+        <KitButton
           size="xs"
-          color="neutral"
           variant="outline"
-          icon="i-lucide-check"
+          icon="check"
           :label="t('comments.replyUpdated.acknowledge')"
           data-reply-acknowledge
           @click="emit('acknowledge')"

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from '#imports'
+import KitBadge from '~/components/kit/ui/Badge.vue'
 import { useRequirements } from '../../composables/useRequirements'
 import type { ViewRequirementRow } from '../../utils/requirements'
 
@@ -56,32 +57,26 @@ function note(row: ViewRequirementRow): 'unresolved' | 'unverified' | undefined 
           class="min-w-0 break-all font-mono text-sm text-highlighted"
           translate="no"
         >{{ row.id }}</span>
-        <UBadge
+        <KitBadge
           v-if="note(row) === 'unresolved'"
-          color="warning"
-          variant="subtle"
-          icon="i-lucide-circle-help"
+          tone="warning"
+          icon="circle-help"
           data-requirement-note="unresolved"
-        >
-          {{ t('requirements.unresolved.badge') }}
-        </UBadge>
-        <UBadge
+          :label="t('requirements.unresolved.badge')"
+        />
+        <KitBadge
           v-else-if="note(row) === 'unverified'"
-          color="neutral"
           variant="soft"
           data-requirement-note="unverified"
-        >
-          {{ t('requirements.unverified.badge') }}
-        </UBadge>
-        <UBadge
+          :label="t('requirements.unverified.badge')"
+        />
+        <KitBadge
           v-for="variant in (row.fromView ? [] : row.variants)"
           :key="variant"
-          color="neutral"
           variant="soft"
           data-requirement-variant
-        >
-          {{ t('requirements.viaVariant', { name: variant }) }}
-        </UBadge>
+          :label="t('requirements.viaVariant', { name: variant })"
+        />
       </span>
       <span
         v-if="requirements.statements.value.get(row.id)"

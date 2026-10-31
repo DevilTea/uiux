@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { useI18n } from '#imports'
+import KitIcon from '~/components/kit/ui/Icon.vue'
 import { mapContourAffine, mapPointAffine, type AffineOuterMapping } from '../../../src/preview/outer-precision'
 import { aggregateHighlightBounds } from '../../../src/preview/highlight-bounds'
 import type { Contour, WidgetRect } from '../../../src/preview/protocol/schema'
@@ -245,9 +246,10 @@ const selection = computed(() => {
       data-translucent-notice
       :style="{ left: `${translucentNotice.left}px`, top: `${translucentNotice.top}px` }"
     >
-      <UIcon
-        name="i-lucide-layers"
-        class="size-3 align-text-bottom"
+      <KitIcon
+        name="layers"
+        :size="12"
+        class="align-text-bottom"
       />
       {{ t('canvas.translucentNotice') }}
     </span>

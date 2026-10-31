@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useI18n } from '#imports'
+import KitButton from '~/components/kit/ui/Button.vue'
 
 /**
  * The inline second step of a thread action that asks something first: Duplicate's reason
@@ -38,16 +39,14 @@ defineExpose({ focus: () => input.value?.inputRef?.focus() })
       @keydown.escape.stop="emit('cancel')"
     />
     <div class="flex justify-end gap-2">
-      <UButton
-        color="neutral"
+      <KitButton
         variant="ghost"
         :size="props.size"
         :label="t('common.cancel')"
         @click="emit('cancel')"
       />
-      <UButton
-        color="primary"
-        variant="solid"
+      <KitButton
+        variant="primary"
         :size="props.size"
         :disabled="action === 'duplicate' && !reason.trim()"
         :loading="busy"

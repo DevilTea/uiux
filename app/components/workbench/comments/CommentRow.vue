@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from '#imports'
+import KitIcon from '~/components/kit/ui/Icon.vue'
 import { relativeTime } from '../../../utils/widget-inspection'
 import { threadAuthorInitials, useCanvasComments, VIEW_ANCHOR_WIDGET_ID, type CommentThread } from '../../../composables/useCanvasComments'
 
@@ -30,7 +31,7 @@ const note = computed(() => {
 	return undefined
 })
 
-const SIDE_ICON = { top: 'i-lucide-arrow-up-to-line', right: 'i-lucide-arrow-right-to-line', bottom: 'i-lucide-arrow-down-to-line', left: 'i-lucide-arrow-left-to-line' } as const
+const SIDE_ICON = { top: 'arrow-up-to-line', right: 'arrow-right-to-line', bottom: 'arrow-down-to-line', left: 'arrow-left-to-line' } as const
 
 /** Why the pin is not on the canvas right now (decision 7): a glyph with its words for assistive tech and the tooltip. */
 const canvas = computed<{ icon: string; text: string } | undefined>(() => {
@@ -38,20 +39,20 @@ const canvas = computed<{ icon: string; text: string } | undefined>(() => {
 	if (!props.item.anchorValid || !current || current.state === 'visible') return undefined
 	if (current.state === 'offscreen') return { icon: SIDE_ICON[current.side ?? 'bottom'], text: t('comments.reason.offscreen') }
 	switch (current.reason) {
-		case 'point-not-visible': return { icon: 'i-lucide-scan', text: t('comments.reason.pointNotVisible') }
+		case 'point-not-visible': return { icon: 'scan', text: t('comments.reason.pointNotVisible') }
 		case 'not-rendered':
-		case 'no-visible-region': return { icon: 'i-lucide-eye-off', text: t('pins.notVisible') }
-		case 'mapping-unavailable': return { icon: 'i-lucide-scan-line', text: t('comments.reason.mapping') }
+		case 'no-visible-region': return { icon: 'eye-off', text: t('pins.notVisible') }
+		case 'mapping-unavailable': return { icon: 'scan-line', text: t('comments.reason.mapping') }
 		default: return undefined
 	}
 })
 
 const statusIcon = computed(() => {
-	if (props.unplaceable) return { name: 'i-lucide-triangle-alert', class: 'text-warning' }
-	if (props.item.status === 'ready-for-review') return { name: 'i-lucide-eye', class: 'text-info' }
-	if (props.item.dismissed) return { name: 'i-lucide-circle-slash', class: 'text-muted' }
-	if (props.item.status === 'resolved') return { name: 'i-lucide-circle-check', class: 'text-success' }
-	return { name: 'i-lucide-circle-dot', class: 'text-annotation' }
+	if (props.unplaceable) return { name: 'triangle-alert', class: 'text-warning' }
+	if (props.item.status === 'ready-for-review') return { name: 'eye', class: 'text-info' }
+	if (props.item.dismissed) return { name: 'circle-slash', class: 'text-muted' }
+	if (props.item.status === 'resolved') return { name: 'circle-check', class: 'text-success' }
+	return { name: 'circle-dot', class: 'text-annotation' }
 })
 
 const when = computed(() => props.item.latestActivityAt ? relativeTime(props.item.latestActivityAt, locale.value) : '')
@@ -78,9 +79,9 @@ const target = computed(() => onView.value ? t('comments.viewTarget') : `#${prop
     @blur="emit('leave')"
     @click="emit('open')"
   >
-    <UIcon
+    <KitIcon
       :name="statusIcon.name"
-      class="mt-1 size-4"
+      class="mt-1"
       :class="statusIcon.class"
     />
     <UAvatar
@@ -121,9 +122,9 @@ const target = computed(() => onView.value ? t('comments.viewTarget') : `#${prop
           class="inline-grid size-3.5 place-items-center"
           data-comment-canvas-glyph
         >
-          <UIcon
-            :name="canvas?.icon ?? 'i-lucide-scan'"
-            class="size-3.5"
+          <KitIcon
+            :name="canvas?.icon ?? 'scan'"
+            :size="14"
             :class="canvas ? '' : 'invisible'"
           />
           <span
@@ -137,9 +138,9 @@ const target = computed(() => onView.value ? t('comments.viewTarget') : `#${prop
         :datetime="item.latestActivityAt"
       >{{ when }}</time>
       <span class="inline-flex items-center gap-0.5">
-        <UIcon
-          name="i-lucide-message-circle"
-          class="size-3"
+        <KitIcon
+          name="message-circle"
+          :size="12"
         />{{ item.messageCount }}
         <span class="sr-only">{{ messageCountLabel }}</span>
       </span>

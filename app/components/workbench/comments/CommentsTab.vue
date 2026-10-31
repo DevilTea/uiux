@@ -4,6 +4,8 @@ import { useI18n } from '#imports'
 import { useWorkbench } from '../../../composables/useWorkbench'
 import { useMediaQuery } from '../../../composables/useMediaQuery'
 import { statusKey, useCanvasComments, VIEW_ANCHOR_WIDGET_ID, type CommentFilter, type CommentThread } from '../../../composables/useCanvasComments'
+import KitButton from '~/components/kit/ui/Button.vue'
+import KitIcon from '~/components/kit/ui/Icon.vue'
 import CommentRow from './CommentRow.vue'
 import WbErrorDescription from '../WbErrorDescription.vue'
 import { flattenWidgetTree } from '../../../../src/preview/widget-tree'
@@ -40,16 +42,16 @@ const groups = computed<readonly Group[]>(() => {
 	// Threads on the View as a whole (the RootShell anchor) lead, apart from the Widget threads.
 	const onView = (item: CommentThread) => item.anchor.widgetId === VIEW_ANCHOR_WIDGET_ID
 	const result: Group[] = [
-		{ key: 'view', label: t('comments.group.view'), icon: 'i-lucide-app-window', rows: here.filter(item => onView(item) && item.status !== 'resolved') },
+		{ key: 'view', label: t('comments.group.view'), icon: 'app-window', rows: here.filter(item => onView(item) && item.status !== 'resolved') },
 		{ key: 'ready', label: t('comments.group.ready'), rows: here.filter(item => !onView(item) && item.status === 'ready-for-review') },
 		{ key: 'open', label: t('comments.group.open'), rows: here.filter(item => !onView(item) && item.status === 'open') },
 		// Decision 6: Widgets beyond the tracking cap get no stream and no pin; they are listed here instead.
-		{ key: 'overcap', label: t('pins.notOnCanvasGroup'), icon: 'i-lucide-eye-off', rows: placeable.filter(item => item.inScope && notOnCanvas.has(item.id)) },
-		{ key: 'unplaced', label: t('comments.group.unplaced'), icon: 'i-lucide-triangle-alert', rows: all.filter(unplaceable) },
+		{ key: 'overcap', label: t('pins.notOnCanvasGroup'), icon: 'eye-off', rows: placeable.filter(item => item.inScope && notOnCanvas.has(item.id)) },
+		{ key: 'unplaced', label: t('comments.group.unplaced'), icon: 'triangle-alert', rows: all.filter(unplaceable) },
 		{ key: 'other', label: t('pins.otherVariants', { n: placeable.filter(item => !item.inScope).length }), rows: placeable.filter(item => !item.inScope) },
 		{ key: 'resolved', label: t('comments.group.resolved'), rows: here.filter(item => item.status === 'resolved' && !item.dismissed) },
 		// Dismissed threads are listed with the resolved ones, but never drawn as pins.
-		{ key: 'dismissed', label: t('comments.group.dismissed'), icon: 'i-lucide-circle-slash', rows: placeable.filter(item => item.dismissed) },
+		{ key: 'dismissed', label: t('comments.group.dismissed'), icon: 'circle-slash', rows: placeable.filter(item => item.dismissed) },
 	]
 	return result.filter(group => group.rows.length)
 })
@@ -63,9 +65,9 @@ const visibleCount = computed(() => groups.value.reduce((sum, group) => sum + gr
 const allResolved = computed(() => comments.threads.value.length > 0 && comments.threads.value.every(item => item.status === 'resolved'))
 
 const FILTERS: ReadonlyArray<{ key: keyof CommentFilter; icon: string }> = [
-	{ key: 'open', icon: 'i-lucide-circle-dot' },
-	{ key: 'ready', icon: 'i-lucide-eye' },
-	{ key: 'resolved', icon: 'i-lucide-circle-check' },
+	{ key: 'open', icon: 'circle-dot' },
+	{ key: 'ready', icon: 'eye' },
+	{ key: 'resolved', icon: 'circle-check' },
 ]
 
 function openRow(item: CommentThread): void {
@@ -109,33 +111,32 @@ function onListKeydown(event: KeyboardEvent): void {
         :aria-label="t('comments.filterLabel')"
         class="flex flex-wrap items-center gap-1"
       >
-        <UButton
+        <KitButton
           v-for="item in FILTERS"
           :key="item.key"
           size="xs"
-          color="neutral"
-          :variant="comments.filter.value[item.key] ? 'soft' : 'ghost'"
+          variant="ghost"
           :icon="item.icon"
-          :aria-pressed="comments.filter.value[item.key]"
+          :pressed="comments.filter.value[item.key]"
+          class="[&>span]:inline-flex [&>span]:items-center [&>span]:gap-1.5"
           :data-comment-filter="item.key"
           @click="comments.setFilter(item.key, !comments.filter.value[item.key])"
         >
           {{ t(`thread.status.${item.key}`) }}
           <span class="text-muted tabular-nums">{{ counts[item.key] }}</span>
-        </UButton>
+        </KitButton>
       </div>
       <!-- Phones never start comments (DESIGN.md "Mobile"); the canvas pill says so there. -->
       <UTooltip
         v-if="!phone"
         :text="viewCommentBlocked ?? t('comments.commentOnViewHint')"
       >
-        <UButton
+        <KitButton
           size="xs"
-          color="neutral"
           variant="outline"
-          icon="i-lucide-message-square-plus"
+          icon="message-square-plus"
           class="ms-auto"
-          :class="viewCommentBlocked ? 'cursor-not-allowed text-dimmed' : ''"
+          :class="viewCommentBlocked ? 'cursor-not-allowed text-dimmed!' : ''"
           :aria-disabled="viewCommentBlocked ? 'true' : undefined"
           :aria-description="viewCommentBlocked"
           data-comment-on-view="tab"
@@ -143,7 +144,7 @@ function onListKeydown(event: KeyboardEvent): void {
           @click="comments.commentOnView()"
         >
           {{ t('comments.commentOnViewShort') }}
-        </UButton>
+        </KitButton>
       </UTooltip>
     </div>
 
@@ -181,10 +182,10 @@ function onListKeydown(event: KeyboardEvent): void {
         >
           <h2 class="flex items-center gap-1.5 px-3 pt-3 pb-1 text-xs font-medium text-muted">
             {{ group.key === 'other' ? group.label : `${group.label} · ${group.rows.length}` }}
-            <UIcon
+            <KitIcon
               v-if="group.icon"
               :name="group.icon"
-              class="size-3.5"
+              :size="14"
               :class="group.key === 'overcap' || group.key === 'view' || group.key === 'dismissed' ? 'text-muted' : 'text-warning'"
             />
           </h2>
@@ -221,11 +222,10 @@ function onListKeydown(event: KeyboardEvent): void {
                 v-if="group.key === 'unplaced' && comments.canComment.value && !item.anchorValid && !phone"
                 class="px-3 pb-2 ps-[3.75rem]"
               >
-                <UButton
+                <KitButton
                   size="xs"
-                  color="neutral"
                   variant="outline"
-                  icon="i-lucide-crosshair"
+                  icon="crosshair"
                   :label="t('thread.reanchor')"
                   @click="reanchor(item)"
                 />
@@ -234,11 +234,10 @@ function onListKeydown(event: KeyboardEvent): void {
                 v-else-if="group.key === 'other' && item.variantNames[0]"
                 class="px-3 pb-2 ps-[3.75rem]"
               >
-                <UButton
+                <KitButton
                   size="xs"
-                  color="neutral"
                   variant="outline"
-                  icon="i-lucide-layers"
+                  icon="layers"
                   :label="t('comments.switchTo', { variant: item.variantNames.find(name => !item.missingVariants.includes(name)) ?? item.variantNames[0] })"
                   @click="selectedVariant = item.variantNames.find(name => !item.missingVariants.includes(name)) ?? item.variantNames[0]!"
                 />
@@ -253,16 +252,16 @@ function onListKeydown(event: KeyboardEvent): void {
         class="grid justify-items-start gap-2 px-4 py-6"
         data-comments-empty="resolved"
       >
-        <UIcon
-          name="i-lucide-circle-check"
-          class="size-5 text-success"
+        <KitIcon
+          name="circle-check"
+          :size="20"
+          class="text-success"
         />
         <p class="text-sm font-medium text-highlighted">
           {{ t('allCaughtUp', { n: counts.resolved }) }}
         </p>
-        <UButton
+        <KitButton
           size="xs"
-          color="neutral"
           variant="outline"
           :label="t('comments.showResolved')"
           @click="comments.setFilter('resolved', true)"
@@ -287,10 +286,9 @@ function onListKeydown(event: KeyboardEvent): void {
       class="flex items-center gap-1.5 border-t border-default px-3 py-2 text-xs text-muted"
       data-comments-workspace-footer
     >
-      <UIcon
-        name="i-lucide-globe"
-        class="size-3.5 shrink-0"
-        aria-hidden="true"
+      <KitIcon
+        name="globe"
+        :size="14"
       />
       <ULink
         :to="{ path: '/reviews', query: { view: 'workspace' } }"

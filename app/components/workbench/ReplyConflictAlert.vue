@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from '#imports'
+import KitButton from '~/components/kit/ui/Button.vue'
 import { replyConflictChange, type ThreadState } from '../../utils/reply-conflict'
 import type { InboxStatus } from '../../utils/review-inbox'
 
@@ -56,11 +57,10 @@ const description = computed(() => {
       v-if="canSend"
       #actions
     >
-      <UButton
+      <KitButton
         size="xs"
-        color="neutral"
         variant="outline"
-        icon="i-lucide-send-horizontal"
+        icon="send-horizontal"
         :label="t('comments.replyConflict.sendAgain')"
         :loading="busy"
         data-reply-send-again

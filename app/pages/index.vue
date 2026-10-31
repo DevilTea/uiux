@@ -10,6 +10,10 @@ import { useWorkbench } from '../composables/useWorkbench'
 import { useWorkbenchShell } from '../composables/useWorkbenchShell'
 import { splitReadinessDiagnostics, updatedSince } from '../utils/readiness'
 import { viewLocation } from '../utils/workbench-routes'
+import KitBadge from '~/components/kit/ui/Badge.vue'
+import KitButton from '~/components/kit/ui/Button.vue'
+import KitIcon from '~/components/kit/ui/Icon.vue'
+import KitSkeleton from '~/components/kit/ui/Skeleton.vue'
 import WorkbenchPage from '../components/workbench/WorkbenchPage.vue'
 import OverviewChecks from '../components/readiness/OverviewChecks.vue'
 import OverviewActivity from '../components/readiness/OverviewActivity.vue'
@@ -186,12 +190,12 @@ defineShortcuts(computed(() => ({
 	meta_shift_e: () => { if (canExport.value) exportOpen.value = true },
 })))
 
-const READINESS_BADGE: Record<ReadinessState, { color: 'success' | 'error' | 'neutral'; icon: string }> = {
-	ready: { color: 'success', icon: 'i-lucide-badge-check' },
-	blocked: { color: 'error', icon: 'i-lucide-circle-x' },
-	failed: { color: 'error', icon: 'i-lucide-circle-alert' },
-	checking: { color: 'neutral', icon: 'i-lucide-loader-circle' },
-	unsupported: { color: 'neutral', icon: 'i-lucide-database' },
+const READINESS_BADGE: Record<ReadinessState, { tone: 'success' | 'danger' | 'neutral'; icon: string }> = {
+	ready: { tone: 'success', icon: 'badge-check' },
+	blocked: { tone: 'danger', icon: 'circle-x' },
+	failed: { tone: 'danger', icon: 'circle-alert' },
+	checking: { tone: 'neutral', icon: 'loader-circle' },
+	unsupported: { tone: 'neutral', icon: 'database' },
 }
 
 function readinessLabel(row: ViewRow): string {
@@ -204,11 +208,11 @@ function readinessLabel(row: ViewRow): string {
 
 function evidenceLabel(row: ViewRow): { text: string; icon: string; tone: string } {
 	const evidence = row.evidence
-	if (!evidence.total) return { text: t('overview.evidence.none'), icon: 'i-lucide-circle-dashed', tone: 'text-dimmed' }
-	if (evidence.stale && evidence.fresh) return { text: t('overview.evidence.mixed', { fresh: evidence.fresh, stale: evidence.stale }), icon: 'i-lucide-history', tone: 'text-warning' }
-	if (evidence.stale) return { text: t('overview.evidence.stale', evidence.stale), icon: 'i-lucide-history', tone: 'text-warning' }
-	if (evidence.fresh) return { text: t('overview.evidence.fresh', evidence.fresh), icon: 'i-lucide-circle-check', tone: 'text-success' }
-	return { text: t('overview.evidence.unknown'), icon: 'i-lucide-circle-help', tone: 'text-muted' }
+	if (!evidence.total) return { text: t('overview.evidence.none'), icon: 'circle-dashed', tone: 'text-dimmed' }
+	if (evidence.stale && evidence.fresh) return { text: t('overview.evidence.mixed', { fresh: evidence.fresh, stale: evidence.stale }), icon: 'history', tone: 'text-warning' }
+	if (evidence.stale) return { text: t('overview.evidence.stale', evidence.stale), icon: 'history', tone: 'text-warning' }
+	if (evidence.fresh) return { text: t('overview.evidence.fresh', evidence.fresh), icon: 'circle-check', tone: 'text-success' }
+	return { text: t('overview.evidence.unknown'), icon: 'circle-help', tone: 'text-muted' }
 }
 </script>
 
@@ -230,9 +234,11 @@ function evidenceLabel(row: ViewRow): { text: string; icon: string; tone: string
               data-attention
             >
               <template v-if="loading">
-                <USkeleton
-                  class="h-8 w-80 max-w-full"
-                  :aria-label="t('common.loading')"
+                <KitSkeleton
+                  class="wb-skeleton animate-pulse max-w-full"
+                  :width="320"
+                  :height="32"
+                  :label="t('common.loading')"
                 />
               </template>
               <template v-else-if="!views.length">
@@ -278,23 +284,24 @@ function evidenceLabel(row: ViewRow): { text: string; icon: string; tone: string
                 v-else
                 class="inline-flex items-center gap-2"
               >
-                <UIcon
-                  name="i-lucide-circle-check"
-                  class="size-6 text-success"
+                <KitIcon
+                  name="circle-check"
+                  :size="24"
+                  class="text-success"
                 />
                 {{ assessedAll ? t('overview.allClear', readyViews) : t('overview.nothingWaiting') }}
               </span>
             </div>
           </div>
-          <UButton
+          <KitButton
             v-if="canExport && views.length"
-            icon="i-lucide-package"
+            variant="outline"
+            icon="package"
             class="mt-1"
+            :label="t('handoff.export')"
             data-export-open
             @click="exportOpen = true"
-          >
-            {{ t('handoff.export') }}
-          </UButton>
+          />
         </div>
       </div>
 
@@ -350,16 +357,14 @@ function evidenceLabel(row: ViewRow): { text: string; icon: string; tone: string
                 :key="columnId"
                 #[`${columnId}-header`]="{ column }"
               >
-                <UButton
+                <KitButton
                   variant="ghost"
-                  color="neutral"
                   size="xs"
-                  class="-mx-2 font-medium text-muted"
-                  :trailing-icon="column.getIsSorted() === 'asc' ? 'i-lucide-arrow-up' : column.getIsSorted() === 'desc' ? 'i-lucide-arrow-down' : 'i-lucide-arrow-up-down'"
+                  class="-mx-2"
+                  :trailing-icon="column.getIsSorted() === 'asc' ? 'arrow-up' : column.getIsSorted() === 'desc' ? 'arrow-down' : 'arrow-up-down'"
+                  :label="String(column.columnDef.header)"
                   @click="column.toggleSorting(column.getIsSorted() === 'asc')"
-                >
-                  {{ String(column.columnDef.header) }}
-                </UButton>
+                />
               </template>
               <template #name-cell="{ row }">
                 <span class="flex items-center gap-2">
@@ -391,16 +396,18 @@ function evidenceLabel(row: ViewRow): { text: string; icon: string; tone: string
                   v-if="row.original.ready || row.original.open"
                   class="flex flex-wrap gap-1"
                 >
-                  <UBadge
+                  <KitBadge
                     v-if="row.original.ready"
-                    color="info"
-                    icon="i-lucide-eye"
-                  >{{ t('overview.reviews.ready', row.original.ready) }}</UBadge>
-                  <UBadge
+                    tone="info"
+                    icon="eye"
+                    :label="t('overview.reviews.ready', row.original.ready)"
+                  />
+                  <KitBadge
                     v-if="row.original.open"
-                    color="annotation"
-                    icon="i-lucide-circle-dot"
-                  >{{ t('overview.reviews.open', row.original.open) }}</UBadge>
+                    tone="annotation"
+                    icon="circle-dot"
+                    :label="t('overview.reviews.open', row.original.open)"
+                  />
                 </span>
                 <span
                   v-else
@@ -411,36 +418,29 @@ function evidenceLabel(row: ViewRow): { text: string; icon: string; tone: string
                 <span
                   v-if="row.original.findings"
                   class="inline-flex items-center gap-1.5 text-warning"
-                ><UIcon
-                  name="i-lucide-triangle-alert"
-                  class="size-4"
-                />{{ t('overview.findings', row.original.findings) }}</span>
+                ><KitIcon name="triangle-alert" />{{ t('overview.findings', row.original.findings) }}</span>
                 <span
                   v-else
                   class="inline-flex items-center gap-1.5 text-muted"
-                ><UIcon
-                  name="i-lucide-check"
-                  class="size-4 text-success"
+                ><KitIcon
+                  name="check"
+                  class="text-success"
                 />{{ t('overview.noFindings') }}</span>
               </template>
               <template #evidence-cell="{ row }">
                 <span
                   class="inline-flex items-center gap-1.5"
                   :class="evidenceLabel(row.original).tone"
-                ><UIcon
-                  :name="evidenceLabel(row.original).icon"
-                  class="size-4"
-                /><span class="text-default">{{ evidenceLabel(row.original).text }}</span></span>
+                ><KitIcon :name="evidenceLabel(row.original).icon" /><span class="text-default">{{ evidenceLabel(row.original).text }}</span></span>
               </template>
               <template #readiness-cell="{ row }">
-                <UBadge
-                  :color="READINESS_BADGE[row.original.readiness].color"
+                <KitBadge
+                  :tone="READINESS_BADGE[row.original.readiness].tone"
                   :icon="READINESS_BADGE[row.original.readiness].icon"
-                  :ui="{ leadingIcon: row.original.readiness === 'checking' ? 'animate-spin' : '' }"
+                  :spin="row.original.readiness === 'checking'"
                   :data-readiness="row.original.readiness"
-                >
-                  {{ readinessLabel(row.original) }}
-                </UBadge>
+                  :label="readinessLabel(row.original)"
+                />
               </template>
             </UTable>
 
@@ -469,10 +469,11 @@ function evidenceLabel(row: ViewRow): { text: string; icon: string; tone: string
                       class="shrink-0 text-xs text-muted"
                       data-last-opened
                     >{{ t('workbench.views.lastOpened') }}</span>
-                    <UBadge
-                      :color="READINESS_BADGE[row.readiness].color"
+                    <KitBadge
+                      :tone="READINESS_BADGE[row.readiness].tone"
                       :icon="READINESS_BADGE[row.readiness].icon"
-                    >{{ readinessLabel(row) }}</UBadge>
+                      :label="readinessLabel(row)"
+                    />
                   </span>
                   <span
                     v-if="row.feature"
