@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { chromium, type Browser, type BrowserContext, type Locator, type Page } from 'playwright'
+import { currentInteractionReplayRecord, putRecordInWorkspace } from './support/evidence-record'
 import { startWorkbenchServer, type WorkbenchServer } from './support/workbench-server'
 
 /**
@@ -294,6 +295,51 @@ describe('The Workbench canvas and shell use the Kit components (#380)', () => {
 			const box = await panel.boundingBox()
 			expect(box?.width).toBeGreaterThanOrEqual(44)
 			expect(box?.height).toBeGreaterThanOrEqual(44)
+		}
+		finally { await context.close() }
+	}, 90_000)
+
+	it('Submit for review: select-all, Cancel and Submit are Kit buttons that keep their names, loading and disabled state', async () => {
+		const post = async <T>(path: string, body: unknown): Promise<T> => {
+			const response = await fetch(`${server.origin}${path}`, { method: 'POST', headers: { 'content-type': 'application/json', ...server.headers }, body: JSON.stringify(body) })
+			if (!response.ok) throw new Error(`${path}: ${response.status} ${await response.text()}`)
+			return await response.json() as T
+		}
+		// Select-all needs two fresh formal captures of the View: the current replay record, rewritten as a capture.
+		for (const themeId of ['light', 'dark']) {
+			const base = await currentInteractionReplayRecord(server.workspaceRoot, VIEW)
+			const rest: Record<string, unknown> = { ...base }
+			delete rest.evidenceRefs
+			delete rest.data
+			await putRecordInWorkspace(server.workspaceRoot, { ...rest, kind: 'formal_capture', executionContext: { ...(base.executionContext as object), themeId }, artifactRefs: [`sha256:${(themeId === 'light' ? 'a' : 'b').repeat(64)}`], data: { format: 'png', width: 1280, height: 800 } })
+		}
+		const created = await post<{ key: string; revision: string }>('/api/reviews', { anchor: { viewId: VIEW, widgetId: 'root' } })
+		await post(`/api/reviews/${created.key}/messages`, { expectedRevision: created.revision, body: 'Kit button swap.' })
+		const { context, page } = await open(`/reviews?thread=${created.key}`)
+		try {
+			await page.locator('[data-review-submit]').click()
+			await page.locator('[data-submit-review]').waitFor({ timeout: 15_000 })
+			const all = page.locator('[data-submit-select-current]')
+			await all.waitFor({ timeout: 15_000 })
+			expect(await hasClass(all, 'kit-btn--link-muted')).toBe(true)
+			expect(await hasClass(all, 'kit-btn--xs')).toBe(true)
+			expect(await all.textContent()).toMatch(/Select/)
+			const cancel = page.locator('[data-submit-cancel]')
+			expect(await hasClass(cancel, 'kit-btn--ghost')).toBe(true)
+			expect(await cancel.textContent()).toContain('Cancel')
+			const send = page.locator('[data-submit-send]')
+			expect(await hasClass(send, 'kit-btn--primary')).toBe(true)
+			expect(await send.getAttribute('type')).toBe('submit')
+			expect(await send.locator('svg.kit-icon').count()).toBe(1)
+			expect(await send.isDisabled()).toBe(true)
+			await all.click()
+			await page.locator('[data-submit-domains]').click()
+			await page.getByRole('option', { name: 'i18n (Locale messages)' }).click()
+			await page.keyboard.press('Escape')
+			await expect.poll(() => send.isDisabled()).toBe(false)
+			await cancel.click()
+			await page.locator('[data-submit-review]').waitFor({ state: 'detached' })
+			await expectClean(page, 'submit for review')
 		}
 		finally { await context.close() }
 	}, 90_000)
