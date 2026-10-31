@@ -11,10 +11,16 @@ export type CreateLocaleCommand = Readonly<{
 	messages: I18nResource
 }>
 
+/**
+ * Either `messages` (replaces every message) or `set` and/or `remove` (change only the named
+ * keys), never both and never none (Clause 01a191cf-5734-73c7-9bf2-b437c39ae072).
+ */
 export type UpdateLocaleCommand = Readonly<{
 	locale: string
 	expectedRevision: string
-	messages: I18nResource
+	messages?: I18nResource
+	set?: Readonly<Record<string, string>>
+	remove?: readonly string[]
 }>
 
 export type LocaleAuthoringResult =
@@ -29,6 +35,34 @@ export type LocaleAuthoringService = Readonly<{
 	createLocale(command: CreateLocaleCommand): Promise<LocaleAuthoringResult>
 	updateLocale(command: UpdateLocaleCommand): Promise<LocaleAuthoringResult>
 }>
+
+function invalidUpdate(message: string): Readonly<{ ok: false; diagnostics: readonly Diagnostic[] }> {
+	return { ok: false, diagnostics: [{ code: 'i18n.invalid_locale_update', path: '/', message }] }
+}
+
+/** The messages an update leaves: `messages` verbatim, or the current ones with `set` applied and `remove` deleted. */
+function resolveUpdatedMessages(
+	command: UpdateLocaleCommand,
+	current: I18nResource,
+): Readonly<{ ok: true; messages: I18nResource }> | Readonly<{ ok: false; diagnostics: readonly Diagnostic[] }> {
+	const partial = command.set !== undefined || command.remove !== undefined
+	if (command.messages !== undefined) {
+		if (partial) return invalidUpdate('Give either messages, or set and remove, not both.')
+		return { ok: true, messages: command.messages }
+	}
+	if (!partial) return invalidUpdate('Give either messages, or set and/or remove.')
+
+	const set = command.set ?? {}
+	const remove = command.remove ?? []
+	const removed = new Set(remove)
+	const overlap = Object.keys(set).filter(key => removed.has(key))
+	if (overlap.length > 0)
+		return invalidUpdate(`A key cannot be in both set and remove: ${overlap.join(', ')}.`)
+
+	const messages: Record<string, string> = { ...current, ...set }
+	for (const key of removed) delete messages[key]
+	return { ok: true, messages }
+}
 
 export function createLocaleAuthoringService(persistence: FileNativePersistence): LocaleAuthoringService {
 	async function createLocale(command: CreateLocaleCommand): Promise<LocaleAuthoringResult> {
@@ -76,19 +110,23 @@ export function createLocaleAuthoringService(persistence: FileNativePersistence)
 		if (current.revision !== expectedRevision.value)
 			return { status: 'conflict', key: command.locale, currentRevision: current.revision }
 
-		const validation = validateI18nResource(command.messages, `${command.locale}.json`)
+		const next = resolveUpdatedMessages(command, current.resource)
+		if (!next.ok)
+			return { status: 'invalid', key: command.locale, diagnostics: next.diagnostics }
+
+		const validation = validateI18nResource(next.messages, `${command.locale}.json`)
 		if (!validation.ok)
 			return { status: 'invalid', key: command.locale, diagnostics: validation.diagnostics }
 
 		const commit = await persistence.locales.compareAndSwap({
 			key: command.locale,
 			expectedRevision: expectedRevision.value,
-			resource: command.messages,
+			resource: next.messages,
 		})
 		if (!commit.ok)
 			return { status: 'conflict', key: command.locale, currentRevision: commit.conflict.currentRevision }
 		const inspected = await persistence.locales.readInspected(command.locale)
-		return { status: 'updated', key: command.locale, revision: commit.revision, diagnostics: inspected?.diagnostics ?? [], changeSummary: summarizeChange(current.resource, command.messages) }
+		return { status: 'updated', key: command.locale, revision: commit.revision, diagnostics: inspected?.diagnostics ?? [], changeSummary: summarizeChange(current.resource, next.messages) }
 	}
 
 	return { createLocale, updateLocale }

@@ -761,6 +761,80 @@ describe('Locale authoring', () => {
 		finally { await close() }
 	})
 
+	describe('partial update_locale (set and remove)', () => {
+		const seeded = async () => {
+			const { app } = await emptySession()
+			const created = await app.createLocale({ locale: 'en-US', messages: { a: 'A', b: 'B', c: 'C' } })
+			if (created.status !== 'created') throw new Error('seed failed')
+			return { app, revision: created.revision }
+		}
+		const messagesOf = async (app: Awaited<ReturnType<typeof emptySession>>['app']) => {
+			const read = await app.readPointResource('locale', 'en-US')
+			return read?.kind === 'locale' ? read.resource : undefined
+		}
+
+		it('merges set and remove and keeps every other key', async () => {
+			const { app, revision } = await seeded()
+			const result = await app.updateLocale({ locale: 'en-US', expectedRevision: revision, set: { a: 'A2', d: 'D' }, remove: ['c'] })
+			expect(result).toMatchObject({ status: 'updated', key: 'en-US', changeSummary: expect.any(Object) })
+			expect(await messagesOf(app)).toEqual({ a: 'A2', b: 'B', d: 'D' })
+		})
+
+		it('treats removing an absent key as a no-op', async () => {
+			const { app, revision } = await seeded()
+			const result = await app.updateLocale({ locale: 'en-US', expectedRevision: revision, remove: ['zzz'] })
+			expect(result.status).toBe('updated')
+			expect(await messagesOf(app)).toEqual({ a: 'A', b: 'B', c: 'C' })
+		})
+
+		it('refuses messages together with set or remove, none of the three, and a key in both', async () => {
+			const { app, revision } = await seeded()
+			for (const extra of [{ messages: { a: 'x' }, set: { a: 'y' } }, { messages: { a: 'x' }, remove: ['b'] }, {}, { set: { a: 'x' }, remove: ['a'] }])
+				expect(await app.updateLocale({ locale: 'en-US', expectedRevision: revision, ...extra })).toMatchObject({ status: 'invalid', key: 'en-US', diagnostics: [expect.objectContaining({ code: 'i18n.invalid_locale_update' })] })
+			expect(await messagesOf(app)).toEqual({ a: 'A', b: 'B', c: 'C' })
+		})
+
+		it('checks expectedRevision first', async () => {
+			const { app, revision } = await seeded()
+			expect((await app.updateLocale({ locale: 'en-US', expectedRevision: revision, set: { a: '1' } })).status).toBe('updated')
+			expect(await app.updateLocale({ locale: 'en-US', expectedRevision: revision, set: { a: '2' }, remove: ['a'] })).toMatchObject({ status: 'conflict' })
+			expect((await messagesOf(app))?.a).toBe('1')
+		})
+
+		it('works through the strict MCP schema and rejects unknown fields', async () => {
+			const { app, revision } = await seeded()
+			const { client, close } = await connectedClient(app)
+			try {
+				const ok = await client.callTool({ name: 'update_locale', arguments: { locale: 'en-US', expectedRevision: revision, set: { a: 'A2' }, remove: ['c'] } })
+				expect(ok.isError).not.toBe(true)
+				expect(ok.structuredContent).toMatchObject({ status: 'updated', key: 'en-US' })
+				expect(await messagesOf(app)).toEqual({ a: 'A2', b: 'B' })
+
+				const both = await client.callTool({ name: 'update_locale', arguments: { locale: 'en-US', expectedRevision: (ok.structuredContent as { revision: string }).revision, messages: { a: 'x' }, set: { a: 'y' } } })
+				expect(both.isError).toBe(true)
+				expect(both.structuredContent).toMatchObject({ status: 'invalid' })
+
+				const unknown = await client.callTool({ name: 'update_locale', arguments: { locale: 'en-US', expectedRevision: revision, patch: {} } })
+				expect(unknown.isError).toBe(true)
+				expect(await messagesOf(app)).toEqual({ a: 'A2', b: 'B' })
+			}
+			finally { await close() }
+		})
+
+		it('mirrors set and remove on PUT /api/locales/:locale', async () => {
+			const { app, revision } = await seeded()
+			const updated = await updateLocaleForHttp(scoped(app), 'en-US', { expectedRevision: revision, set: { a: 'A2' }, remove: ['c'] })
+			expect(updated.status).toBe(200)
+			expect(updated.body).toMatchObject({ status: 'updated', key: 'en-US' })
+			expect(await messagesOf(app)).toEqual({ a: 'A2', b: 'B' })
+
+			const refused = await updateLocaleForHttp(scoped(app), 'en-US', { expectedRevision: (updated.body as { revision: string }).revision, set: { b: 'x' }, remove: ['b'] })
+			expect(refused.status).toBeGreaterThanOrEqual(400)
+			expect(refused.body).toMatchObject({ status: 'invalid' })
+			expect(await messagesOf(app)).toEqual({ a: 'A2', b: 'B' })
+		})
+	})
+
 	it('fails creation if locale already exists without overwriting', async () => {
 		const { app } = await emptySession()
 		const first = await app.createLocale({ locale: 'en-US', messages: { title: 'First' } })

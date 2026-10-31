@@ -210,7 +210,9 @@ const createLocaleSchema = z.object({
 const updateLocaleSchema = z.object({
 	locale: z.string(),
 	expectedRevision: z.string(),
-	messages: z.record(z.string(), z.string()),
+	messages: z.record(z.string(), z.string()).optional().describe('Replaces every message. Give either this, or set and/or remove.'),
+	set: z.record(z.string(), z.string()).optional().describe('Key to value; adds or changes each key and keeps every other message.'),
+	remove: z.array(z.string()).optional().describe('Keys to delete; a key the Locale lacks changes nothing. A key may not be in both set and remove.'),
 }).strict()
 
 const flowStepSchema = z.object({
@@ -964,14 +966,16 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 		'update_locale',
 		{
 			title: 'Update UIUX Locale',
-			description: 'Update a canonical flat locale translation file with revision CAS. Fails on revision conflict or missing locale.',
+			description: 'Update a canonical flat locale translation file with revision CAS. Prefer set (key to value) and remove (key list) for a partial edit: they change only the named keys and keep every other message. messages replaces the whole file; give either messages or set/remove, not both. Fails on revision conflict or missing locale.',
 			inputSchema: updateLocaleSchema,
 			annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
 		},
 		async input => authoringToolResult('locale', await app.updateLocale({
 			locale: input.locale,
 			expectedRevision: input.expectedRevision,
-			messages: input.messages,
+			...(input.messages === undefined ? {} : { messages: input.messages }),
+			...(input.set === undefined ? {} : { set: input.set }),
+			...(input.remove === undefined ? {} : { remove: input.remove }),
 		})),
 	)
 
