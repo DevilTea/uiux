@@ -88,7 +88,7 @@ const breadcrumb = computed<BreadcrumbItem[]>(() => {
       class="hidden min-w-0 flex-1 sm:block"
       color="neutral"
       separator-icon="i-lucide-chevron-right"
-      :ui="{ item: 'shrink-0 last:shrink', link: 'text-sm pointer-coarse:min-h-11 pointer-coarse:min-w-11 pointer-coarse:justify-center', linkLabel: 'truncate max-w-64', separatorIcon: 'size-3.5' }"
+      :ui="{ item: 'shrink-0 last:shrink', link: 'text-sm min-h-(--wb-target) pointer-coarse:min-h-11 pointer-coarse:min-w-11 pointer-coarse:justify-center', linkLabel: 'truncate max-w-64', separatorIcon: 'size-3.5' }"
     />
     <p
       class="min-w-0 flex-1 truncate text-sm font-semibold text-highlighted sm:hidden"

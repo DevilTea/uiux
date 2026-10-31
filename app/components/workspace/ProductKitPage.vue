@@ -437,7 +437,7 @@ onBeforeUnmount(() => {
               >
                 <a
                   :href="link.href"
-                  class="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm font-medium whitespace-nowrap focus-visible:outline-2 focus-visible:outline-primary"
+                  class="flex min-h-(--wb-target) items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm font-medium whitespace-nowrap focus-visible:outline-2 focus-visible:outline-primary"
                   :class="currentSection === link.id ? 'bg-elevated text-highlighted' : 'text-muted hover:bg-elevated/50 hover:text-default'"
                   :aria-current="currentSection === link.id ? 'page' : undefined"
                   :data-product-kit-section-link="link.id"

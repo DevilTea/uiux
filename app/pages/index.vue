@@ -252,7 +252,7 @@ function evidenceLabel(row: ViewRow): { text: string; icon: string; tone: string
                     <ULink
                       v-if="part.to"
                       :to="part.to"
-                      class="text-highlighted hover:underline pointer-coarse:inline-flex pointer-coarse:min-h-11 pointer-coarse:items-center"
+                      class="text-highlighted hover:underline inline-flex min-h-(--wb-target) items-center"
                     >{{ part.text }}</ULink>
                     <button
                       v-else
@@ -370,7 +370,7 @@ function evidenceLabel(row: ViewRow): { text: string; icon: string; tone: string
                   ><span class="sr-only">{{ t('overview.updated') }}</span></span>
                   <ULink
                     :to="viewLocation(row.original.key, { panel: 'readiness' })"
-                    class="font-medium text-highlighted hover:underline pointer-coarse:inline-flex pointer-coarse:min-h-11 pointer-coarse:items-center"
+                    class="font-medium text-highlighted hover:underline inline-flex min-h-(--wb-target) items-center"
                     :data-view-row="row.original.key"
                     @click.stop
                   >
