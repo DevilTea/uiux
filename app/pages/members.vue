@@ -14,6 +14,8 @@ import { describeFetchError, type FetchErrorDetails } from '../utils/fetch-error
 import { memberInitials } from '../utils/member-initials'
 import { keyChanges, keysNoHumanHolds } from '../utils/member-keys'
 import { memberLabelText } from '../utils/member-label'
+import KitBadge from '~/components/kit/ui/Badge.vue'
+import KitButton from '~/components/kit/ui/Button.vue'
 import MemberKeyEditor from '../components/access/MemberKeyEditor.vue'
 import WbErrorDescription from '../components/workbench/WbErrorDescription.vue'
 import WorkbenchPage from '../components/workbench/WorkbenchPage.vue'
@@ -315,14 +317,13 @@ const tableUi = { th: 'text-xs font-medium text-muted whitespace-nowrap', td: 't
             v-if="roster"
             class="flex flex-wrap items-center gap-1.5 text-xs text-muted"
           >
-            <UBadge
-              color="neutral"
+            <KitBadge
+              tone="neutral"
               variant="soft"
-              size="sm"
               class="font-mono"
             >
               {{ t('access.members.rosterLabel', { hint: roster.hint }) }}
-            </UBadge>
+            </KitBadge>
             <span
               class="min-w-0 truncate font-mono"
               translate="no"
@@ -335,15 +336,14 @@ const tableUi = { th: 'text-xs font-medium text-muted whitespace-nowrap', td: 't
             {{ t('access.members.rosterHelp') }}
           </p>
         </div>
-        <UButton
+        <KitButton
           v-if="!adminOriginRefused"
-          color="primary"
-          variant="solid"
-          icon="i-lucide-user-plus"
+          variant="primary"
+          icon="user-plus"
           @click="openAdd()"
         >
           {{ t('access.members.add') }}
-        </UButton>
+        </KitButton>
       </header>
 
       <UAlert
@@ -399,17 +399,16 @@ const tableUi = { th: 'text-xs font-medium text-muted whitespace-nowrap', td: 't
           </p>
         </template>
         <template #actions>
-          <UButton
+          <KitButton
             v-if="roster?.members.some(isSelf)"
-            color="neutral"
             variant="outline"
             size="sm"
-            icon="i-lucide-list-checks"
+            icon="list-checks"
             data-unheld-open-checklist
             @click="openOwnChecklist"
           >
             {{ t('access.members.unheldAction') }}
-          </UButton>
+          </KitButton>
           <UButton
             to="/workspace/access-presets"
             color="neutral"
@@ -441,14 +440,13 @@ const tableUi = { th: 'text-xs font-medium text-muted whitespace-nowrap', td: 't
                 size="2xs"
               />
               <span class="font-medium text-highlighted">{{ row.original.nickname }}</span>
-              <UBadge
+              <KitBadge
                 v-if="isSelf(row.original)"
-                color="neutral"
+                tone="neutral"
                 variant="soft"
-                size="sm"
               >
                 {{ t('access.members.you') }}
-              </UBadge>
+              </KitBadge>
             </div>
           </template>
           <template #kind-cell="{ row }">
@@ -456,41 +454,39 @@ const tableUi = { th: 'text-xs font-medium text-muted whitespace-nowrap', td: 't
           </template>
           <template #label-cell="{ row }">
             <div class="flex flex-wrap items-center gap-1.5">
-              <UBadge
-                color="neutral"
+              <KitBadge
+                tone="neutral"
                 variant="soft"
                 data-member-label
               >
                 {{ labelText(row.original.label) }}
-              </UBadge>
+              </KitBadge>
               <UTooltip
                 v-if="gapsOf(row.original).length > 0"
                 :text="gapText(row.original)"
               >
-                <UBadge
-                  color="warning"
+                <KitBadge
+                  tone="warning"
                   variant="subtle"
-                  icon="i-lucide-triangle-alert"
+                  icon="triangle-alert"
                   data-member-key-gap
                   :aria-description="gapText(row.original)"
                 >
                   {{ t('access.keys.gapBadge') }}
-                </UBadge>
+                </KitBadge>
               </UTooltip>
             </div>
           </template>
           <template #keys-cell="{ row }">
-            <UButton
-              color="neutral"
-              variant="link"
+            <KitButton
+              variant="link-muted"
               size="sm"
-              class="px-0"
               data-member-key-count
               :aria-label="t('access.members.editAccessFor', { nickname: row.original.nickname })"
               @click="openEdit(row.original)"
             >
               {{ t('access.keys.count', { n: row.original.keys.length }, row.original.keys.length) }}
-            </UButton>
+            </KitButton>
           </template>
           <template #actions-cell="{ row }">
             <div class="flex justify-end">
@@ -498,12 +494,12 @@ const tableUi = { th: 'text-xs font-medium text-muted whitespace-nowrap', td: 't
                 :items="memberActions(row.original)"
                 :content="{ align: 'end' }"
               >
-                <UButton
-                  color="neutral"
+                <KitButton
                   variant="ghost"
-                  icon="i-lucide-ellipsis"
+                  icon="ellipsis"
                   size="sm"
-                  :aria-label="t('access.members.actionsLabel', { nickname: row.original.nickname })"
+                  icon-only
+                  :label="t('access.members.actionsLabel', { nickname: row.original.nickname })"
                 />
               </UDropdownMenu>
             </div>
@@ -539,15 +535,14 @@ const tableUi = { th: 'text-xs font-medium text-muted whitespace-nowrap', td: 't
           </template>
           <template #actions-cell="{ row }">
             <div class="flex justify-end">
-              <UButton
-                color="neutral"
+              <KitButton
                 variant="outline"
                 size="xs"
                 :aria-label="t('access.tokens.revokeLabel', { id: row.original.id })"
                 @click="revokeToken(row.original)"
               >
                 {{ t('access.tokens.revoke') }}
-              </UButton>
+              </KitButton>
             </div>
           </template>
         </UTable>
@@ -566,15 +561,14 @@ const tableUi = { th: 'text-xs font-medium text-muted whitespace-nowrap', td: 't
         >
           <template #member-cell="{ row }">
             <span class="font-medium text-highlighted">{{ row.original.member }}</span>
-            <UBadge
+            <KitBadge
               v-if="row.original.current"
-              color="neutral"
+              tone="neutral"
               variant="soft"
-              size="sm"
               class="ms-1.5"
             >
               {{ t('access.sessions.current') }}
-            </UBadge>
+            </KitBadge>
           </template>
           <template #userAgent-cell="{ row }">
             <span
@@ -590,15 +584,14 @@ const tableUi = { th: 'text-xs font-medium text-muted whitespace-nowrap', td: 't
           </template>
           <template #actions-cell="{ row }">
             <div class="flex justify-end">
-              <UButton
-                color="neutral"
+              <KitButton
                 variant="outline"
                 size="xs"
                 :aria-label="t('access.sessions.revokeLabel', { member: row.original.member, device: row.original.userAgent || '—' })"
                 @click="endSession(row.original)"
               >
                 {{ t('access.sessions.revoke') }}
-              </UButton>
+              </KitButton>
             </div>
           </template>
         </UTable>
@@ -679,24 +672,22 @@ const tableUi = { th: 'text-xs font-medium text-muted whitespace-nowrap', td: 't
             </template>
           </UAlert>
           <div class="flex justify-end gap-2">
-            <UButton
-              color="neutral"
+            <KitButton
               variant="outline"
               :disabled="saving"
               @click="editorOpen = false"
             >
               {{ t('common.cancel') }}
-            </UButton>
-            <UButton
+            </KitButton>
+            <KitButton
               type="submit"
-              color="primary"
-              variant="solid"
+              variant="primary"
               :loading="saving"
               :disabled="!editor.nickname.trim()"
               data-member-editor-save
             >
               {{ editor.member ? t('access.members.save') : t('access.members.add') }}
-            </UButton>
+            </KitButton>
           </div>
         </UForm>
       </template>
@@ -721,26 +712,24 @@ const tableUi = { th: 'text-xs font-medium text-muted whitespace-nowrap', td: 't
               data-testid="revealed-token"
               @focus="($event.target as HTMLInputElement).select()"
             />
-            <UButton
-              color="neutral"
+            <KitButton
               variant="outline"
-              icon="i-lucide-copy"
+              icon="copy"
               @click="copy(revealed)"
             >
               {{ t('access.tokens.copy') }}
-            </UButton>
+            </KitButton>
           </div>
           <p class="text-xs text-muted">
             {{ t('access.tokens.mcpHint') }}
           </p>
           <div class="flex justify-end">
-            <UButton
-              color="neutral"
+            <KitButton
               variant="outline"
               @click="closeToken"
             >
               {{ t('common.close') }}
-            </UButton>
+            </KitButton>
           </div>
         </div>
         <UForm
@@ -770,20 +759,18 @@ const tableUi = { th: 'text-xs font-medium text-muted whitespace-nowrap', td: 't
             />
           </UFormField>
           <div class="flex justify-end gap-2">
-            <UButton
-              color="neutral"
+            <KitButton
               variant="outline"
               @click="closeToken"
             >
               {{ t('common.cancel') }}
-            </UButton>
-            <UButton
+            </KitButton>
+            <KitButton
               type="submit"
-              color="primary"
-              variant="solid"
+              variant="primary"
             >
               {{ t('access.members.createToken') }}
-            </UButton>
+            </KitButton>
           </div>
         </UForm>
       </template>
@@ -806,14 +793,13 @@ const tableUi = { th: 'text-xs font-medium text-muted whitespace-nowrap', td: 't
             class="w-full font-mono"
             @focus="($event.target as HTMLInputElement).select()"
           />
-          <UButton
-            color="neutral"
+          <KitButton
             variant="outline"
-            icon="i-lucide-copy"
+            icon="copy"
             @click="copy(invite.url)"
           >
             {{ t('access.tokens.copy') }}
-          </UButton>
+          </KitButton>
         </div>
       </template>
     </UModal>
@@ -826,21 +812,19 @@ const tableUi = { th: 'text-xs font-medium text-muted whitespace-nowrap', td: 't
     >
       <template #body>
         <div class="flex justify-end gap-2">
-          <UButton
-            color="neutral"
+          <KitButton
             variant="outline"
             @click="removing = undefined"
           >
             {{ t('common.cancel') }}
-          </UButton>
-          <UButton
-            color="error"
-            variant="soft"
-            icon="i-lucide-user-minus"
+          </KitButton>
+          <KitButton
+            variant="danger"
+            icon="user-minus"
             @click="removeMember"
           >
             {{ t('access.members.remove') }}
-          </UButton>
+          </KitButton>
         </div>
       </template>
     </UModal>
