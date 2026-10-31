@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { defineShortcuts, useI18n } from '#imports'
+import KitButton from '~/components/kit/ui/Button.vue'
+import KitSkeleton from '~/components/kit/ui/Skeleton.vue'
 import { useWorkbench } from '../../composables/useWorkbench'
 import { useWorkbenchShell } from '../../composables/useWorkbenchShell'
 import { useUiuxClient } from '../../composables/useUiuxClient'
@@ -663,13 +665,12 @@ function switchToBase(): void {
             v-model:open="contextPopoverOpen"
             :content="{ align: 'start', sideOffset: 6 }"
           >
-            <UButton
-              color="neutral"
+            <KitButton
               variant="ghost"
               size="sm"
-              icon="i-lucide-layers"
-              trailing-icon="i-lucide-chevron-down"
-              class="min-w-0 max-w-full"
+              icon="layers"
+              trailing-icon="chevron-down"
+              truncate
               :label="t('ctx.summary', contextSummary)"
               :aria-label="t('ctx.summaryLabel', contextSummary)"
               data-context-summary
@@ -776,16 +777,17 @@ function switchToBase(): void {
             </div>
           </div>
 
-          <USkeleton
+          <KitSkeleton
             v-else-if="!selectedView && loading"
-            class="absolute rounded-xs"
+            class="wb-skeleton absolute animate-pulse"
+            :width="dims.width * scale"
+            :height="dims.height * scale"
+            :radius="2"
             :style="{
               left: `${offset.x}px`,
               top: `${offset.y}px`,
-              width: `${dims.width * scale}px`,
-              height: `${dims.height * scale}px`,
             }"
-            :aria-label="t('common.loading')"
+            :label="t('common.loading')"
           />
 
           <div
@@ -905,27 +907,25 @@ function switchToBase(): void {
           v-if="showFrame && (unplacedThreads.length || notOnCanvasCount)"
           class="pointer-events-none absolute bottom-4 left-3 z-20 flex max-w-[calc(100%-1.5rem)] flex-col items-start gap-1.5 max-md:bottom-16 xl:max-w-[calc(50%-12rem)]"
         >
-          <UButton
+          <KitButton
             v-if="notOnCanvasCount"
-            class="pointer-events-auto bg-default shadow-overlay"
-            color="neutral"
+            class="pointer-events-auto shadow-overlay"
             variant="outline"
             size="sm"
-            icon="i-lucide-eye-off"
+            icon="eye-off"
+            truncate
             :label="t('pins.notOnCanvas', notOnCanvasCount)"
-            :ui="{ label: 'truncate' }"
             data-pins-overcap
             @click="showNotOnCanvas"
           />
-          <UButton
+          <KitButton
             v-if="unplacedThreads.length"
-            class="pointer-events-auto shadow-overlay"
-            color="warning"
+            class="pointer-events-auto text-warning! shadow-overlay"
             variant="soft"
             size="sm"
-            icon="i-lucide-triangle-alert"
+            icon="triangle-alert"
+            truncate
             :label="t('pins.unplaced', unplacedThreads.length)"
-            :ui="{ label: 'truncate' }"
             data-comment-tray
             @click="comments.open(unplacedThreads[0]!.id)"
           />

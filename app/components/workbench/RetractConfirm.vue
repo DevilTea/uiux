@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { nextTick, onMounted, ref, useId } from 'vue'
 import { useI18n } from '#imports'
+import KitButton from '~/components/kit/ui/Button.vue'
 
 /**
  * The inline confirm for "Delete comment" (retract addendum decision 8): it replaces the bubble
@@ -62,8 +63,7 @@ function onKeydown(event: KeyboardEvent): void {
       {{ error }}
     </p>
     <div class="flex justify-end gap-2">
-      <UButton
-        color="neutral"
+      <KitButton
         variant="outline"
         :size="compact ? 'xs' : 'sm'"
         :disabled="busy"
@@ -71,11 +71,10 @@ function onKeydown(event: KeyboardEvent): void {
         data-retract-cancel
         @click="emit('cancel')"
       />
-      <UButton
-        color="error"
-        variant="soft"
+      <KitButton
+        variant="danger"
         :size="compact ? 'xs' : 'sm'"
-        icon="i-lucide-trash-2"
+        icon="trash-2"
         :loading="busy"
         :disabled="busy"
         :label="t('comments.deleteConfirm')"

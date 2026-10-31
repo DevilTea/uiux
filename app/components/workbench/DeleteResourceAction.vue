@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, shallowRef, useTemplateRef } from 'vue'
 import { useI18n, useToast } from '#imports'
+import KitButton from '~/components/kit/ui/Button.vue'
 import { useUiuxClient } from '../../composables/useUiuxClient'
 import { useWorkbench } from '../../composables/useWorkbench'
 import { describeFetchError, type FetchErrorDetails } from '../../utils/fetch-error'
@@ -159,15 +160,14 @@ async function remove(acknowledgeImpact: boolean): Promise<void> {
 
 <template>
   <span class="inline-flex">
-    <UButton
+    <KitButton
       size="xs"
-      color="error"
       variant="ghost"
-      icon="i-lucide-trash-2"
+      icon="trash-2"
       :label="t('deleteResource.action')"
       :aria-label="t('deleteResource.actionNamed', { name })"
       aria-haspopup="dialog"
-      class="pointer-coarse:min-h-11 pointer-coarse:min-w-11 pointer-coarse:justify-center"
+      class="text-error!"
       data-delete-resource
       @click="show"
     />
@@ -247,41 +247,37 @@ async function remove(acknowledgeImpact: boolean): Promise<void> {
       </template>
       <template #footer>
         <div class="flex w-full flex-wrap justify-end gap-2">
-          <UButton
+          <KitButton
             ref="cancelButton"
-            color="neutral"
             variant="outline"
             :disabled="submitting"
             :label="stage === 'confirm' || stage === 'impact' ? t('common.cancel') : t('common.close')"
             data-delete-cancel
             @click="open = false"
           />
-          <UButton
+          <KitButton
             v-if="stage === 'confirm'"
-            color="error"
-            variant="solid"
-            icon="i-lucide-trash-2"
+            variant="danger"
+            icon="trash-2"
             :loading="submitting"
             :disabled="reading || expectedRevision === undefined"
             :label="t('deleteResource.confirm')"
             data-delete-confirm
             @click="remove(false)"
           />
-          <UButton
+          <KitButton
             v-else-if="stage === 'impact'"
-            color="error"
-            variant="solid"
-            icon="i-lucide-trash-2"
+            variant="danger"
+            icon="trash-2"
             :loading="submitting"
             :label="t('deleteResource.impact.confirm')"
             data-delete-acknowledge
             @click="remove(true)"
           />
-          <UButton
+          <KitButton
             v-else-if="stage === 'conflict' || stage === 'locked' || (stage === 'refused' && readFailed)"
-            color="primary"
-            variant="solid"
-            icon="i-lucide-refresh-cw"
+            variant="primary"
+            icon="refresh-cw"
             :loading="reading"
             :label="stage === 'conflict' ? t('deleteResource.conflict.reload') : t('common.retry')"
             data-delete-reload

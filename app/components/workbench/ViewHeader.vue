@@ -5,6 +5,8 @@ import { useAuthoringAccess } from '../../composables/useAuthoringAccess'
 import { useWorkbench } from '../../composables/useWorkbench'
 import { useViewMetadataEditor } from '../../composables/useViewMetadataEditor'
 import { diagnosticText } from '../../utils/diagnostic-copy'
+import KitBadge from '~/components/kit/ui/Badge.vue'
+import KitButton from '~/components/kit/ui/Button.vue'
 import DeleteResourceAction from './DeleteResourceAction.vue'
 import LockBadge from './LockBadge.vue'
 import LockedSaveAlert from './LockedSaveAlert.vue'
@@ -82,21 +84,16 @@ const conflictActions = computed(() => [
       >
         {{ name }}
       </h1>
-      <UBadge
+      <KitBadge
         v-if="view?.resource.feature"
-        color="neutral"
-        variant="subtle"
-        size="sm"
-        icon="i-lucide-tag"
+        icon="tag"
+        truncate
         class="max-w-48"
         data-view-feature
       >
         <span class="sr-only">{{ t('viewHeader.feature') }}</span>
-        <span
-          class="truncate"
-          translate="no"
-        >{{ view.resource.feature }}</span>
-      </UBadge>
+        <span translate="no">{{ view.resource.feature }}</span>
+      </KitBadge>
       <UTooltip
         v-if="canRename"
         :text="heldByOther ? t('viewHeader.lockedHint') : t('viewHeader.edit')"
@@ -107,13 +104,12 @@ const conflictActions = computed(() => [
           :aria-label="heldByOther ? t('viewHeader.lockedHint') : undefined"
           data-view-rename-wrap
         >
-          <UButton
-            color="neutral"
+          <KitButton
             variant="ghost"
             size="xs"
-            icon="i-lucide-pencil"
-            class="pointer-coarse:min-h-11 pointer-coarse:min-w-11 pointer-coarse:justify-center"
-            :aria-label="t('viewHeader.editNamed', { name })"
+            icon="pencil"
+            icon-only
+            :label="t('viewHeader.editNamed', { name })"
             :disabled="heldByOther"
             data-view-rename
             @click="start"
@@ -175,18 +171,16 @@ const conflictActions = computed(() => [
           />
         </UFormField>
         <div class="flex items-center gap-2 self-center sm:pt-5">
-          <UButton
+          <KitButton
             type="submit"
-            color="primary"
-            variant="solid"
+            variant="primary"
             size="sm"
             :label="saving ? t('common.saving') : t('common.save')"
             :loading="saving"
             :disabled="!!conflict || heldByOther"
             data-view-metadata-save
           />
-          <UButton
-            color="neutral"
+          <KitButton
             variant="outline"
             size="sm"
             :label="t('common.cancel')"

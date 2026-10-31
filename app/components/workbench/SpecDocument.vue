@@ -2,6 +2,9 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from '#imports'
 import type { SelectItem } from '@nuxt/ui'
+import KitBadge from '~/components/kit/ui/Badge.vue'
+import KitButton from '~/components/kit/ui/Button.vue'
+import KitIcon from '~/components/kit/ui/Icon.vue'
 import { useWorkbench } from '../../composables/useWorkbench'
 import { useWorkbenchShell } from '../../composables/useWorkbenchShell'
 import { useWorkbenchFormat } from '../../composables/useWorkbenchFormat'
@@ -163,7 +166,7 @@ function decisionColor(status: DecisionRead['status']): 'success' | 'warning' | 
 	return status === 'decided' ? 'success' : status === 'pending' ? 'warning' : 'neutral'
 }
 function decisionIcon(status: DecisionRead['status']): string {
-	return status === 'decided' ? 'i-lucide-check' : status === 'pending' ? 'i-lucide-clock' : 'i-lucide-pause'
+	return status === 'decided' ? 'check' : status === 'pending' ? 'clock' : 'pause'
 }
 function decisionLabel(status: DecisionRead['status']): string {
 	return status === 'decided' ? t('decision.decided') : status === 'pending' ? t('decision.pending') : t('decision.deferred')
@@ -233,37 +236,32 @@ function isHttp(uri: string): boolean {
             :id="`spec-heading-${section.key}`"
             class="min-w-0 text-title font-semibold text-highlighted"
           >
-            <UButton
+            <KitButton
               v-if="isMobile"
-              color="neutral"
-              variant="link"
-              class="min-h-(--wb-target) gap-2 p-0 text-start text-title font-semibold text-highlighted"
-              :trailing-icon="isOpen(section.key) ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'"
-              :aria-expanded="isOpen(section.key)"
+              variant="link-muted"
+              class="min-h-(--wb-target)! gap-2 text-start text-title! font-semibold! text-highlighted! [&>span]:inline-flex [&>span]:items-center [&>span]:gap-2"
+              trailing-icon="chevron-down"
+              :expanded="isOpen(section.key)"
               :aria-controls="`spec-body-${section.key}`"
               @click="toggle(section.key)"
             >
               {{ section.title }}
-              <UBadge
+              <KitBadge
                 v-if="section.count"
-                color="neutral"
                 variant="soft"
-              >
-                {{ section.count }}
-              </UBadge>
-            </UButton>
+                :label="String(section.count)"
+              />
+            </KitButton>
             <span
               v-else
               class="inline-flex items-center gap-2"
             >
               {{ section.title }}
-              <UBadge
+              <KitBadge
                 v-if="section.count"
-                color="neutral"
                 variant="soft"
-              >
-                {{ section.count }}
-              </UBadge>
+                :label="String(section.count)"
+              />
             </span>
           </h3>
           <UTooltip
@@ -271,12 +269,12 @@ function isHttp(uri: string): boolean {
             :text="t('spec.editSection', { section: section.title })"
             :kbds="['e']"
           >
-            <UButton
-              color="neutral"
+            <KitButton
               variant="ghost"
               size="sm"
-              icon="i-lucide-pencil"
-              :aria-label="t('spec.editSection', { section: section.title })"
+              icon="pencil"
+              icon-only
+              :label="t('spec.editSection', { section: section.title })"
               :disabled="!!editor.editing.value"
               data-spec-edit
               @click="startEditing(section.key)"
@@ -304,12 +302,11 @@ function isHttp(uri: string): boolean {
             data-spec-empty
           >
             <span>{{ section.empty }}</span>
-            <UButton
+            <KitButton
               v-if="canEdit && section.editable"
-              color="neutral"
               variant="ghost"
               size="sm"
-              icon="i-lucide-plus"
+              icon="plus"
               :label="t('common.add')"
               :aria-label="t('spec.addSection', { section: section.title })"
               :disabled="!!editor.editing.value"
@@ -340,14 +337,12 @@ function isHttp(uri: string): boolean {
               data-spec-decision
             >
               <div class="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                <UBadge
-                  :color="decisionColor(decision.status)"
+                <KitBadge
+                  :tone="decisionColor(decision.status)"
                   :icon="decisionIcon(decision.status)"
-                  variant="subtle"
                   class="self-center"
-                >
-                  {{ decisionLabel(decision.status) }}
-                </UBadge>
+                  :label="decisionLabel(decision.status)"
+                />
                 <span
                   class="min-w-0 font-medium text-highlighted"
                   :lang="authoredLang"
@@ -373,13 +368,11 @@ function isHttp(uri: string): boolean {
                 class="flex flex-wrap gap-1.5"
                 data-decision-actions
               >
-                <UButton
+                <KitButton
                   v-for="action in offeredActions(decision.status)"
                   :key="action"
-                  color="neutral"
                   variant="outline"
                   size="sm"
-                  class="pointer-coarse:min-h-11"
                   :label="actionLabel(action)"
                   :aria-label="actionAria(action, decision)"
                   :loading="decisionActions.busy.value === decision.id"
@@ -402,9 +395,10 @@ function isHttp(uri: string): boolean {
                   @click="emit('openThread', decisionSourceThread(decision)!)"
                 >
                   {{ t('spec.fromReview') }}
-                  <UIcon
-                    name="i-lucide-chevron-right"
-                    class="size-3.5 rtl:rotate-180"
+                  <KitIcon
+                    name="chevron-right"
+                    :size="14"
+                    class="rtl:rotate-180"
                   />
                 </ULink>
               </p>
@@ -426,9 +420,10 @@ function isHttp(uri: string): boolean {
               class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5"
             >
               <template v-if="reference.kind === 'external'">
-                <UIcon
-                  name="i-lucide-external-link"
-                  class="size-3.5 shrink-0 text-dimmed"
+                <KitIcon
+                  name="external-link"
+                  :size="14"
+                  class="text-dimmed"
                 />
                 <ULink
                   v-if="isHttp(reference.uri)"
@@ -448,9 +443,10 @@ function isHttp(uri: string): boolean {
                 >{{ reference.label }}</span>
               </template>
               <template v-else>
-                <UIcon
-                  name="i-lucide-app-window"
-                  class="size-3.5 shrink-0 text-dimmed"
+                <KitIcon
+                  name="app-window"
+                  :size="14"
+                  class="text-dimmed"
                 />
                 <ULink
                   v-if="reference.to"
@@ -463,23 +459,18 @@ function isHttp(uri: string): boolean {
                   v-else
                   class="text-sm text-muted"
                 >{{ t('spec.ref.viewMissing') }}</span>
-                <UBadge
+                <KitBadge
                   v-if="reference.variantName"
-                  color="neutral"
-                  variant="soft"
-                  class="font-mono"
+                  variant="mono"
                   translate="no"
-                >
-                  {{ reference.variantName }}
-                </UBadge>
+                  :label="reference.variantName"
+                />
               </template>
-              <UBadge
+              <KitBadge
                 v-if="reference.relation"
-                color="neutral"
                 variant="soft"
-              >
-                {{ reference.relation }}
-              </UBadge>
+                :label="reference.relation"
+              />
             </li>
           </ul>
 

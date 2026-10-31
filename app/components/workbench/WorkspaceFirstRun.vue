@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from '#imports'
+import KitButton from '~/components/kit/ui/Button.vue'
 import { useAccess } from '../../composables/useAccess'
 import { useWorkbenchFeedback } from '../../composables/useWorkbenchFeedback'
 import { copyText } from '../../utils/copy-text'
@@ -60,11 +61,10 @@ async function copy(text: string): Promise<void> {
               class="min-w-0 truncate rounded-md border border-default bg-muted px-2 py-1 font-mono text-xs text-highlighted"
               data-first-run-endpoint
             >{{ endpoint }}</code>
-            <UButton
-              color="primary"
-              variant="solid"
+            <KitButton
+              variant="primary"
               size="sm"
-              icon="i-lucide-copy"
+              icon="copy"
               :label="t('firstRun.copyEndpoint')"
               data-first-run-copy
               @click="copy(endpoint)"
@@ -80,12 +80,12 @@ async function copy(text: string): Promise<void> {
           >
             <code class="min-w-0 flex-1 rounded-md bg-muted px-2 py-1 font-mono text-xs break-all text-toned">{{ command }}</code>
             <UTooltip :text="t('firstRun.copyCommand')">
-              <UButton
-                color="neutral"
+              <KitButton
                 variant="ghost"
                 size="xs"
-                icon="i-lucide-copy"
-                :aria-label="t('firstRun.copyCommand')"
+                icon="copy"
+                icon-only
+                :label="t('firstRun.copyCommand')"
                 @click="copy(command)"
               />
             </UTooltip>

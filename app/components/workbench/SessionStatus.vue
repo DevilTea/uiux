@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from '#imports'
+import KitButton from '~/components/kit/ui/Button.vue'
 import { useWorkbench } from '../../composables/useWorkbench'
 
 /**
@@ -14,13 +15,13 @@ const { preview } = useWorkbench()
 const status = computed(() => {
 	switch (preview.sessionStatus.value) {
 		case 'live':
-			return { color: 'neutral' as const, dot: 'bg-(--ui-text-muted)', label: t('session.live'), hint: t('session.liveHint') }
+			return { tone: undefined, dot: 'bg-(--ui-text-muted)', label: t('session.live'), hint: t('session.liveHint') }
 		case 'reconnecting':
-			return { color: 'warning' as const, dot: 'bg-warning', label: t('session.reconnecting'), hint: t('session.reconnectingHint') }
+			return { tone: 'text-warning!', dot: 'bg-warning', label: t('session.reconnecting'), hint: t('session.reconnectingHint') }
 		case 'stopped':
-			return { color: 'error' as const, dot: 'bg-error', label: t('session.stopped'), hint: t('session.stoppedHint') }
+			return { tone: 'text-error!', dot: 'bg-error', label: t('session.stopped'), hint: t('session.stoppedHint') }
 		default:
-			return { color: 'neutral' as const, dot: 'bg-accented', label: t('session.connecting'), hint: t('session.connectingHint') }
+			return { tone: undefined, dot: 'bg-accented', label: t('session.connecting'), hint: t('session.connectingHint') }
 	}
 })
 const pending = computed(() => preview.sessionStatus.value === 'connecting' || preview.sessionStatus.value === 'reconnecting')
@@ -28,12 +29,11 @@ const pending = computed(() => preview.sessionStatus.value === 'connecting' || p
 
 <template>
   <UPopover :content="{ align: 'end', sideOffset: 6 }">
-    <UButton
-      :color="status.color"
+    <KitButton
       variant="ghost"
       size="sm"
-      class="gap-1.5 px-2 font-medium"
-      :class="status.color === 'neutral' ? 'text-muted' : ''"
+      class="gap-1.5 px-2 font-medium [&>span]:inline-flex [&>span]:items-center [&>span]:gap-1.5"
+      :class="status.tone"
       :aria-label="t('session.chipLabel', { status: status.label })"
       data-session-status
       :data-status="preview.sessionStatus.value"
@@ -47,7 +47,7 @@ const pending = computed(() => preview.sessionStatus.value === 'connecting' || p
         role="status"
         class="text-xs"
       >{{ status.label }}</span>
-    </UButton>
+    </KitButton>
 
     <template #content>
       <div class="grid w-72 gap-3 p-3">
@@ -69,12 +69,11 @@ const pending = computed(() => preview.sessionStatus.value === 'connecting' || p
           </dd>
         </dl>
         <!-- The same Retry Preview action as the inline diagnostic (Rule 01a11687-386c-764f-98fd-cf19dc3d0013). -->
-        <UButton
+        <KitButton
           v-if="preview.sessionStatus.value !== 'live'"
-          color="neutral"
           variant="outline"
           size="sm"
-          :icon="preview.retryDisabled.value ? 'i-lucide-loader-circle' : 'i-lucide-rotate-ccw'"
+          :icon="preview.retryDisabled.value ? 'loader-circle' : 'rotate-ccw'"
           class="justify-self-start"
           :class="preview.retryDisabled.value ? 'cursor-not-allowed opacity-75 [&_svg]:animate-spin motion-reduce:[&_svg]:animate-none' : ''"
           :aria-disabled="preview.retryDisabled.value ? 'true' : undefined"

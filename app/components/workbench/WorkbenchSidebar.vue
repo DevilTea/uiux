@@ -5,6 +5,9 @@ import type { NavigationMenuItem } from '@nuxt/ui'
 import { useWorkbench } from '../../composables/useWorkbench'
 import { useMediaQuery, WORKBENCH_BREAKPOINTS } from '../../composables/useMediaQuery'
 import { flowPath, viewLocation } from '../../utils/workbench-routes'
+import KitBadge from '~/components/kit/ui/Badge.vue'
+import KitButton from '~/components/kit/ui/Button.vue'
+import KitIcon from '~/components/kit/ui/Icon.vue'
 import WidgetTree from './WidgetTree.vue'
 import WorkspaceMenu from './WorkspaceMenu.vue'
 import FlowCreateModal from '../flows/FlowCreateModal.vue'
@@ -121,16 +124,13 @@ const createFlowOpen = ref(false)
     >
       <template v-if="openViewId && !showViewList">
         <div class="shrink-0 px-2">
-          <UButton
-            color="neutral"
+          <KitButton
             variant="ghost"
             size="sm"
-            icon="i-lucide-arrow-left"
-            class="text-muted"
+            icon="arrow-left"
+            :label="t('shell.allViews')"
             @click="showViewList = true"
-          >
-            {{ t('shell.allViews') }}
-          </UButton>
+          />
           <p class="truncate px-2 pt-1 text-title font-semibold text-highlighted">
             {{ selectedView?.resource.name || t('common.unnamed') }}
           </p>
@@ -164,9 +164,9 @@ const createFlowOpen = ref(false)
               active-class="bg-selection-subtle text-selection-text"
               @click="showViewList = false"
             >
-              <UIcon
-                name="i-lucide-app-window"
-                class="size-4 shrink-0 text-dimmed"
+              <KitIcon
+                name="app-window"
+                class="text-dimmed"
               />
               <span class="min-w-0 flex-1">
                 <span class="block truncate">{{ view.summary.name || t('common.unnamed') }}</span>
@@ -175,16 +175,13 @@ const createFlowOpen = ref(false)
                   class="block truncate font-mono text-xs text-dimmed"
                 >{{ view.summary.feature }}</span>
               </span>
-              <UBadge
+              <KitBadge
                 v-if="view.diagnosticCount"
-                color="warning"
-                variant="subtle"
-                size="sm"
-                icon="i-lucide-triangle-alert"
+                tone="warning"
+                icon="triangle-alert"
                 :aria-label="t('workbench.views.diagnosticCount', view.diagnosticCount)"
-              >
-                {{ view.diagnosticCount }}
-              </UBadge>
+                :label="String(view.diagnosticCount)"
+              />
             </ULink>
           </li>
           <li
@@ -203,12 +200,11 @@ const createFlowOpen = ref(false)
       :aria-label="t('flows.list.label')"
     >
       <li v-if="canCreateFlow">
-        <UButton
-          color="neutral"
+        <KitButton
           variant="ghost"
           size="sm"
-          icon="i-lucide-plus"
-          class="w-full text-muted"
+          icon="plus"
+          full-width
           :label="t('flows.newFlow')"
           data-flow-new
           @click="createFlowOpen = true"
@@ -227,9 +223,9 @@ const createFlowOpen = ref(false)
           class="flex min-h-7 items-center gap-2 rounded-md px-2 py-1 text-sm text-default hover:bg-muted"
           :class="openFlowId === flow.key ? 'bg-selection-subtle text-selection-text' : ''"
         >
-          <UIcon
-            name="i-lucide-workflow"
-            class="size-4 shrink-0 text-dimmed"
+          <KitIcon
+            name="workflow"
+            class="text-dimmed"
           />
           <span class="truncate">{{ flow.summary.name || t('flows.list.unnamed') }}</span>
         </ULink>

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useI18n } from '#imports'
+import KitBadge from '~/components/kit/ui/Badge.vue'
 import { usePendingDecisions } from '../../composables/usePendingDecisions'
 import { viewLocation } from '../../utils/workbench-routes'
 import type { PendingDecisionRow } from '../../utils/decisions'
@@ -65,20 +66,18 @@ function to(row: PendingDecisionRow) {
           <span class="font-medium text-highlighted">{{ row.decision.question }}</span>
           <span class="flex flex-wrap items-center gap-x-2 text-xs text-muted">
             <span>{{ t('decision.pendingList.inView', { view: row.viewName || t('common.unnamed') }) }}</span>
-            <UBadge
+            <KitBadge
               v-if="row.target.variant"
-              color="neutral"
-              variant="soft"
-              class="font-mono"
+              variant="mono"
               translate="no"
-            >{{ row.target.variant }}</UBadge>
-            <UBadge
+              :label="row.target.variant"
+            />
+            <KitBadge
               v-if="row.target.widgetId"
-              color="neutral"
-              variant="soft"
-              class="font-mono"
+              variant="mono"
               translate="no"
-            >{{ row.target.widgetId }}</UBadge>
+              :label="row.target.widgetId"
+            />
           </span>
         </ULink>
       </li>

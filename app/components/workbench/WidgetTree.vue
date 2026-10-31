@@ -3,6 +3,7 @@ import { isWidgetAnchor } from '../../../src/domain/reviews/schema'
 import { computed, ref, watch } from 'vue'
 import { useI18n } from '#imports'
 import type { ContextMenuItem, TreeItem } from '@nuxt/ui'
+import KitIcon from '~/components/kit/ui/Icon.vue'
 import { useWorkbench } from '../../composables/useWorkbench'
 import { useMediaQuery, WORKBENCH_BREAKPOINTS } from '../../composables/useMediaQuery'
 import type { WidgetTreeNode } from '../../../src/preview/widget-tree'
@@ -32,17 +33,17 @@ type WidgetTreeItem = TreeItem & {
 /** Lucide glyphs for the reference Catalog's Widget types; anything else is a generic box. */
 function typeIcon(type: string, hasChildren: boolean): string {
 	switch (type) {
-		case 'RootShell': return 'i-lucide-frame'
-		case 'Stack': return 'i-lucide-rows-3'
-		case 'Panel': return 'i-lucide-panel-top'
-		case 'Text': return 'i-lucide-type'
-		case 'Badge': return 'i-lucide-tag'
-		case 'Button': return 'i-lucide-rectangle-horizontal'
-		case 'Divider': return 'i-lucide-minus'
-		case 'NavItem': return 'i-lucide-link'
-		case 'TextInput': return 'i-lucide-text-cursor-input'
-		case 'Image': return 'i-lucide-image'
-		default: return hasChildren ? 'i-lucide-box' : 'i-lucide-square'
+		case 'RootShell': return 'frame'
+		case 'Stack': return 'rows-3'
+		case 'Panel': return 'panel-top'
+		case 'Text': return 'type'
+		case 'Badge': return 'tag'
+		case 'Button': return 'rectangle-horizontal'
+		case 'Divider': return 'minus'
+		case 'NavItem': return 'link'
+		case 'TextInput': return 'text-cursor-input'
+		case 'Image': return 'image'
+		default: return hasChildren ? 'box' : 'square'
 	}
 }
 
@@ -207,9 +208,10 @@ const missingWidgetId = computed(() => rootItem.value && selectedWidgetId.value 
           @keydown="onTreeKeydown"
         >
           <template #item-leading="{ item }">
-            <UIcon
+            <KitIcon
               :name="typeIcon(item.type, !!item.children?.length)"
-              class="size-3.5 shrink-0 text-dimmed group-data-selected/row:text-selection-text"
+              :size="14"
+              class="text-dimmed group-data-selected/row:text-selection-text"
             />
           </template>
           <template #item-label="{ item }">
@@ -228,9 +230,9 @@ const missingWidgetId = computed(() => rootItem.value && selectedWidgetId.value 
                 v-if="commentCounts.get(item.id)"
                 class="inline-flex items-center gap-0.5 text-xs font-medium text-annotation"
               >
-                <UIcon
-                  name="i-lucide-message-circle"
-                  class="size-3"
+                <KitIcon
+                  name="message-circle"
+                  :size="12"
                 />{{ commentCounts.get(item.id) }}
                 <span class="sr-only">{{ t('workbench.tree.commentCount', commentCounts.get(item.id) ?? 0) }}</span>
               </span>

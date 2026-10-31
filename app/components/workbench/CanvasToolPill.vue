@@ -2,6 +2,7 @@
 import { computed, nextTick, ref } from 'vue'
 import { useI18n } from '#imports'
 import { useWorkbenchShell } from '../../composables/useWorkbenchShell'
+import KitButton from '~/components/kit/ui/Button.vue'
 
 /**
  * The floating canvas tool palette (DESIGN.md "Canvas tool palette"; brief b, section 10):
@@ -36,9 +37,9 @@ const { t } = useI18n()
 const shell = useWorkbenchShell()
 
 const tools = computed(() => [
-	{ id: 'select' as const, icon: 'i-lucide-mouse-pointer-2', label: t('tool.select'), hint: undefined, kbd: 'V' },
-	{ id: 'comment' as const, icon: 'i-lucide-message-circle-plus', label: t('tool.comment'), hint: undefined, kbd: 'C' },
-	{ id: 'interact' as const, icon: 'i-lucide-hand', label: t('tool.interact'), hint: t('tool.interactHint'), kbd: 'I' },
+	{ id: 'select' as const, icon: 'mouse-pointer-2', label: t('tool.select'), hint: undefined, kbd: 'V' },
+	{ id: 'comment' as const, icon: 'message-circle-plus', label: t('tool.comment'), hint: undefined, kbd: 'C' },
+	{ id: 'interact' as const, icon: 'hand', label: t('tool.interact'), hint: t('tool.interactHint'), kbd: 'I' },
 ].filter(tool => tool.id !== 'comment' || props.comments).map(tool => ({
 	...tool,
 	// An active Comment tool always stays clickable, so it can be turned off.
@@ -65,12 +66,15 @@ async function move(direction: 1 | -1 | 'first' | 'last'): Promise<void> {
 	buttons.value[focusIndex.value]?.$el.focus()
 }
 
-function toolClass(id: CanvasToolId, blocked: string | undefined): string {
-	if (blocked) return 'text-dimmed cursor-not-allowed hover:bg-transparent'
-	if (props.active !== id) return 'text-muted'
-	return id === 'comment'
-		? 'bg-comment-subtle text-annotation ring-1 ring-inset ring-annotation/35 hover:bg-comment-subtle'
-		: 'bg-primary text-inverted hover:bg-primary'
+/** The active tool is the one solid region (Comment in the annotation look); the others are quiet. */
+function toolVariant(id: CanvasToolId, blocked: string | undefined): 'ghost' | 'primary' | 'annotation' {
+	if (blocked || props.active !== id) return 'ghost'
+	return id === 'comment' ? 'annotation' : 'primary'
+}
+
+function toolClass(blocked: string | undefined): string | undefined {
+	// The Kit's own colors are unlayered, so an unavailable tool needs `!` to dim and stay flat.
+	return blocked ? 'text-dimmed! cursor-not-allowed hover:bg-transparent!' : undefined
 }
 
 function choose(id: CanvasToolId, blocked: string | undefined): void {
@@ -104,12 +108,12 @@ function commentOnView(): void {
         :text="tool.blocked ?? tool.hint ?? tool.label"
         :kbds="tool.blocked || !keys ? undefined : [tool.kbd]"
       >
-        <UButton
+        <KitButton
           ref="buttons"
-          color="neutral"
-          variant="ghost"
+          :variant="toolVariant(tool.id, tool.blocked)"
           size="sm"
           :icon="tool.icon"
+          :kbd="keys && !(tool.blocked && !disabledReason) ? tool.kbd : undefined"
           :aria-pressed="active === tool.id"
           :aria-keyshortcuts="keys ? tool.kbd : undefined"
           :aria-disabled="tool.blocked ? 'true' : undefined"
@@ -117,21 +121,15 @@ function commentOnView(): void {
           :data-tool="tool.id"
           :data-blocked="tool.blocked ? '' : undefined"
           :tabindex="tabIndexFor(index)"
-          :class="toolClass(tool.id, tool.blocked)"
-          :ui="{ base: 'gap-1.5 px-2', label: 'max-sm:sr-only' }"
+          class="max-sm:[&>kbd]:hidden! pointer-coarse:[&>kbd]:hidden! max-sm:[&>span]:sr-only"
+          :class="toolClass(tool.blocked)"
           @focus="focusIndex = index"
           @blur="focusIndex = -1"
           @click="choose(tool.id, tool.blocked)"
         >
+          <!-- A tool that can't be used here at all (role, unsupported schema, phone) shows no key to press (the `kbd` prop). -->
           {{ tool.label }}
-          <!-- A tool that can't be used here at all (role, unsupported schema, phone) shows no key to press. -->
-          <UKbd
-            v-if="keys && !(tool.blocked && !disabledReason)"
-            :value="tool.kbd"
-            variant="outline"
-            class="max-sm:hidden pointer-coarse:hidden bg-transparent text-current ring-current/35"
-          />
-        </UButton>
+        </KitButton>
       </UTooltip>
     </div>
     <template v-if="comments || pinsHidden !== undefined">
@@ -143,15 +141,15 @@ function commentOnView(): void {
         v-if="comments"
         :text="viewCommentBlocked ?? t('comments.commentOnView')"
       >
-        <UButton
-          color="neutral"
+        <KitButton
           variant="ghost"
           size="sm"
-          icon="i-lucide-message-square-plus"
-          :aria-label="t('comments.commentOnView')"
+          icon="message-square-plus"
+          icon-only
+          :label="t('comments.commentOnView')"
           :aria-disabled="viewCommentBlocked ? 'true' : undefined"
           :aria-description="viewCommentBlocked"
-          :class="viewCommentBlocked ? 'text-dimmed cursor-not-allowed hover:bg-transparent' : 'text-muted'"
+          :class="toolClass(viewCommentBlocked)"
           data-comment-on-view="pill"
           :data-blocked="viewCommentBlocked ? '' : undefined"
           @click="commentOnView"
@@ -162,15 +160,14 @@ function commentOnView(): void {
         :text="pinsHidden ? t('pins.show') : t('pins.hide')"
         :kbds="keys ? ['shift', 'C'] : undefined"
       >
-        <UButton
-          color="neutral"
+        <KitButton
           variant="ghost"
           size="sm"
-          :icon="pinsHidden ? 'i-lucide-eye-off' : 'i-lucide-eye'"
-          :aria-label="t('pins.toggle')"
+          :icon="pinsHidden ? 'eye-off' : 'eye'"
+          icon-only
+          :label="t('pins.toggle')"
           :aria-pressed="!pinsHidden"
           :aria-keyshortcuts="keys ? 'Shift+C' : undefined"
-          class="text-muted"
           data-pins-toggle
           @click="emit('togglePins')"
         />

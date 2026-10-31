@@ -2,6 +2,8 @@
 import { computed } from 'vue'
 import { navigateTo, useI18n } from '#imports'
 import type { DropdownMenuItem } from '@nuxt/ui'
+import KitBadge from '~/components/kit/ui/Badge.vue'
+import KitButton from '~/components/kit/ui/Button.vue'
 import { useAccess } from '../../composables/useAccess'
 import { useWorkbenchFeedback } from '../../composables/useWorkbenchFeedback'
 import { memberInitials } from '../../utils/member-initials'
@@ -46,10 +48,9 @@ const items = computed<DropdownMenuItem[][]>(() => {
     :items="items"
     :content="{ align: 'end', sideOffset: 6 }"
   >
-    <UButton
-      color="neutral"
+    <KitButton
       variant="ghost"
-      class="gap-2 px-1.5"
+      class="gap-2 px-1.5! pointer-coarse:min-w-11 [&>span]:inline-flex [&>span]:items-center [&>span]:gap-2"
       data-testid="member-chip"
       :aria-label="t('access.chip.label', { nickname: member.nickname, kind: t(`access.kind.${member.kind}`), label: labelText })"
     >
@@ -60,15 +61,13 @@ const items = computed<DropdownMenuItem[][]>(() => {
         :ui="{ fallback: 'font-semibold text-xs text-default' }"
       />
       <span class="hidden max-w-32 truncate lg:inline">{{ member.nickname }}</span>
-      <UBadge
-        color="neutral"
+      <KitBadge
         variant="soft"
-        size="sm"
-        class="hidden lg:inline-flex"
+        class="max-lg:hidden!"
         data-member-label
       >
         {{ labelText }}
-      </UBadge>
-    </UButton>
+      </KitBadge>
+    </KitButton>
   </UDropdownMenu>
 </template>

@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import { useI18n } from '#imports'
 import type { ReviewRenderContext } from '../../../src/domain/reviews/schema'
 import { resolveRecordedContext } from '../../../src/preview/render-context-options'
+import KitIcon from '~/components/kit/ui/Icon.vue'
 import { useWorkbench } from '../../composables/useWorkbench'
 import { recordedContextParts, recordedContextText } from '../../utils/thread-render-context'
 
@@ -33,10 +34,9 @@ const title = computed(() => t('threadContext.label', { context: text.value }))
     data-thread-context
     :data-context-label="text"
   >
-    <UIcon
-      name="i-lucide-scan-eye"
-      class="size-3.5 shrink-0"
-      aria-hidden="true"
+    <KitIcon
+      name="scan-eye"
+      :size="14"
     />
     <span class="sr-only">{{ t('threadContext.srPrefix') }}</span>
     <span class="min-w-0 truncate">

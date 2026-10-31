@@ -2,6 +2,9 @@
 import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from '#imports'
 import type { RadioGroupItem } from '@nuxt/ui'
+import KitButton from '~/components/kit/ui/Button.vue'
+import KitIcon from '~/components/kit/ui/Icon.vue'
+import { useKbdHints } from '../../composables/useKbdHints'
 import { useReviewInbox } from '../../composables/useReviewInbox'
 import { useAccess } from '../../composables/useAccess'
 import WbErrorDescription from './WbErrorDescription.vue'
@@ -17,6 +20,7 @@ const open = defineModel<boolean>('open', { default: false })
 const emit = defineEmits<{ (e: 'created', threadId: string): void }>()
 
 const { t } = useI18n()
+const kbdHint = useKbdHints()
 const inbox = useReviewInbox()
 const access = useAccess()
 
@@ -83,11 +87,7 @@ function onKeydown(event: KeyboardEvent): void {
           class="flex items-center gap-1.5 text-sm text-muted"
           data-new-comment-where
         >
-          <UIcon
-            name="i-lucide-globe"
-            class="size-4 shrink-0"
-            aria-hidden="true"
-          />
+          <KitIcon name="globe" />
           {{ t('comments.workspaceComment') }} · {{ t('inbox.compose.workspaceHint') }}
         </p>
         <UFormField
@@ -125,32 +125,20 @@ function onKeydown(event: KeyboardEvent): void {
           </template>
         </UAlert>
         <div class="flex justify-end gap-2">
-          <UButton
-            color="neutral"
+          <KitButton
             variant="ghost"
             :label="t('common.cancel')"
             @click="open = false"
           />
-          <UButton
+          <KitButton
             type="submit"
-            color="primary"
-            variant="solid"
+            variant="primary"
+            :label="inbox.composeState.value.created ? t('common.retry') : t('comment.send')"
+            :kbd="kbdHint.submit.value"
             :loading="posting"
             :disabled="!text.trim()"
             data-new-comment-submit
-          >
-            {{ inbox.composeState.value.created ? t('common.retry') : t('comment.send') }}
-            <UKbd
-              value="meta"
-              size="sm"
-              class="pointer-coarse:hidden"
-            />
-            <UKbd
-              value="enter"
-              size="sm"
-              class="-ms-1 pointer-coarse:hidden"
-            />
-          </UButton>
+          />
         </div>
       </form>
     </template>

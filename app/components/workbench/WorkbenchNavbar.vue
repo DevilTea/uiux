@@ -5,6 +5,7 @@ import type { BreadcrumbItem } from '@nuxt/ui'
 import { useWorkbench } from '../../composables/useWorkbench'
 import { useWorkbenchShell } from '../../composables/useWorkbenchShell'
 import { flowPath, viewPath, VIEWS_LOCATION } from '../../utils/workbench-routes'
+import KitButton from '~/components/kit/ui/Button.vue'
 import WorkbenchPreferences from './WorkbenchPreferences.vue'
 import MemberChip from './MemberChip.vue'
 import WorkspaceMenu from './WorkspaceMenu.vue'
@@ -62,12 +63,12 @@ const breadcrumb = computed<BreadcrumbItem[]>(() => {
     data-landmark="banner"
     class="box-content flex h-(--ui-header-height) shrink-0 items-center gap-2 border-b border-default bg-default ps-[max(0.5rem,env(safe-area-inset-left))] pe-[max(0.75rem,env(safe-area-inset-right))] pt-[env(safe-area-inset-top)]"
   >
-    <UButton
-      color="neutral"
+    <KitButton
       variant="ghost"
-      icon="i-lucide-menu"
-      class="md:hidden"
-      :aria-label="t('shell.toggleSidebar')"
+      icon="menu"
+      icon-only
+      class="md:hidden!"
+      :label="t('shell.toggleSidebar')"
       @click="shell.toggleSidebar()"
     />
     <!-- Phones keep the bar to ☰, the page title and global actions; the Workspace mark moves into the ☰ menu. -->

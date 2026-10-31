@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { useColorMode, useI18n } from '#imports'
 import type { DropdownMenuItem } from '@nuxt/ui'
+import KitButton from '~/components/kit/ui/Button.vue'
 import { useWorkbenchShell } from '../../composables/useWorkbenchShell'
 import {
 	clearSavedWorkbenchLocale,
@@ -95,11 +96,11 @@ const items = computed<DropdownMenuItem[][]>(() => {
     :ui="{ content: 'w-72', label: 'flex-col items-start gap-0.5', itemDescription: 'text-xs text-muted whitespace-normal' }"
   >
     <UTooltip :text="t('prefs.title')">
-      <UButton
-        color="neutral"
+      <KitButton
         variant="ghost"
-        icon="i-lucide-sliders-horizontal"
-        :aria-label="t('prefs.title')"
+        icon="sliders-horizontal"
+        icon-only
+        :label="t('prefs.title')"
       />
     </UTooltip>
   </UDropdownMenu>

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n, useRoute } from '#imports'
+import KitIcon from '~/components/kit/ui/Icon.vue'
 import { useWorkbench } from '../../composables/useWorkbench'
 
 /**
@@ -14,9 +15,9 @@ const route = useRoute()
 const { unresolvedReviewCount } = useWorkbench()
 
 const items = computed(() => [
-	{ to: '/', label: t('nav.overview'), icon: 'i-lucide-layout-dashboard', active: route.path === '/' || route.path.startsWith('/views') },
-	{ to: '/flows', label: t('nav.flows'), icon: 'i-lucide-workflow', active: route.path.startsWith('/flows') },
-	{ to: '/reviews', label: t('nav.reviews'), icon: 'i-lucide-inbox', active: route.path.startsWith('/reviews'), count: unresolvedReviewCount.value },
+	{ to: '/', label: t('nav.overview'), icon: 'layout-dashboard', active: route.path === '/' || route.path.startsWith('/views') },
+	{ to: '/flows', label: t('nav.flows'), icon: 'workflow', active: route.path.startsWith('/flows') },
+	{ to: '/reviews', label: t('nav.reviews'), icon: 'inbox', active: route.path.startsWith('/reviews'), count: unresolvedReviewCount.value },
 ])
 </script>
 
@@ -46,9 +47,9 @@ const items = computed(() => [
             aria-hidden="true"
           />
           <span class="relative">
-            <UIcon
+            <KitIcon
               :name="item.icon"
-              class="size-5"
+              :size="20"
               :class="item.active ? 'text-primary' : ''"
             />
             <span

@@ -13,6 +13,12 @@ import { isDismissal } from '../../../utils/review-inbox'
 import { latestEditableMessageId } from '../../../utils/review-message-actions'
 import { useMediaQuery, WORKBENCH_BREAKPOINTS } from '../../../composables/useMediaQuery'
 import { isLockedError } from '../../../utils/fetch-error'
+import KitBadge from '~/components/kit/ui/Badge.vue'
+import KitButtonGroup from '~/components/kit/ui/ButtonGroup.vue'
+import KitButton from '~/components/kit/ui/Button.vue'
+import KitIcon from '~/components/kit/ui/Icon.vue'
+import KitSkeleton from '~/components/kit/ui/Skeleton.vue'
+import { useKbdHints } from '../../../composables/useKbdHints'
 import LockedSaveAlert from '../LockedSaveAlert.vue'
 import RetractConfirm from '../RetractConfirm.vue'
 import ReviewMessage from '../ReviewMessage.vue'
@@ -36,6 +42,7 @@ import { effectiveRenderContext } from '../../../../src/preview/render-context-o
 const props = defineProps<{ threadId: string }>()
 
 const { t, locale } = useI18n()
+const kbdHint = useKbdHints()
 const workbench = useWorkbench()
 const comments = useCanvasComments()!
 const { preview, widgetTreeResult, selectedVariant, selectedLocale, selectedViewportId, selectedThemeId } = workbench
@@ -51,8 +58,8 @@ const widgetType = computed(() => {
 })
 
 const status = computed(() => thread.value?.dismissed ? 'dismissed' : statusKey(thread.value?.status ?? 'open'))
-const STATUS_ICON = { open: 'i-lucide-circle-dot', ready: 'i-lucide-eye', resolved: 'i-lucide-circle-check', dismissed: 'i-lucide-circle-slash' } as const
-const STATUS_COLOR = { open: 'annotation', ready: 'info', resolved: 'success', dismissed: 'neutral' } as const
+const STATUS_ICON = { open: 'circle-dot', ready: 'eye', resolved: 'circle-check', dismissed: 'circle-slash' } as const
+const STATUS_TONE = { open: 'annotation', ready: 'info', resolved: 'success', dismissed: 'neutral' } as const
 const STATUS_LABEL = { open: 'thread.status.open', ready: 'thread.status.ready', resolved: 'thread.status.resolved', dismissed: 'inbox.group.dismissed' } as const
 
 const actorName = useActorName()
@@ -278,13 +285,11 @@ watch(() => props.threadId, () => {
     :data-thread-muted="muted ? '' : undefined"
   >
     <div class="flex min-w-0 items-center gap-2">
-      <UBadge
-        :color="STATUS_COLOR[status]"
+      <KitBadge
+        :tone="STATUS_TONE[status]"
         variant="soft"
-        size="sm"
         :icon="STATUS_ICON[status]"
         :label="t(STATUS_LABEL[status])"
-        class="shrink-0"
       />
       <span
         id="thread-bubble-title"
@@ -297,20 +302,20 @@ watch(() => props.threadId, () => {
         :items="overflow"
         :content="{ align: 'end', onCloseAutoFocus: keepConfirmFocus }"
       >
-        <UButton
-          color="neutral"
+        <KitButton
           variant="ghost"
           size="xs"
-          icon="i-lucide-ellipsis"
-          :aria-label="t('comments.more')"
+          icon="ellipsis"
+          icon-only
+          :label="t('comments.more')"
         />
       </UDropdownMenu>
-      <UButton
-        color="neutral"
+      <KitButton
         variant="ghost"
         size="xs"
-        icon="i-lucide-x"
-        :aria-label="t('common.close')"
+        icon="x"
+        icon-only
+        :label="t('common.close')"
         data-thread-close
         @click="comments.close()"
       />
@@ -326,25 +331,21 @@ watch(() => props.threadId, () => {
         class="text-muted"
         data-thread-muted-note
       >{{ t('threadContext.mutedNote') }}</span>
-      <UButton
+      <KitButton
         v-if="switchable"
-        color="neutral"
-        variant="link"
+        variant="link-muted"
         size="xs"
-        class="p-0"
-        icon="i-lucide-scan-eye"
+        icon="scan-eye"
         :label="t('threadContext.openInRecorded')"
         :title="t('threadContext.openInRecordedHint')"
         data-thread-open-recorded
         @click="openInRecordedContext"
       />
-      <UButton
+      <KitButton
         v-if="contextBefore"
-        color="neutral"
-        variant="link"
+        variant="link-muted"
         size="xs"
-        class="p-0"
-        icon="i-lucide-undo-2"
+        icon="undo-2"
         :label="t('threadContext.openInCurrent')"
         :title="t('threadContext.openInCurrentHint')"
         data-thread-open-current
@@ -377,17 +378,15 @@ watch(() => props.threadId, () => {
       class="flex items-center gap-1.5 text-xs text-muted"
       data-thread-placement
     >
-      <UIcon
-        name="i-lucide-map-pin-off"
-        class="size-3.5 shrink-0"
+      <KitIcon
+        name="map-pin-off"
+        :size="14"
       />
       <span>{{ placementNote }}</span>
-      <UButton
+      <KitButton
         v-if="placement?.reason === 'other-variant' && thread.variantNames[0]"
         size="xs"
-        variant="link"
-        color="neutral"
-        class="p-0"
+        variant="link-muted"
         :label="t('comments.switchTo', { variant: thread.variantNames[0] })"
         @click="switchVariant(thread.variantNames[0]!)"
       />
@@ -442,9 +441,10 @@ watch(() => props.threadId, () => {
         v-if="!detail"
         class="text-xs text-muted"
       >
-        <USkeleton
-          class="h-10 w-full"
-          :aria-label="t('common.loading')"
+        <KitSkeleton
+          class="wb-skeleton animate-pulse"
+          height="40px"
+          :label="t('common.loading')"
         />
       </li>
       <li
@@ -469,28 +469,25 @@ watch(() => props.threadId, () => {
         </template>
         <template v-else>
           <span class="grid w-6 place-items-center pt-0.5 text-dimmed">
-            <UIcon
-              :name="item.kind === 'submission' ? 'i-lucide-git-pull-request-arrow' : item.kind === 'resolved' ? (isDismissal(item.resolution) ? 'i-lucide-circle-slash' : 'i-lucide-circle-check') : item.kind === 'reopened' ? 'i-lucide-rotate-ccw' : 'i-lucide-crosshair'"
-              class="size-3.5"
+            <KitIcon
+              :name="item.kind === 'submission' ? 'git-pull-request-arrow' : item.kind === 'resolved' ? (isDismissal(item.resolution) ? 'circle-slash' : 'circle-check') : item.kind === 'reopened' ? 'rotate-ccw' : 'crosshair'"
+              :size="14"
               :class="item.kind === 'resolved' && !isDismissal(item.resolution) ? 'text-success' : ''"
             />
           </span>
           <div class="text-xs text-muted">
             <template v-if="item.kind === 'submission'">
               <b class="font-medium text-default">{{ t('comments.submitted') }}</b> · {{ actorName(item.actor) }} · <time :datetime="item.at">{{ relativeTime(item.at, locale) }}</time>
-              <UBadge
+              <KitBadge
                 v-if="item.current"
-                color="neutral"
                 variant="soft"
-                size="sm"
                 class="ms-1"
                 :label="t('comments.current')"
               />
-              <UBadge
+              <KitBadge
                 v-if="item.notAccepted"
-                color="warning"
+                tone="warning"
                 variant="soft"
-                size="sm"
                 class="ms-1"
                 :label="t('comments.notAccepted')"
               />
@@ -566,27 +563,16 @@ watch(() => props.threadId, () => {
         @keydown="onReplyKeydown"
       />
       <div class="-mt-1 flex justify-end">
-        <UButton
+        <KitButton
           size="xs"
-          color="neutral"
           variant="outline"
+          :label="t('comments.replyAction')"
+          :kbd="kbdHint.submit.value"
           :loading="comments.busy.value === 'reply'"
           :disabled="!reply.trim()"
           data-thread-send
           @click="sendReply"
-        >
-          {{ t('comments.replyAction') }}
-          <UKbd
-            value="meta"
-            size="sm"
-            class="pointer-coarse:hidden"
-          />
-          <UKbd
-            value="enter"
-            size="sm"
-            class="-ms-1 pointer-coarse:hidden"
-          />
-        </UButton>
+        />
       </div>
     </template>
 
@@ -608,21 +594,19 @@ watch(() => props.threadId, () => {
         class="flex flex-wrap items-center justify-end gap-2"
         data-thread-lifecycle
       >
-        <UButton
+        <KitButton
           v-if="thread.status === 'ready-for-review' && comments.canSubmit.value"
           size="sm"
-          color="neutral"
           variant="outline"
-          icon="i-lucide-rotate-ccw"
+          icon="rotate-ccw"
           :label="t('thread.reopen')"
           @click="ask('reopen')"
         />
-        <UFieldGroup v-if="comments.canResolve.value">
-          <UButton
+        <KitButtonGroup v-if="comments.canResolve.value">
+          <KitButton
             size="sm"
-            color="primary"
-            variant="solid"
-            icon="i-lucide-check"
+            variant="primary"
+            icon="check"
             :label="t('thread.resolve')"
             :loading="comments.busy.value === 'resolve'"
             :disabled="thread.status === 'ready-for-review' && !activeSubmission"
@@ -634,16 +618,16 @@ watch(() => props.threadId, () => {
             :items="resolveMenu"
             :content="{ align: 'end' }"
           >
-            <UButton
+            <KitButton
               size="sm"
-              color="primary"
-              variant="solid"
-              icon="i-lucide-chevron-down"
-              :aria-label="t('comments.resolveOptions')"
+              variant="primary"
+              icon="chevron-down"
+              icon-only
+              :label="t('comments.resolveOptions')"
               data-thread-resolve-menu
             />
           </UDropdownMenu>
-        </UFieldGroup>
+        </KitButtonGroup>
       </div>
       <p
         v-if="thread.status !== 'resolved' && comments.canResolve.value"
@@ -662,11 +646,10 @@ watch(() => props.threadId, () => {
         v-if="thread.status === 'resolved' && comments.canSubmit.value"
         class="flex justify-end"
       >
-        <UButton
+        <KitButton
           size="sm"
-          color="neutral"
           variant="outline"
-          icon="i-lucide-rotate-ccw"
+          icon="rotate-ccw"
           :label="t('thread.reopen')"
           data-thread-reopen
           @click="ask('reopen')"

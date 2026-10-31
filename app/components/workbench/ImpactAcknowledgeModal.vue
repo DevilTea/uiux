@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { nextTick, useTemplateRef } from 'vue'
 import { useI18n } from '#imports'
+import KitButton from '~/components/kit/ui/Button.vue'
 import type { ReceivedImpact } from '../../utils/version-restore'
 import ImpactList from './ImpactList.vue'
 
@@ -52,18 +53,16 @@ function focusCancel(event: Event): void {
     </template>
     <template #footer>
       <div class="flex w-full flex-wrap justify-end gap-2">
-        <UButton
+        <KitButton
           ref="cancelButton"
-          color="neutral"
           variant="outline"
           :disabled="submitting"
           :label="t('common.cancel')"
           data-impact-cancel
           @click="open = false"
         />
-        <UButton
-          color="warning"
-          variant="solid"
+        <KitButton
+          variant="primary"
           :loading="submitting"
           :label="confirmLabel"
           data-impact-acknowledge

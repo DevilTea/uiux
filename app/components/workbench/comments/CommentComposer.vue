@@ -4,6 +4,9 @@ import { useI18n } from '#imports'
 import { useWorkbench } from '../../../composables/useWorkbench'
 import { threadAuthorInitials, useCanvasComments, VIEW_ANCHOR_WIDGET_ID } from '../../../composables/useCanvasComments'
 import { flattenWidgetTree } from '../../../../src/preview/widget-tree'
+import KitButton from '~/components/kit/ui/Button.vue'
+import KitIcon from '~/components/kit/ui/Icon.vue'
+import { useKbdHints } from '../../../composables/useKbdHints'
 import WbErrorDescription from '../WbErrorDescription.vue'
 
 /**
@@ -11,6 +14,7 @@ import WbErrorDescription from '../WbErrorDescription.vue'
  * the message, "Commenting as", Cancel and Comment ⌘↵. No dialog, no form page.
  */
 const { t } = useI18n()
+const kbdHint = useKbdHints()
 const workbench = useWorkbench()
 const comments = useCanvasComments()!
 const { contextOptions, widgetTreeResult } = workbench
@@ -73,9 +77,9 @@ function onKeydown(event: KeyboardEvent): void {
         class="inline-flex min-w-0 items-center gap-1 truncate rounded-sm border border-default px-1.5 text-xs leading-5 text-muted"
         data-composer-target="view"
       >
-        <UIcon
-          name="i-lucide-app-window"
-          class="size-3.5 shrink-0"
+        <KitIcon
+          name="app-window"
+          :size="14"
         />
         <span class="truncate">{{ comments.targetLabel(composer.widgetId) }}</span>
       </span>
@@ -119,17 +123,15 @@ function onKeydown(event: KeyboardEvent): void {
       data-composer-discard
     >
       <span class="me-auto">{{ t('comment.discard') }}</span>
-      <UButton
+      <KitButton
         size="xs"
-        color="neutral"
         variant="outline"
         :label="t('comments.keepEditing')"
         @click="comments.patchComposer({ askingDiscard: false })"
       />
-      <UButton
+      <KitButton
         size="xs"
-        color="error"
-        variant="soft"
+        variant="danger"
         :label="t('comments.discardAction')"
         @click="comments.closeComposer(true)"
       />
@@ -162,34 +164,22 @@ function onKeydown(event: KeyboardEvent): void {
         />
         <span class="truncate">{{ t('comment.commentingAs', { name }) }}</span>
       </span>
-      <UButton
+      <KitButton
         size="sm"
-        color="neutral"
         variant="ghost"
         :label="t('common.cancel')"
         @click="comments.closeComposer()"
       />
-      <UButton
+      <KitButton
         size="sm"
-        color="primary"
-        variant="solid"
+        variant="primary"
+        :label="t('comment.send')"
+        :kbd="kbdHint.submit.value"
         :loading="composer.posting"
         :disabled="!composer.text.trim()"
         data-composer-send
         @click="comments.sendComposer()"
-      >
-        {{ t('comment.send') }}
-        <UKbd
-          value="meta"
-          size="sm"
-          class="bg-transparent text-current ring-current/35 pointer-coarse:hidden"
-        />
-        <UKbd
-          value="enter"
-          size="sm"
-          class="-ms-1 bg-transparent text-current ring-current/35 pointer-coarse:hidden"
-        />
-      </UButton>
+      />
     </div>
   </div>
 </template>

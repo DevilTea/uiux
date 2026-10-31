@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useI18n } from '#imports'
+import KitButton from '~/components/kit/ui/Button.vue'
 import type { FetchErrorDiagnostic } from '../../utils/fetch-error'
 
 /**
@@ -22,12 +23,11 @@ const open = ref(false)
     class="w-full text-start"
     data-error-details
   >
-    <UButton
-      color="neutral"
-      variant="link"
+    <KitButton
+      variant="link-muted"
       size="xs"
-      class="px-0"
-      :trailing-icon="open ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'"
+      trailing-icon="chevron-down"
+      :expanded="open"
       :label="t('common.details')"
     />
     <template #content>

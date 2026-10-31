@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useI18n } from '#imports'
+import KitBadge from '~/components/kit/ui/Badge.vue'
 import { useWorkbench } from '../../composables/useWorkbench'
 import type { ViewportOption } from '../../../src/preview/render-context-options'
 
@@ -203,14 +204,11 @@ const selectUi = computed(() => ({
         >{{ values.locale }}</span>
       </span>
       <template #item-trailing="{ item }">
-        <UBadge
+        <KitBadge
           v-if="(item as ContextItem).primary"
-          color="neutral"
           variant="soft"
-          size="sm"
-        >
-          {{ t('ctx.primaryLocale') }}
-        </UBadge>
+          :label="t('ctx.primaryLocale')"
+        />
       </template>
     </USelect>
 
