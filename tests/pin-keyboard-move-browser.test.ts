@@ -177,3 +177,75 @@ describe('Keyboard pin move (issue #118)', () => {
 		finally { await context.close() }
 	}, 90_000)
 })
+
+describe('Pointer pin move and physical hints', () => {
+	it('writes a dragged pin once, when the drag ends, and never streams intermediate positions (Rule 01a11544-5c53)', async () => {
+		const { viewId, threadId } = await seed()
+		const { context, page } = await open(`/views/${viewId}`)
+		try {
+			const pin = page.locator(`[data-comment-pins] [data-pin-thread="${threadId}"]`)
+			await pin.waitFor({ timeout: 15_000 })
+			// Every request that could write the pin: any non-read request on the Review API.
+			const writes: { method: string; url: string }[] = []
+			page.on('request', (request) => {
+				if (request.method() !== 'GET' && new URL(request.url()).pathname.startsWith('/api/reviews')) writes.push({ method: request.method(), url: new URL(request.url()).pathname })
+			})
+			const box = (await pin.boundingBox())!
+			const from = { x: box.x + box.width / 2, y: box.y + box.height / 2 }
+			await page.mouse.move(from.x, from.y)
+			await page.mouse.down()
+			// A long drag in many small moves, with pauses so that any streamed write would have been sent.
+			for (let step = 1; step <= 20; step++) {
+				await page.mouse.move(from.x + step * 4, from.y + step * 1.5)
+				if (step % 5 === 0) await page.waitForTimeout(60)
+			}
+			await expect.poll(() => pin.evaluate(element => element.classList.contains('is-dragging'))).toBe(true)
+			await page.waitForTimeout(300)
+			// Moving, not yet released: nothing was written and the stored hint is where it was.
+			expect(writes).toEqual([])
+			expect(await hintOf(threadId)).toEqual({ x: 0.5, y: 0.5 })
+
+			await page.mouse.up()
+			await expect.poll(async () => (await hintOf(threadId))?.x).toBeGreaterThan(0.5)
+			await page.waitForTimeout(300)
+			// Exactly one write, the one at the end of the drag.
+			expect(writes).toHaveLength(1)
+			expect(writes[0]!.url).toBe(`/api/reviews/${threadId}/display-hint`)
+		}
+		finally { await context.close() }
+	}, 90_000)
+
+	it('keeps a hinted pin on the same physical side of its Widget in a right-to-left Locale (Rule 01a11544-5cec)', async () => {
+		const { viewId, threadId } = await seed()
+		// A hint on the left of the Widget: x is measured from its physical left edge.
+		const thread = await api<{ revision: string }>(`/api/resources/review/${threadId}`)
+		await api(`/api/reviews/${threadId}/display-hint`, { expectedRevision: thread.revision, displayHint: { pin: { x: 0.2, y: 0.5 } } })
+		await api('/api/locales', { locale: 'ar-SA', messages: {} })
+		const { context, page, frame } = await open(`/views/${viewId}`)
+		try {
+			const pin = page.locator(`[data-comment-pins] [data-pin-thread="${threadId}"]`)
+			await pin.waitFor({ timeout: 15_000 })
+			const card = frame.locator('[data-widget-id="card"]')
+			// The pin's tip is the bottom-left corner of its box.
+			const tipError = async () => {
+				const rect = (await card.boundingBox())!
+				const pinBox = (await pin.boundingBox())!
+				return { error: Math.hypot(pinBox.x - (rect.x + 0.2 * rect.width), pinBox.y + pinBox.height - (rect.y + 0.5 * rect.height)), left: pinBox.x < rect.x + rect.width / 2 }
+			}
+			const cardLtr = (await card.boundingBox())!
+			expect(await tipError()).toMatchObject({ left: true })
+
+			// The right-to-left Locale is chosen, and the Preview lays its content out right to left.
+			await page.locator('[data-context="locale"]').click()
+			await page.getByRole('option', { name: 'ar-SA' }).click()
+			await expect.poll(() => new URL(page.url()).searchParams.get('locale')).toBe('ar-SA')
+			await frame.evaluate(() => { document.documentElement.setAttribute('dir', 'rtl'); document.body.setAttribute('dir', 'rtl') })
+			await expect.poll(async () => (await card.boundingBox())!.x, { timeout: 15_000 }).toBeGreaterThan(cardLtr.x + 50)
+
+			// The pin follows the Widget's physical box: 20 % from its left edge, however far right the Widget now lies.
+			await expect.poll(async () => (await tipError()).error, { timeout: 15_000 }).toBeLessThan(2)
+			expect(await tipError()).toMatchObject({ left: true })
+		}
+		finally { await context.close() }
+	}, 90_000)
+})

@@ -208,3 +208,64 @@ describe('Workbench in zh-TW', () => {
 		expect(findings).toEqual([])
 	}, 240_000)
 })
+
+describe('Workbench links and the chrome (Rule 01a116f0-934e)', () => {
+	/** Every `href` of the Workbench document, resolved, with its query. */
+	const hrefs = (page: Page) => page.evaluate(() => [...document.querySelectorAll<HTMLAnchorElement>('a[href]')].map((anchor) => {
+		const url = new URL(anchor.href)
+		return { path: url.pathname, query: [...url.searchParams.entries()], hash: url.hash }
+	}))
+
+	it('never puts the chrome language or theme in a link, a copied link included', async () => {
+		// The chrome is zh-TW and dark; the View's own render context is en-US and light, so a chrome value in a link cannot be mistaken for the render context's.
+		const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'dark' })
+		await context.addInitScript(() => {
+			localStorage.setItem('uiux.workbench.locale', 'zh-TW')
+			localStorage.setItem('nuxt-color-mode', 'dark')
+		})
+		await context.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: server.origin })
+		await context.addCookies([{ ...server.cookie, url: server.origin, httpOnly: true, sameSite: 'Strict' }])
+		const page = await context.newPage()
+		try {
+			const routes = [
+				'/',
+				`/views/${VIEW_ID}?locale=en-US&theme=light&panel=comments`,
+				`/views/${VIEW_ID}?locale=en-US&theme=light&panel=history`,
+				'/flows',
+				'/reviews',
+				`/reviews?thread=${THREAD_ID}`,
+				'/workspace/settings',
+				'/workspace/locales',
+				'/members',
+			]
+			let seen = 0
+			for (const route of routes) {
+				await page.goto(`${server.origin}${route}`, { waitUntil: 'networkidle' })
+				await page.locator('main').first().waitFor()
+				await page.waitForTimeout(400)
+				// The chrome really is zh-TW and dark here, or the check would prove nothing.
+				expect(await page.evaluate(() => [document.documentElement.lang, document.documentElement.classList.contains('dark')]), route).toEqual(['zh-TW', true])
+				for (const link of await hrefs(page)) {
+					seen++
+					const where = `${route} → ${link.path}${link.query.length ? `?${new URLSearchParams(link.query)}` : ''}`
+					expect(link.query.map(([key]) => key).filter(key => /^(lang|chrome|colorMode|color-mode|mode|uiLocale)/iu.test(key)), where).toEqual([])
+					expect(link.query.map(([, value]) => value).filter(value => value === 'zh-TW' || value === 'dark'), where).toEqual([])
+				}
+			}
+			expect(seen).toBeGreaterThan(30)
+
+			// A copied link of a thread: the chrome is zh-TW and dark, and the link names neither.
+			await page.goto(`${server.origin}/views/${VIEW_ID}?locale=en-US&theme=light&thread=${THREAD_ID}`, { waitUntil: 'networkidle' })
+			const bubble = page.locator('[data-thread-bubble]')
+			await bubble.waitFor({ timeout: 15_000 })
+			await bubble.locator('[data-thread-more], button[aria-haspopup="menu"]').first().click()
+			await page.getByRole('menuitem').filter({ hasText: '複製連結' }).click()
+			const copied = await page.evaluate(() => navigator.clipboard.readText())
+			const url = new URL(copied)
+			expect(url.searchParams.get('thread')).toBe(THREAD_ID)
+			expect([...url.searchParams.entries()].filter(([, value]) => value === 'zh-TW' || value === 'dark')).toEqual([])
+			expect([...url.searchParams.keys()].filter(key => /^(lang|chrome|colorMode|color-mode|mode|uiLocale)/iu.test(key))).toEqual([])
+		}
+		finally { await context.close() }
+	}, 120_000)
+})

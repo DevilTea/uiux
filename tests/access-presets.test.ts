@@ -524,3 +524,35 @@ describe('labels and --preset from the Workspace\'s presets (Rules 01a11c09-c724
 		expect(set.out).toContain(`Keys from the Viewer preset: ${builtIns()[0]!.keys.join(', ')}`)
 	})
 })
+
+describe('a key a new UIUX version adds (Rule 01a11c09-cf7d)', () => {
+	it('is in no preset and held by no member of a Workspace an older version wrote, until someone grants it', async () => {
+		// An older version's Workspace: its presets file and roster predate the key, so the key is absent from both.
+		const NEW_KEY = 'product-kit.compose'
+		expect(PERMISSION_KEYS).toContain(NEW_KEY)
+		const base = await makeRoot()
+		const root = join(base, 'ws')
+		await writeCurrentWorkspace(root)
+		const home = join(base, 'home')
+		const run = async (...argv: string[]) => {
+			const out: string[] = []
+			const err: string[] = []
+			const code = await runAccessCommand({ argv, env: { UIUX_HOME: home }, cwd: base, stdout: line => out.push(line), stderr: line => err.push(line) })
+			return { code, out: out.join('\n'), err: err.join('\n') }
+		}
+		const olderPresets = builtIns().map(preset => ({ ...preset, keys: preset.keys.filter(key => key !== NEW_KEY) }))
+		await writeFile(join(root, ACCESS_PRESETS_FILENAME), JSON.stringify({ presets: olderPresets }))
+		expect((await readWorkspaceAccessPresets(root)).every(preset => !preset.keys.includes(NEW_KEY))).toBe(true)
+
+		// Applying the Owner preset copies its keys at that moment: the member does not hold the new key.
+		expect(await run('member', 'add', 'olga', '--preset', 'owner', '--workspace', root)).toMatchObject({ code: 0 })
+		const olga = (await AccessStore.open({ workspaceRoot: root, home }))!.data.members.find(member => member.nickname === 'olga')!
+		expect(olga.keys).not.toContain(NEW_KEY)
+		expect(olga.keys.length).toBeGreaterThan(0)
+
+		// Only an explicit grant gives it.
+		expect(await run('member', 'set', 'olga', '--grant', NEW_KEY, '--workspace', root)).toMatchObject({ code: 0 })
+		const granted = (await AccessStore.open({ workspaceRoot: root, home }))!.data.members.find(member => member.nickname === 'olga')!
+		expect(granted.keys).toContain(NEW_KEY)
+	})
+})

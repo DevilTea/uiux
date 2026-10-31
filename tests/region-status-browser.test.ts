@@ -183,3 +183,206 @@ describe('unavailable precision in the Workbench (issue #106)', () => {
 		finally { await context.close() }
 	}, 120_000)
 })
+
+describe('the highlight follows the Widget (Rule 01a11658-1bda)', () => {
+	/** The Widget's rectangle in Workbench pixels, and the bounding box of the outline the Workbench draws for it. */
+	async function boxes(page: Page, frame: Frame) {
+		const widget = (await frame.locator(`[data-widget-id="${WIDGET_ID}"]`).boundingBox())!
+		const outline = (await highlight(page).locator('path.stroke-selection').first().boundingBox())!
+		return { widget, outline }
+	}
+	const onWidget = ({ widget, outline }: Awaited<ReturnType<typeof boxes>>) => Math.max(
+		Math.abs(outline.x - widget.x), Math.abs(outline.y - widget.y),
+		Math.abs(outline.width - widget.width), Math.abs(outline.height - widget.height),
+	)
+	const responses = (page: Page) => page.evaluate(id => (window as unknown as WireRecorderWindow).__wire.messages
+		.filter(message => message.type === 'geometry.acquire.response' && message.context.widgetId === id).length, WIDGET_ID)
+
+	it('tracks a Widget that moves, resizes or reflows, one update per animation frame at most, and does nothing while it is still', async () => {
+		const { context, page, frame } = await open('inspect')
+		try {
+			await highlight(page).first().waitFor({ state: 'attached', timeout: 20_000 })
+			await expect.poll(async () => onWidget(await boxes(page, frame)), { timeout: 10_000 }).toBeLessThan(4)
+			const resting = (await boxes(page, frame)).outline
+
+			// Resizes.
+			await frame.evaluate(id => { const element = document.querySelector<HTMLElement>(`[data-widget-id="${id}"]`)!; element.style.display = 'block'; element.style.width = '180px' }, WIDGET_ID)
+			await expect.poll(async () => onWidget(await boxes(page, frame)), { timeout: 10_000 }).toBeLessThan(4)
+			expect((await boxes(page, frame)).outline.width).toBeLessThan(resting.width)
+
+			// Moves: a layout offset, with no scroll and no resize.
+			const xBefore = (await boxes(page, frame)).outline.x
+			await frame.evaluate(id => { const element = document.querySelector<HTMLElement>(`[data-widget-id="${id}"]`)!; element.style.position = 'relative'; element.style.left = '120px' }, WIDGET_ID)
+			await expect.poll(async () => onWidget(await boxes(page, frame)), { timeout: 10_000 }).toBeLessThan(4)
+			expect((await boxes(page, frame)).outline.x).toBeGreaterThan(xBefore + 20)
+
+			// Reflows: content inserted above pushes it down, though nothing about the Widget itself changed.
+			const yBefore = (await boxes(page, frame)).outline.y
+			await frame.evaluate(() => { const spacer = document.createElement('div'); spacer.id = 'test-spacer'; spacer.style.height = '90px'; document.body.prepend(spacer) })
+			await expect.poll(async () => onWidget(await boxes(page, frame)), { timeout: 10_000 }).toBeLessThan(4)
+			expect((await boxes(page, frame)).outline.y).toBeGreaterThan(yBefore + 20)
+
+			// A burst of changes inside one frame is reported once, and a run of frames at most once per frame.
+			await page.evaluate(() => {
+				const win = window as unknown as { __frames: number; __sampling: boolean }
+				win.__frames = 0
+				win.__sampling = true
+				const tick = () => { win.__frames++; if (win.__sampling) requestAnimationFrame(tick) }
+				requestAnimationFrame(tick)
+			})
+			await page.waitForTimeout(200)
+			const burstFrom = await responses(page)
+			await frame.evaluate((id) => {
+				const element = document.querySelector<HTMLElement>(`[data-widget-id="${id}"]`)!
+				for (let step = 0; step < 50; step++) element.style.left = `${step}px`
+			}, WIDGET_ID)
+			await expect.poll(async () => onWidget(await boxes(page, frame)), { timeout: 10_000 }).toBeLessThan(4)
+			await page.waitForTimeout(300)
+			expect((await responses(page)) - burstFrom).toBeLessThanOrEqual(1)
+
+			const runFrom = await responses(page)
+			const framesFrom = await page.evaluate(() => (window as unknown as { __frames: number }).__frames)
+			await frame.evaluate((id) => new Promise<void>((resolve) => {
+				const element = document.querySelector<HTMLElement>(`[data-widget-id="${id}"]`)!
+				let step = 0
+				const move = () => { element.style.left = `${40 + (++step) * 3}px`; if (step < 30) requestAnimationFrame(move); else resolve() }
+				requestAnimationFrame(move)
+			}), WIDGET_ID)
+			await expect.poll(async () => onWidget(await boxes(page, frame)), { timeout: 10_000 }).toBeLessThan(4)
+			await page.waitForTimeout(300)
+			const updates = (await responses(page)) - runFrom
+			const frames = (await page.evaluate(() => (window as unknown as { __frames: number }).__frames)) - framesFrom
+			expect(updates).toBeGreaterThan(1)
+			expect(updates).toBeLessThanOrEqual(frames)
+
+			// Still: no update arrives and the Preview runs no animation frame, which is neither frozen (above) nor polled.
+			const stillResponses = await responses(page)
+			const stillFrames = await frame.evaluate(() => (window as unknown as WireRecorderWindow).__rafCallbacks)
+			await page.waitForTimeout(1_000)
+			expect(await responses(page)).toBe(stillResponses)
+			expect(await frame.evaluate(() => (window as unknown as WireRecorderWindow).__rafCallbacks)).toBe(stillFrames)
+			await page.evaluate(() => { (window as unknown as { __sampling: boolean }).__sampling = false })
+		}
+		finally { await context.close() }
+	}, 120_000)
+})
+
+describe('the highlight outline (Rules 01a11658-1ca4, 01a11658-1db1 and 01a11687-2d8d)', () => {
+	/** The path data of every outline path the Workbench draws for the selection. */
+	const outlinePaths = (page: Page) => highlight(page).locator('path').evaluateAll(paths => paths.map((path) => {
+		const style = getComputedStyle(path)
+		// The stroke width as drawn on screen: the attribute times the scale of every transform above the path.
+		const screenScale = Math.hypot((path as SVGGraphicsElement).getScreenCTM()!.a, (path as SVGGraphicsElement).getScreenCTM()!.b)
+		return { d: path.getAttribute('d') ?? '', fill: style.fill, fillAttr: path.closest('g')?.getAttribute('fill') ?? path.getAttribute('fill'), stroke: style.stroke, strokePx: Math.round(Number.parseFloat(path.getAttribute('stroke-width') ?? '0') * screenScale * 1000) / 1000 }
+	}))
+
+	it('outlines every reported region of a Widget split by an opaque band, as one selection (Rule 01a11658-1ca4)', async () => {
+		const { context, page, frame } = await open('inspect')
+		try {
+			await highlight(page).first().waitFor({ state: 'attached', timeout: 20_000 })
+			const widgetBox = (await frame.locator(`[data-widget-id="${WIDGET_ID}"]`).boundingBox())!
+			// An opaque band across the middle of the Widget splits what is visible of it into two regions.
+			await frame.evaluate((id) => {
+				const rect = document.querySelector(`[data-widget-id="${id}"]`)!.getBoundingClientRect()
+				const band = document.createElement('div')
+				band.id = 'test-band'
+				band.style.cssText = `position:fixed;left:${rect.left + rect.width * 0.4}px;top:${rect.top - 10}px;width:${rect.width * 0.2}px;height:${rect.height + 20}px;background:#123456`
+				document.body.append(band)
+			}, WIDGET_ID)
+			await expect.poll(async () => ((await reports(page)).at(-1)?.regions ?? 0), { timeout: 20_000 }).toBe(2)
+			// One outline per reported region, still one selection: one highlight element, one selected Widget.
+			await expect.poll(() => highlight(page).locator('path.stroke-selection').count(), { timeout: 10_000 }).toBe(2)
+			expect(await highlight(page).count()).toBe(1)
+			const boxesOfPaths = await highlight(page).locator('path.stroke-selection').evaluateAll(paths => paths.map((path) => { const box = (path as SVGGraphicsElement).getBoundingClientRect(); return { x: box.x, width: box.width } }))
+			// The two regions lie on either side of the band: one path left of the Widget's middle and one right of it.
+			const middle = widgetBox.x + widgetBox.width / 2
+			expect(boxesOfPaths.some(box => box.x + box.width <= middle + 2)).toBe(true)
+			expect(boxesOfPaths.some(box => box.x >= middle - 2)).toBe(true)
+			expect(new URL(page.url()).searchParams.get('widget')).toBe(WIDGET_ID)
+			expect(await page.locator('[data-blueprint="type"]').count()).toBeLessThanOrEqual(1)
+		}
+		finally { await context.close() }
+	}, 120_000)
+
+	it('strokes only the outer perimeter of a region that encloses a hidden area: no fill and no inner ring (Rule 01a11687-2d8d)', async () => {
+		const { context, page, frame } = await open('inspect')
+		try {
+			await highlight(page).first().waitFor({ state: 'attached', timeout: 20_000 })
+			const single = await outlinePaths(page)
+			// An opaque block in the middle of the Widget: a hole in its visible part, enclosed by the region.
+			await frame.evaluate((id) => {
+				const rect = document.querySelector(`[data-widget-id="${id}"]`)!.getBoundingClientRect()
+				const block = document.createElement('div')
+				block.id = 'test-hole'
+				block.style.cssText = `position:fixed;left:${rect.left + rect.width * 0.35}px;top:${rect.top + rect.height * 0.25}px;width:${rect.width * 0.3}px;height:${rect.height * 0.5}px;background:#123456`
+				document.body.append(block)
+			}, WIDGET_ID)
+			await expect.poll(async () => ((await reports(page)).at(-1)?.regions ?? 0), { timeout: 20_000 }).toBe(1)
+			await page.waitForTimeout(500)
+			const paths = await outlinePaths(page)
+			expect(paths.length).toBeGreaterThan(0)
+			for (const path of paths) {
+				// Stroked, never filled.
+				expect(path.stroke).not.toBe('none')
+				expect(['none', 'rgba(0, 0, 0, 0)'].includes(path.fill) || path.fillAttr === 'none').toBe(true)
+				// One closed ring per path: a single `M` and no ring for the hole inside.
+				expect(path.d.match(/M/gu)?.length ?? 0).toBe(1)
+			}
+			// The ring is the outer perimeter: its bounding box stays the Widget's, as it was without the hole.
+			const outer = (await highlight(page).locator('path.stroke-selection').first().boundingBox())!
+			const widgetBox = (await frame.locator(`[data-widget-id="${WIDGET_ID}"]`).boundingBox())!
+			expect(Math.abs(outer.width - widgetBox.width)).toBeLessThan(6)
+			expect(Math.abs(outer.height - widgetBox.height)).toBeLessThan(6)
+			expect(single.length).toBeGreaterThan(0)
+		}
+		finally { await context.close() }
+	}, 120_000)
+
+	it('keeps the stroke width in final Workbench pixels when the Preview is zoomed (Rule 01a11658-1db1)', async () => {
+		const { context, page } = await open('inspect')
+		try {
+			await highlight(page).first().waitFor({ state: 'attached', timeout: 20_000 })
+			const strokes = async () => (await outlinePaths(page)).map(path => path.strokePx)
+			const scale = async () => (await page.locator('iframe[src*="/preview"]').boundingBox())!.width
+			const before = await strokes()
+			expect(before.length).toBeGreaterThan(0)
+			expect(before.every(px => px > 0)).toBe(true)
+			let lastWidth = await scale()
+			// Zoom the canvas: the Preview is scaled by the canvas, the stroke is not.
+			for (const percent of ['200%', '50%']) {
+				await page.locator('[data-zoom-percent]').click()
+				await page.getByRole('menuitemcheckbox', { name: percent, exact: true }).click()
+				await expect.poll(() => page.locator('[data-zoom-percent]').textContent()).toContain(percent)
+				await expect.poll(scale, { timeout: 10_000 }).not.toBe(lastWidth)
+				lastWidth = await scale()
+				await highlight(page).first().waitFor({ state: 'attached', timeout: 20_000 })
+				await page.waitForTimeout(500)
+				expect(await strokes()).toEqual(before)
+			}
+		}
+		finally { await context.close() }
+	}, 120_000)
+})
+
+describe('the translucent-coverage marker lives only where the Preview is live (Rule 01a11a70-38db)', () => {
+	it('appears on the Widget\'s Checks entry on its View page and never in Overview › Checks', async () => {
+		const { context, page, frame } = await open('readiness')
+		try {
+			await highlight(page).first().waitFor({ state: 'attached', timeout: 20_000 })
+			await cover(frame)
+			// On the View page, where the Preview is live, the Widget's Checks entry carries the marker.
+			await marker(page).waitFor({ state: 'attached', timeout: 20_000 })
+			expect(await page.locator('[data-facet="validation"] li', { hasText: `#${WIDGET_ID}` }).locator('[data-translucent-marker]').count()).toBe(1)
+
+			// Overview › Checks, reached inside the same Workbench page while the coverage is still there: no Preview, no marker.
+			await page.getByRole('link', { name: 'Overview', exact: true }).first().click()
+			await page.getByRole('tab', { name: /^Checks/ }).click()
+			await page.locator('[data-check-sources]').waitFor({ timeout: 20_000 })
+			expect(await page.locator('iframe[src*="/preview"]').count()).toBe(0)
+			await page.waitForTimeout(1_000)
+			expect(await marker(page).count()).toBe(0)
+			expect(await notice(page).count()).toBe(0)
+		}
+		finally { await context.close() }
+	}, 120_000)
+})
