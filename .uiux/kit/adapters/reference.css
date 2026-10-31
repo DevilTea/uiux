@@ -30,6 +30,8 @@
 .uiux-ref-stack.surface-canvas { background-color: var(--kit-bg-canvas); color: var(--kit-text); }
 .uiux-ref-stack.is-overlay { position: absolute; inset: 0; pointer-events: none; }
 .uiux-ref-stack.is-overlay > * { pointer-events: auto; }
+/* A Stack whose overlay layer holds Pins is the positioned parent of those Pins: a Pin at x and y sits inside that Stack's own rectangle, as a comment pin sits inside its Widget's rectangle. */
+.uiux-ref-stack:has(> .is-overlay > .uiux-ref-pin) { position: relative; }
 .uiux-ref-stack.is-card { border: 1px solid var(--kit-border); border-radius: 8px; background-color: var(--kit-bg-surface); }
 .uiux-ref-stack.is-dashed { border: 1px dashed var(--kit-border-control); border-radius: 8px; }
 
