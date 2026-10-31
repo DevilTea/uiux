@@ -18,7 +18,7 @@ const ROOT = join(import.meta.dirname, '..')
 const WORKSPACE = join(ROOT, '.uiux')
 const KIT = join(WORKSPACE, 'kit')
 const COMPONENTS = [
-	'badge', 'breadcrumb', 'breadcrumb-item', 'button', 'checkbox', 'code-block', 'comment-pin', 'diff-item', 'disclosure', 'field', 'icon', 'kbd',
+	'badge', 'breadcrumb', 'breadcrumb-item', 'button', 'button-group', 'checkbox', 'code-block', 'comment-pin', 'diff-item', 'disclosure', 'field', 'icon', 'kbd',
 	'list-item', 'select', 'select-option', 'skeleton', 'table', 'table-row', 'tokens',
 ] as const
 
@@ -57,6 +57,7 @@ describe('the dogfood Product Kit registry', () => {
 			Breadcrumb: { component: 'breadcrumb' },
 			BreadcrumbItem: { component: 'breadcrumb-item' },
 			Button: { component: 'button' },
+			ButtonGroup: { component: 'button-group' },
 			Checkbox: { component: 'checkbox' },
 			CodeBlock: { component: 'code-block' },
 			DiffItem: { component: 'diff-item' },

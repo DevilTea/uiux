@@ -57,7 +57,7 @@ defineProps<{
 .kit-breadcrumb-item { display: inline-flex; align-items: baseline; flex-shrink: 0; gap: 6px; font-size: 13px; line-height: 20px; white-space: nowrap; color: var(--kit-text-muted); }
 .kit-breadcrumb-item + .kit-breadcrumb-item::before { content: "\203A" / ""; margin-inline: 6px; color: var(--kit-text-subtle); }
 .kit-breadcrumb-item > .kit-icon { align-self: center; }
-.kit-breadcrumb-item__index { font-family: var(--kit-font-mono); font-size: 12px; font-variant-numeric: tabular-nums; color: var(--kit-text-subtle); }
+.kit-breadcrumb-item__index { font-family: var(--kit-font-mono); font-feature-settings: var(--kit-font-mono-features); font-size: 12px; font-variant-numeric: tabular-nums; color: var(--kit-text-subtle); }
 .kit-breadcrumb-item__variant { max-width: 14rem; overflow: hidden; text-overflow: ellipsis; font-weight: 500; color: var(--kit-text); }
 .kit-breadcrumb-item__label { max-width: 10rem; overflow: hidden; text-overflow: ellipsis; font-size: 12px; color: var(--kit-text-muted); }
 .kit-breadcrumb-item__trailing { font-size: 12px; color: var(--kit-text-subtle); }

@@ -127,7 +127,7 @@ const icon = computed(() => ICONS[props.op] ?? 'diff')
 .kit-diff-item__head > .kit-icon { color: var(--kit-diff-tone, var(--kit-text-muted)); }
 .kit-diff-item__op { flex-shrink: 0; font-weight: 500; color: var(--kit-diff-tone, var(--kit-text)); }
 .kit-diff-item__field { flex-shrink: 0; color: var(--kit-text-muted); }
-.kit-diff-item__label, .kit-diff-item__change-label { min-width: 0; font-family: var(--kit-font-mono); overflow-wrap: anywhere; }
+.kit-diff-item__label, .kit-diff-item__change-label { min-width: 0; font-family: var(--kit-font-mono); font-feature-settings: var(--kit-font-mono-features); overflow-wrap: anywhere; }
 .kit-diff-item__label { color: var(--kit-text-highlighted); }
 .kit-diff-item__change-label { color: var(--kit-text-muted); }
 .kit-diff-item__values { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; min-width: 0; margin-top: 4px !important; }
