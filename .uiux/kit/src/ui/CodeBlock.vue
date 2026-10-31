@@ -33,7 +33,7 @@ const length = (value: number | string | undefined): string | undefined => typeo
 <style>
 .kit-code-block {
   margin: 0; padding: 8px 10px; box-sizing: border-box; width: 100%; min-width: 0; overflow: auto;
-  font-family: var(--kit-font-mono); font-size: 12px; line-height: 18px; color: var(--kit-text);
+  font-family: var(--kit-font-mono); font-feature-settings: var(--kit-font-mono-features); font-size: 12px; line-height: 18px; color: var(--kit-text);
   background-color: var(--kit-bg-muted); border: 1px solid var(--kit-border); border-radius: 6px; white-space: pre;
 }
 .kit-code-block.is-wrap { white-space: pre-wrap; overflow-wrap: anywhere; }

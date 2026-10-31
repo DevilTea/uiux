@@ -26,6 +26,7 @@ import KitBadge from '../src/ui/Badge.vue'
 import KitBreadcrumb from '../src/ui/Breadcrumb.vue'
 import KitBreadcrumbItem from '../src/ui/BreadcrumbItem.vue'
 import KitButton from '../src/ui/Button.vue'
+import KitButtonGroup from '../src/ui/ButtonGroup.vue'
 import KitCheckbox from '../src/ui/Checkbox.vue'
 import KitCodeBlock from '../src/ui/CodeBlock.vue'
 import KitCommentPin from '../src/ui/CommentPin.vue'
@@ -945,18 +946,21 @@ export const TextRenderer = defineComponent({
 // 4. Button Widget Plugin & Renderer
 // ---------------------------------------------------------------------------
 export interface ButtonPresentation {
-	size?: 'sm' | 'md' | 'lg'
+	size?: 'xs' | 'sm' | 'md' | 'lg'
 	/** Shows only the icon; the translated label stays available as the accessible name. */
 	iconOnly?: boolean
 	fullWidth?: boolean
+	/** A long label ends in an ellipsis (the button yields to the width its parent gives it) and its text is the `title`. */
+	truncate?: boolean
 	hidden?: boolean
 	/** Hide the keyboard shortcut hint (touch tiers). */
 	hideKbd?: boolean
 }
 
-/** `neutral` is the solid neutral button (the current choice of a group); `link` is a primary link, `link-muted` a quiet one. */
-type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'outline' | 'danger' | 'annotation' | 'link' | 'link-muted' | 'brand' | 'display' | 'neutral'
-const BUTTON_VARIANTS: readonly ButtonVariant[] = ['primary', 'secondary', 'ghost', 'outline', 'danger', 'annotation', 'link', 'link-muted', 'brand', 'display', 'neutral']
+/** `neutral` is the solid neutral button (the current choice of a group); `soft` is the quiet filled look; `link` is a primary link, `link-muted` a quiet one. */
+type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'outline' | 'danger' | 'annotation' | 'link' | 'link-muted' | 'brand' | 'display' | 'neutral' | 'soft'
+const BUTTON_VARIANTS: readonly ButtonVariant[] = ['primary', 'secondary', 'ghost', 'outline', 'danger', 'annotation', 'link', 'link-muted', 'brand', 'display', 'neutral', 'soft']
+const isNullableBoolean = (v: unknown): v is boolean | null => v === null || typeof v === 'boolean'
 
 export interface ButtonInterfaces {
 	config: {
@@ -971,6 +975,10 @@ export interface ButtonInterfaces {
 			disabled?: boolean
 			/** Work is in progress: a spinning icon replaces the icon, and the button does not press. */
 			loading?: boolean
+			/** Initial value of the author-writable `pressed` state: a toggle (`aria-pressed`) that looks soft while pressed. Leave it out for a button that is not a toggle. */
+			pressed?: boolean
+			/** Initial value of the author-writable `expanded` state: `aria-expanded`, and the trailing icon turns 180 degrees while true. Leave it out for a button that discloses nothing. */
+			expanded?: boolean
 			/** Initial value of the author-writable `visible` state (Variants flip it). */
 			visible?: boolean
 			/** Renders the interpolated `{value}` as inline code. */
@@ -986,6 +994,8 @@ export interface ButtonInterfaces {
 			variant: ButtonVariant
 			disabled: boolean
 			loading: boolean
+			pressed: boolean | null
+			expanded: boolean | null
 			visible: boolean
 			valueCode: boolean
 			icon: string
@@ -1000,6 +1010,10 @@ export interface ButtonInterfaces {
 		visible: boolean
 		loading: boolean
 		variant: ButtonVariant
+		/** `null` when the button is not a toggle. */
+		pressed: boolean | null
+		/** `null` when the button discloses nothing. */
+		expanded: boolean | null
 	}
 	events: {
 		click: readonly []
@@ -1013,16 +1027,16 @@ export interface ButtonInterfaces {
 		labelRuns: readonly TextRun[]
 		variant: string
 		icon: string
-		presentation: { size: string; iconOnly: boolean; fullWidth: boolean; hidden: boolean; touch: boolean; kbd: string; trailingIcon: string }
+		presentation: { size: string; iconOnly: boolean; fullWidth: boolean; truncate: boolean; hidden: boolean; touch: boolean; kbd: string; trailingIcon: string }
 		theme: string
 	}
 }
 
 export const buttonPlugin = createWidgetPlugin('Button')
-	.description('Button with translatable label, Lucide icon, optional trailing icon and shortcut hint, neutral-outline default, one solid primary per region (or the solid neutral for a group\'s current choice), muted or primary link looks, a loading spinner, and 44px targets on touch tiers. Author-writable `disabled`, `visible`, `loading` and `variant` states drive Variants.')
+	.description('Button with translatable label, Lucide icon, optional trailing icon and shortcut hint, neutral-outline default, one solid primary per region (or the solid neutral for a group\'s current choice), muted or primary link looks, a quiet `soft` fill, an `xs` (24px) size, a loading spinner, a long label that truncates, and 44px targets on touch tiers. Author-writable `disabled`, `visible`, `loading`, `variant`, `pressed` (a toggle, soft while pressed) and `expanded` (a disclosure toggle, whose trailing icon turns 180 degrees) states drive Variants.')
 	.interfaces<ButtonInterfaces>()
 	.config({
-		description: 'Button configuration. `label` accepts an `$i18n` binding (lowered to `labelKey`); `{value}`, `{value2}` and `{value3}` interpolate `value`, `value2` and `value3`, and with `valueCode` `{value}` shows as inline code. `icon` and `trailingIcon` take Lucide names. `variant`, `disabled` and `loading` are the initial values of the states of the same name.',
+		description: 'Button configuration. `label` accepts an `$i18n` binding (lowered to `labelKey`); `{value}`, `{value2}` and `{value3}` interpolate `value`, `value2` and `value3`, and with `valueCode` `{value}` shows as inline code. `icon` and `trailingIcon` take Lucide names. `variant`, `disabled`, `loading`, `pressed` and `expanded` are the initial values of the states of the same name. `size` is `xs` (24px), `sm`, `md` or `lg`; `truncate` ends a long label in an ellipsis.',
 		schema: configSchema({
 			label: { type: 'string' },
 			labelKey: { type: 'string' },
@@ -1030,9 +1044,11 @@ export const buttonPlugin = createWidgetPlugin('Button')
 			value2: { type: ['string', 'number'] },
 			value3: { type: ['string', 'number'] },
 			variant: { enum: [...BUTTON_VARIANTS] },
-			size: { enum: ['sm', 'md', 'lg'] },
+			size: { enum: ['xs', 'sm', 'md', 'lg'] },
 			disabled: { type: 'boolean' },
 			loading: { type: 'boolean' },
+			pressed: { type: 'boolean' },
+			expanded: { type: 'boolean' },
 			visible: { type: 'boolean' },
 			valueCode: { type: 'boolean' },
 			icon: { type: 'string' },
@@ -1040,12 +1056,13 @@ export const buttonPlugin = createWidgetPlugin('Button')
 			kbd: { type: 'string' },
 			iconOnly: { type: 'boolean' },
 			fullWidth: { type: 'boolean' },
+			truncate: { type: 'boolean' },
 			hidden: { type: 'boolean' },
 			hideKbd: { type: 'boolean' },
 		}),
 		validate: (c): c is ButtonInterfaces['config']['raw'] => isConfigOrOmitted(c),
 		resolve: (raw) => {
-			const { label, labelKey, value, value2, value3, variant, disabled, loading, visible, valueCode, icon, trailingIcon, kbd, ...presentation } = raw ?? {}
+			const { label, labelKey, value, value2, value3, variant, disabled, loading, pressed, expanded, visible, valueCode, icon, trailingIcon, kbd, ...presentation } = raw ?? {}
 			return {
 				label: typeof label === 'string' ? label : 'Button',
 				labelKey: optionalString(labelKey),
@@ -1053,6 +1070,8 @@ export const buttonPlugin = createWidgetPlugin('Button')
 				variant: oneOf(variant, BUTTON_VARIANTS, 'secondary'),
 				disabled: Boolean(disabled),
 				loading: Boolean(loading),
+				pressed: pressed === undefined ? null : Boolean(pressed),
+				expanded: expanded === undefined ? null : Boolean(expanded),
 				visible: visible === undefined ? true : Boolean(visible),
 				valueCode: Boolean(valueCode),
 				icon: typeof icon === 'string' ? icon : '',
@@ -1070,6 +1089,8 @@ export const buttonPlugin = createWidgetPlugin('Button')
 		})
 		.visible({ ...visibleState, default: ({ config }) => config.visible })
 		.loading({ authorWritable: true, validate: isBoolean, default: ({ config }) => config.loading })
+		.pressed({ authorWritable: true, validate: isNullableBoolean, default: ({ config }) => config.pressed })
+		.expanded({ authorWritable: true, validate: isNullableBoolean, default: ({ config }) => config.expanded })
 		.variant({ authorWritable: true, validate: (v): v is ButtonVariant => (BUTTON_VARIANTS as readonly unknown[]).includes(v), default: ({ config }) => config.variant }))
 	.properties(p => p
 		.valueText({ valueContract: STRING, compute: ({ config }) => config.value })
@@ -1089,6 +1110,7 @@ export const buttonPlugin = createWidgetPlugin('Button')
 					size: presentation.size ?? 'md',
 					iconOnly: Boolean(presentation.iconOnly && config.icon),
 					fullWidth: Boolean(presentation.fullWidth),
+					truncate: Boolean(presentation.truncate),
 					hidden: Boolean(presentation.hidden),
 					touch: isTouchTier(tier),
 					kbd: presentation.hideKbd || isTouchTier(tier) ? '' : config.kbd,
@@ -1117,12 +1139,15 @@ export const ButtonRenderer = defineComponent({
 				[WIDGET_ID_ATTRIBUTE]: widgetId,
 				label,
 				variant: (state.variant.value ?? 'secondary') as ButtonVariant,
-				size: (presentation?.size ?? 'md') as 'sm' | 'md' | 'lg',
+				size: (presentation?.size ?? 'md') as 'xs' | 'sm' | 'md' | 'lg',
 				icon: props.icon.value || undefined,
 				trailingIcon: presentation?.trailingIcon || undefined,
 				kbd: presentation?.kbd || undefined,
 				iconOnly: Boolean(presentation?.iconOnly),
 				fullWidth: Boolean(presentation?.fullWidth),
+				truncate: Boolean(presentation?.truncate),
+				pressed: state.pressed.value ?? undefined,
+				expanded: state.expanded.value ?? undefined,
 				touch: Boolean(presentation?.touch),
 				disabled: Boolean(state.disabled.value),
 				loading: Boolean(state.loading.value),
@@ -1136,6 +1161,52 @@ export const ButtonRenderer = defineComponent({
 				},
 			}, hasCode ? { default: () => runNodes(runs, label) } : undefined)
 		}
+	},
+})
+
+// ---------------------------------------------------------------------------
+// 4b. ButtonGroup — Buttons joined into one control (kit/src/ui/ButtonGroup.vue)
+// ---------------------------------------------------------------------------
+export interface ButtonGroupInterfaces {
+	config: {
+		raw: ({ label?: string; labelKey?: string }) | null
+		resolved: { label: string; labelKey: string | null }
+	}
+	slots: 'buttons'
+	properties: {
+		labelResult: TranslationResult
+		label: string
+		theme: string
+	}
+}
+
+export const buttonGroupPlugin = createWidgetPlugin('ButtonGroup')
+	.description('Button widgets joined into one control, such as a split button and its menu trigger: the inner corners square off and neighbors share one border. A group landmark, named by `label` when given. Layout only: each Button keeps its own variant, size and state.')
+	.interfaces<ButtonGroupInterfaces>()
+	.config({
+		description: 'ButtonGroup configuration. `label` accepts an `$i18n` binding (lowered to `labelKey`) and names the group for assistive technology.',
+		schema: configSchema({ label: { type: 'string' }, labelKey: { type: 'string' } }),
+		validate: (c): c is ButtonGroupInterfaces['config']['raw'] => isConfigOrOmitted(c),
+		resolve: raw => ({ label: stringOr(raw?.label, ''), labelKey: optionalString(raw?.labelKey) }),
+	})
+	.slots({ buttons: { description: 'The Button widgets to join, in order' } })
+	.properties(p => p
+		.labelResult(translatedResult<ButtonGroupInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
+		.label(translatedText<ButtonGroupInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
+		.theme(themeProperty()),
+	)
+	.done()
+
+export const ButtonGroupRenderer = defineComponent({
+	name: 'ButtonGroupRenderer',
+	setup() {
+		const { widgetId, WidgetSlot, useProperties } = useWidget(buttonGroupPlugin)
+		const props = useProperties()
+		return (): VNode => h(KitButtonGroup, {
+			[WIDGET_ID_ATTRIBUTE]: widgetId,
+			label: props.label.value || undefined,
+			class: ['uiux-ref-scope', props.theme.value],
+		}, { default: () => h(WidgetSlot, { name: 'buttons' }) })
 	},
 })
 
@@ -1161,6 +1232,8 @@ export interface BadgeInterfaces {
 			icon?: string
 			/** Spins the icon, for work in progress. */
 			spin?: boolean
+			/** A long label ends in an ellipsis (the badge yields to the width its parent gives it) and its text is the `title`. */
+			truncate?: boolean
 			/** Initial value of the author-writable `visible` state (Variants flip it). */
 			visible?: boolean
 			responsive?: Responsive<BadgePresentation>
@@ -1173,6 +1246,7 @@ export interface BadgeInterfaces {
 			variant: string
 			icon: string
 			spin: boolean
+			truncate: boolean
 			visible: boolean
 			base: BadgePresentation
 			responsive?: Responsive<BadgePresentation>
@@ -1191,6 +1265,7 @@ export interface BadgeInterfaces {
 		variant: string
 		icon: string
 		spin: boolean
+		truncate: boolean
 		hidden: boolean
 		theme: string
 	}
@@ -1200,7 +1275,7 @@ export const badgePlugin = createWidgetPlugin('Badge')
 	.description('Status badge, mono identity chip, or count; carries a leading Lucide icon so color is never the only signal. Translated labels may interpolate {value} and the live render context ({viewportId}, {viewport}, {locale}, {theme}).')
 	.interfaces<BadgeInterfaces>()
 	.config({
-		description: 'Badge configuration. `label` accepts an `$i18n` binding (lowered to `labelKey`). `variant: "mono"` is the blueprint identity chip; `variant: "count"` is a count pill.',
+		description: 'Badge configuration. `label` accepts an `$i18n` binding (lowered to `labelKey`). `variant: "mono"` is the blueprint identity chip; `variant: "count"` is a count pill. `truncate` ends a long label in an ellipsis.',
 		schema: configSchema({
 			label: { type: 'string' },
 			labelKey: { type: 'string' },
@@ -1209,12 +1284,13 @@ export const badgePlugin = createWidgetPlugin('Badge')
 			variant: { enum: ['subtle', 'soft', 'solid', 'outline', 'mono', 'count'] },
 			icon: { type: 'string' },
 			spin: { type: 'boolean' },
+			truncate: { type: 'boolean' },
 			visible: { type: 'boolean' },
 			hidden: { type: 'boolean' },
 		}),
 		validate: (c): c is BadgeInterfaces['config']['raw'] => isConfigOrOmitted(c),
 		resolve: (raw) => {
-			const { label, labelKey, value, tone, variant, icon, spin, visible, ...presentation } = raw ?? {}
+			const { label, labelKey, value, tone, variant, icon, spin, truncate, visible, ...presentation } = raw ?? {}
 			return {
 				label: typeof label === 'string' ? label : '',
 				labelKey: optionalString(labelKey),
@@ -1223,6 +1299,7 @@ export const badgePlugin = createWidgetPlugin('Badge')
 				variant: variant ?? 'subtle',
 				icon: typeof icon === 'string' ? icon : '',
 				spin: Boolean(spin),
+				truncate: Boolean(truncate),
 				visible: visible === undefined ? true : Boolean(visible),
 				...splitResponsive<BadgePresentation>(presentation),
 			}
@@ -1281,6 +1358,7 @@ export const badgePlugin = createWidgetPlugin('Badge')
 		.variant({ compute: ({ config }) => config.variant })
 		.icon({ compute: ({ config }) => config.icon })
 		.spin({ compute: ({ config }) => config.spin })
+		.truncate({ compute: ({ config }) => config.truncate })
 		.hidden({
 			registerDeps: viewportDeps,
 			compute: ({ config, deps }) => Boolean(cascade(config.base, config.responsive, tierOf(readViewport(deps.viewport()))).hidden),
@@ -1303,6 +1381,7 @@ export const BadgeRenderer = defineComponent({
 			variant: props.variant.value as BadgeVariant,
 			icon: props.icon.value || undefined,
 			spin: Boolean(props.spin.value),
+			truncate: Boolean(props.truncate.value),
 			class: [
 				'uiux-ref-scope',
 				props.theme.value,
@@ -2473,6 +2552,8 @@ export interface SegmentInterfaces {
 			appearance?: SegmentAppearance
 			activeTone?: 'primary' | 'annotation'
 			selected?: boolean
+			blocked?: boolean
+			visible?: boolean
 			responsive?: Responsive<SegmentPresentation>
 		}) | null
 		resolved: {
@@ -2487,12 +2568,18 @@ export interface SegmentInterfaces {
 			appearance: SegmentAppearance
 			activeTone: string
 			selected: boolean
+			blocked: boolean
+			visible: boolean
 			base: SegmentPresentation
 			responsive?: Responsive<SegmentPresentation>
 		}
 	}
 	state: {
 		selected: boolean
+		/** The segment is unavailable here: it stays in the group, dimmed and `aria-disabled`, and does not report `click`. */
+		blocked: boolean
+		/** `false` hides the segment (a toggle that shows one of two looks swaps two segments). */
+		visible: boolean
 		/** A Locale key: while set, the badge shows its translation instead of `badge` (a Variant shows a badge on a tab). */
 		badgeKey: string
 	}
@@ -2508,10 +2595,10 @@ export interface SegmentInterfaces {
 }
 
 export const segmentPlugin = createWidgetPlugin('Segment')
-	.description('One option inside a SegmentedControl: Lucide icon, translatable label, count, and shortcut hint. The palette appearance fills Iris when selected, or tints Marker for the Comment tool (`activeTone: "annotation"`).')
+	.description('One option inside a SegmentedControl: Lucide icon, translatable label, count, and shortcut hint. The palette appearance fills Iris when selected, or tints Marker for the Comment tool (`activeTone: "annotation"`). The author-writable `blocked` state dims a segment that cannot be used here without removing it (it stays focusable with `aria-disabled` and reports no `click`), and `visible` hides it.')
 	.interfaces<SegmentInterfaces>()
 	.config({
-		description: 'Segment configuration. `label` and `badge` accept `$i18n` bindings (lowered to `labelKey`, `badgeKey`); `appearance` must match the parent SegmentedControl.',
+		description: 'Segment configuration. `label` and `badge` accept `$i18n` bindings (lowered to `labelKey`, `badgeKey`); `appearance` must match the parent SegmentedControl; `blocked` and `visible` are the initial values of the states of the same name.',
 		schema: configSchema({
 			label: { type: 'string' },
 			labelKey: { type: 'string' },
@@ -2524,12 +2611,14 @@ export const segmentPlugin = createWidgetPlugin('Segment')
 			appearance: { enum: [...SEGMENT_APPEARANCES] },
 			activeTone: { enum: ['primary', 'annotation'] },
 			selected: { type: 'boolean' },
+			blocked: { type: 'boolean' },
+			visible: { type: 'boolean' },
 			iconOnly: { type: 'boolean' },
 			hidden: { type: 'boolean' },
 		}),
 		validate: (c): c is SegmentInterfaces['config']['raw'] => isConfigOrOmitted(c),
 		resolve: (raw) => {
-			const { label, labelKey, icon, kbd, count, countTone, badge, badgeKey, appearance, activeTone, selected, ...presentation } = raw ?? {}
+			const { label, labelKey, icon, kbd, count, countTone, badge, badgeKey, appearance, activeTone, selected, blocked, visible, ...presentation } = raw ?? {}
 			return {
 				label: stringOr(label, ''),
 				labelKey: optionalString(labelKey),
@@ -2542,12 +2631,16 @@ export const segmentPlugin = createWidgetPlugin('Segment')
 				appearance: oneOf(appearance, SEGMENT_APPEARANCES, 'segment'),
 				activeTone: activeTone ?? 'primary',
 				selected: Boolean(selected),
+				blocked: Boolean(blocked),
+				visible: visible === undefined ? true : Boolean(visible),
 				...splitResponsive<SegmentPresentation>(presentation),
 			}
 		},
 	})
 	.state(state => state
 		.selected({ authorWritable: true, validate: isBoolean, default: ({ config }) => config.selected })
+		.blocked({ authorWritable: true, validate: isBoolean, default: ({ config }) => config.blocked })
+		.visible({ ...visibleState, default: ({ config }) => config.visible })
 		.badgeKey({ authorWritable: true, validate: (v): v is string => typeof v === 'string', default: ({ config }) => config.badgeKey ?? '' }))
 	.properties(p => p
 		.labelResult(translatedResult<SegmentInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
@@ -2610,6 +2703,7 @@ export const SegmentRenderer = defineComponent({
 				'aria-selected': tabLike ? String(selected) : undefined,
 				'aria-pressed': tabLike ? undefined : String(selected),
 				'aria-label': look?.iconOnly ? label : undefined,
+				'aria-disabled': state.blocked.value ? 'true' : undefined,
 				title: look?.iconOnly ? label : undefined,
 				class: [
 					'uiux-ref-scope',
@@ -2618,11 +2712,14 @@ export const SegmentRenderer = defineComponent({
 					`appearance-${appearance}`,
 					`tone-${look?.activeTone ?? 'primary'}`,
 					selected ? 'is-selected' : '',
+					state.blocked.value ? 'is-blocked' : '',
 					look?.iconOnly ? 'is-icon-only' : '',
 					look?.touch ? 'is-touch' : '',
-					look?.hidden ? 'uiux-ref-hidden' : '',
+					look?.hidden || !state.visible.value ? 'uiux-ref-hidden' : '',
 				],
-				onClick: () => emit.click(),
+				onClick: () => {
+					if (!state.blocked.value) emit.click()
+				},
 			}, children)
 		}
 	},
@@ -2878,10 +2975,13 @@ export interface ContextChipInterfaces {
 			valueKey?: string
 			mono?: boolean
 			chevron?: boolean
+			invalid?: boolean
+			disabled?: boolean
 			responsive?: Responsive<ContextChipPresentation>
 		}) | null
-		resolved: { icon: string; label: string; labelKey: string | null; value: string; valueKey: string | null; mono: boolean; chevron: boolean; base: ContextChipPresentation; responsive?: Responsive<ContextChipPresentation> }
+		resolved: { icon: string; label: string; labelKey: string | null; value: string; valueKey: string | null; mono: boolean; chevron: boolean; invalid: boolean; disabled: boolean; base: ContextChipPresentation; responsive?: Responsive<ContextChipPresentation> }
 	}
+	state: { invalid: boolean; disabled: boolean }
 	events: { click: readonly [] }
 	properties: {
 		contextViewportId: string
@@ -2898,18 +2998,19 @@ export interface ContextChipInterfaces {
 }
 
 export const contextChipPlugin = createWidgetPlugin('ContextChip')
-	.description('Render-context chip: icon, muted label and a highlighted value with a select chevron. Translated values may interpolate the live render context ({viewportId}, {viewport}, {locale}, {theme}).')
+	.description('Render-context chip: icon, muted label and a highlighted value with a select chevron. Translated values may interpolate the live render context ({viewportId}, {viewport}, {locale}, {theme}). The author-writable `invalid` state shows the value in the error ink with an error ring (a selection the Workspace no longer has), and `disabled` locks the chip (a Prototype player fixes the Variant).')
 	.interfaces<ContextChipInterfaces>()
 	.config({
-		description: 'ContextChip configuration. `label` and `value` accept `$i18n` bindings (lowered to `labelKey`, `valueKey`).',
+		description: 'ContextChip configuration. `label` and `value` accept `$i18n` bindings (lowered to `labelKey`, `valueKey`); `invalid` and `disabled` are the initial values of the states of the same name.',
 		schema: configSchema({
 			icon: { type: 'string' }, label: { type: 'string' }, labelKey: { type: 'string' },
 			value: { type: 'string' }, valueKey: { type: 'string' }, mono: { type: 'boolean' }, chevron: { type: 'boolean' },
+			invalid: { type: 'boolean' }, disabled: { type: 'boolean' },
 			hideLabel: { type: 'boolean' }, hidden: { type: 'boolean' },
 		}),
 		validate: (c): c is ContextChipInterfaces['config']['raw'] => isConfigOrOmitted(c),
 		resolve: (raw) => {
-			const { icon, label, labelKey, value, valueKey, mono, chevron, ...presentation } = raw ?? {}
+			const { icon, label, labelKey, value, valueKey, mono, chevron, invalid, disabled, ...presentation } = raw ?? {}
 			return {
 				icon: stringOr(icon, ''),
 				label: stringOr(label, ''),
@@ -2918,10 +3019,15 @@ export const contextChipPlugin = createWidgetPlugin('ContextChip')
 				valueKey: optionalString(valueKey),
 				mono: Boolean(mono),
 				chevron: chevron === undefined ? true : Boolean(chevron),
+				invalid: Boolean(invalid),
+				disabled: Boolean(disabled),
 				...splitResponsive<ContextChipPresentation>(presentation),
 			}
 		},
 	})
+	.state(state => state
+		.invalid({ authorWritable: true, validate: isBoolean, default: ({ config }) => config.invalid })
+		.disabled({ authorWritable: true, validate: isBoolean, default: ({ config }) => config.disabled }))
 	.properties(p => p
 		.contextViewportId({ valueContract: STRING, registerDeps: viewportDeps, compute: ({ deps }) => readViewport(deps.viewport())?.id ?? '' })
 		.contextViewport({
@@ -2973,7 +3079,8 @@ export const contextChipPlugin = createWidgetPlugin('ContextChip')
 export const ContextChipRenderer = defineComponent({
 	name: 'ContextChipRenderer',
 	setup() {
-		const { widgetId, useProperties, emit } = useWidget(contextChipPlugin)
+		const { widgetId, useState, useProperties, emit } = useWidget(contextChipPlugin)
+		const state = useState()
 		const props = useProperties()
 		return (): VNode => {
 			const look = props.look.value
@@ -2983,8 +3090,11 @@ export const ContextChipRenderer = defineComponent({
 				type: 'button',
 				'aria-haspopup': 'listbox',
 				'aria-label': look?.hideLabel ? `${label}: ${props.value.value ?? ''}` : undefined,
-				class: ['uiux-ref-scope', 'uiux-ref-chip', props.theme.value, look?.touch ? 'is-touch' : '', look?.hidden ? 'uiux-ref-hidden' : ''],
-				onClick: () => emit.click(),
+				disabled: Boolean(state.disabled.value),
+				class: ['uiux-ref-scope', 'uiux-ref-chip', props.theme.value, look?.touch ? 'is-touch' : '', state.invalid.value ? 'is-invalid' : '', look?.hidden ? 'uiux-ref-hidden' : ''],
+				onClick: () => {
+					if (!state.disabled.value) emit.click()
+				},
 			}, [
 				iconNode(look?.icon, 16),
 				look?.hideLabel ? null : h('span', label),
@@ -5188,6 +5298,7 @@ const catalogWidgets: Readonly<Record<string, AdapterWidgetCatalogEntry>> = {
 	Panel: { i18n: { fields: { title: i18nField('title', VALUE_PARAMS), description: i18nField('description', VALUE_PARAMS), closeLabel: i18nField('closeLabel') } } },
 	Text: { i18n: { fields: { text: i18nField('text', VALUE_PARAMS) } } },
 	Button: { i18n: { fields: { label: i18nField('label', VALUE_PARAMS) } } },
+	ButtonGroup: i18nFields('label'),
 	Badge: { i18n: { fields: { label: i18nField('label', { value: 'valueText', ...RENDER_CONTEXT_PARAMS }) } } },
 	TextInput: i18nFields('value', 'placeholder', 'label', 'help', 'error'),
 	NavItem: i18nFields('label', 'meta', 'badge'),
@@ -5233,6 +5344,7 @@ export const manifest: AdapterManifest = {
 		panelPlugin,
 		textPlugin,
 		buttonPlugin,
+		buttonGroupPlugin,
 		badgePlugin,
 		textInputPlugin,
 		navItemPlugin,
@@ -5277,6 +5389,7 @@ export const manifest: AdapterManifest = {
 		{ type: 'Panel', component: PanelRenderer },
 		{ type: 'Text', component: TextRenderer },
 		{ type: 'Button', component: ButtonRenderer },
+		{ type: 'ButtonGroup', component: ButtonGroupRenderer },
 		{ type: 'Badge', component: BadgeRenderer },
 		{ type: 'TextInput', component: TextInputRenderer },
 		{ type: 'NavItem', component: NavItemRenderer },

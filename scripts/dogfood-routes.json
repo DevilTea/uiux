@@ -9,7 +9,15 @@
 				"e9f5d101-3a1b-4c2d-9e4f-6b7c8d9eaf01",
 				"e9f5d102-4b2c-4d3e-8f50-7c8d9eafb002",
 				"e9f5d103-5c3d-4e4f-9a61-8d9eafb0c103",
-				"e9f5d104-6d4e-4f50-8b72-9eafb0c1d204"
+				"e9f5d104-6d4e-4f50-8b72-9eafb0c1d204",
+				"f6a2d101-8b3c-4d4e-9f50-6a7b8c9d0e01",
+				"f6a2d102-8b3c-4d4e-9f50-6a7b8c9d0e02",
+				"f6a2d109-8b3c-4d4e-9f50-6a7b8c9d0e09",
+				"f6a2d103-8b3c-4d4e-9f50-6a7b8c9d0e03",
+				"f6a2d104-8b3c-4d4e-9f50-6a7b8c9d0e04",
+				"f6a2d108-8b3c-4d4e-9f50-6a7b8c9d0e08",
+				"f6a2d106-8b3c-4d4e-9f50-6a7b8c9d0e06",
+				"f6a2d107-8b3c-4d4e-9f50-6a7b8c9d0e07"
 			]
 		},
 		"/flows": {
@@ -41,7 +49,9 @@
 			]
 		},
 		"/preview": {
-			"todo": "the Preview host page and its failure and loading states have no View yet (Preview failures and Preview host states in #409)"
+			"views": [
+				"b5f8c101-2d4a-4e6b-8c3f-9a1d5e7b0c01"
+			]
 		},
 		"/reviews": {
 			"views": [
@@ -69,7 +79,12 @@
 				"a4c1d703-6e2b-4f3a-9d5c-2b7e1f8a0c03",
 				"a4c1d704-6e2b-4f3a-9d5c-2b7e1f8a0c04",
 				"a4c1d705-6e2b-4f3a-9d5c-2b7e1f8a0c05",
-				"9677f556-50dd-4c04-9466-54d17bf1e2fb"
+				"9677f556-50dd-4c04-9466-54d17bf1e2fb",
+				"b5f8c102-2d4a-4e6b-8c3f-9a1d5e7b0c02",
+				"b5f8c103-2d4a-4e6b-8c3f-9a1d5e7b0c03",
+				"b5f8c104-2d4a-4e6b-8c3f-9a1d5e7b0c04",
+				"b5f8c105-2d4a-4e6b-8c3f-9a1d5e7b0c05",
+				"f6a2d105-8b3c-4d4e-9f50-6a7b8c9d0e05"
 			]
 		},
 		"/workspace": {

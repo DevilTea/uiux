@@ -70,7 +70,7 @@
 .uiux-ref-text.variant-ui { font-size: 13px; line-height: 20px; }
 .uiux-ref-text.variant-label, .uiux-ref-text.variant-caption { font-size: 12px; line-height: 16px; }
 .uiux-ref-text.variant-label { font-weight: 500; }
-.uiux-ref-text.variant-mono, .uiux-ref-text.variant-code { font-size: 12px; line-height: 16px; font-family: var(--kit-font-mono); }
+.uiux-ref-text.variant-mono, .uiux-ref-text.variant-code { font-size: 12px; line-height: 16px; font-family: var(--kit-font-mono); font-feature-settings: var(--kit-font-mono-features); }
 .uiux-ref-text:lang(zh-TW).variant-ui { line-height: 22px; }
 .uiux-ref-text:lang(zh-TW).variant-body { line-height: 24px; }
 .uiux-ref-text.weight-normal { font-weight: 400; }
@@ -87,7 +87,7 @@
 .uiux-ref-text.tone-warning { color: var(--kit-warning); }
 .uiux-ref-text.tone-danger { color: var(--kit-danger); }
 .uiux-ref-text.tone-info { color: var(--kit-info); }
-.uiux-ref-text.is-mono { font-family: var(--kit-font-mono); }
+.uiux-ref-text.is-mono { font-family: var(--kit-font-mono); font-feature-settings: var(--kit-font-mono-features); }
 .uiux-ref-text.is-truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .uiux-ref-text.is-clamped { display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; }
 
@@ -191,6 +191,7 @@
 .uiux-ref-segment.appearance-palette.is-selected { background: var(--kit-primary); color: var(--kit-on-primary); font-weight: 500; }
 .uiux-ref-segment.appearance-palette.is-selected.tone-annotation { background: var(--kit-annotation-subtle); color: var(--kit-annotation); box-shadow: inset 0 0 0 1px var(--kit-annotation-border); }
 .uiux-ref-segment.appearance-palette.is-selected .kit-kbd { background: transparent; color: inherit; border-color: currentColor; }
+.uiux-ref-segment.is-blocked, .uiux-ref-segment.is-blocked:hover, .uiux-ref-segment.appearance-palette.is-selected.is-blocked { color: var(--kit-text-subtle); background: transparent; box-shadow: none; cursor: not-allowed; }
 .uiux-ref-segment.is-touch { height: 44px; }
 .uiux-ref-segment.is-icon-only { width: 32px; padding: 0; }
 .uiux-ref-segment.is-icon-only.is-touch { width: 44px; }
@@ -232,8 +233,12 @@
 .uiux-ref-chip:hover { background: var(--kit-bg-surface-elevated); }
 .uiux-ref-chip:focus-visible { outline: 2px solid var(--kit-primary); outline-offset: 2px; }
 .uiux-ref-chip-value { color: var(--kit-text-highlighted); font-weight: 500; }
-.uiux-ref-chip-value.is-mono { font-family: var(--kit-font-mono); font-size: 12px; font-weight: 400; }
+.uiux-ref-chip-value.is-mono { font-family: var(--kit-font-mono); font-feature-settings: var(--kit-font-mono-features); font-size: 12px; font-weight: 400; }
 .uiux-ref-chip.is-touch { height: 44px; }
+.uiux-ref-chip.is-invalid { box-shadow: inset 0 0 0 1px var(--kit-danger); }
+.uiux-ref-chip.is-invalid .uiux-ref-chip-value { color: var(--kit-danger); }
+.uiux-ref-chip:disabled { cursor: not-allowed; opacity: 0.75; }
+.uiux-ref-chip:disabled:hover { background: transparent; }
 
 /* TimelineItem */
 .uiux-ref-timeline { display: flex; gap: 10px; align-items: flex-start; min-width: 0; }
@@ -299,7 +304,7 @@
 .uiux-ref-empty.is-compact .uiux-ref-empty-actions { margin-top: 0; }
 
 /* Inline code inside a sentence (Text, Button and Alert with `inlineCode`). */
-.uiux-ref-code { font-family: var(--kit-font-mono); font-size: 0.923em; line-height: 1; padding: 1px 4px; border-radius: 4px; background-color: var(--kit-bg-surface-elevated); color: var(--kit-text-highlighted); }
+.uiux-ref-code { font-family: var(--kit-font-mono); font-feature-settings: var(--kit-font-mono-features); font-size: 0.923em; line-height: 1; padding: 1px 4px; border-radius: 4px; background-color: var(--kit-bg-surface-elevated); color: var(--kit-text-highlighted); }
 
 /* Stack outline: the region is a changed region of a diff (added, removed, modified or moved). */
 .uiux-ref-stack.is-outline-added { outline: 2px solid var(--kit-success); outline-offset: 2px; }
@@ -342,7 +347,7 @@
 .uiux-ref-graph-edges .arrow-problem { fill: var(--kit-danger); }
 .uiux-ref-graph-edge-label {
   position: absolute; z-index: 10; max-width: 176px; padding: 2px 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; transform: translate(-50%, -50%);
-  font-family: var(--kit-font-mono); font-size: 12px; line-height: 16px; color: var(--kit-text-muted); background-color: var(--kit-bg-surface);
+  font-family: var(--kit-font-mono); font-feature-settings: var(--kit-font-mono-features); font-size: 12px; line-height: 16px; color: var(--kit-text-muted); background-color: var(--kit-bg-surface);
   border: 1px solid var(--kit-border); border-radius: 4px; cursor: pointer; transition: background-color 120ms ease, color 120ms ease;
 }
 .uiux-ref-graph-edge-label:hover { background-color: var(--kit-bg-surface-elevated); color: var(--kit-text); }

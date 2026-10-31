@@ -170,7 +170,7 @@ function onInput(event: Event): void {
 textarea.kit-field__control { height: auto; min-height: 64px; resize: none; }
 .kit-field__control.has-icon { padding-left: 32px; }
 .kit-field__control.has-kbd { padding-right: 44px; }
-.kit-field__control.is-mono { font-family: var(--kit-font-mono); font-size: 12px; }
+.kit-field__control.is-mono { font-family: var(--kit-font-mono); font-feature-settings: var(--kit-font-mono-features); font-size: 12px; }
 .kit-field__control.is-touch { height: 44px; font-size: 16px; }
 .kit-field__control:focus { border-color: var(--kit-primary); box-shadow: 0 0 0 1px var(--kit-primary); }
 .kit-field__control::placeholder { color: var(--kit-text-subtle); }
