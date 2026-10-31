@@ -12,6 +12,10 @@ import type { FetchErrorDetails } from '../../utils/fetch-error'
 import { splitReadinessDiagnostics } from '../../utils/readiness'
 import HandoffDiagnosticList from './HandoffDiagnosticList.vue'
 import WbErrorDescription from '../workbench/WbErrorDescription.vue'
+import KitBadge from '~/components/kit/ui/Badge.vue'
+import KitButton from '~/components/kit/ui/Button.vue'
+import KitIcon from '~/components/kit/ui/Icon.vue'
+import KitSkeleton from '~/components/kit/ui/Skeleton.vue'
 
 /**
  * Export handoff (brief f, section 5): explicit roots (the whole Workspace, or chosen Views,
@@ -161,25 +165,22 @@ function middle(value: string | undefined): string {
         data-handoff-result
       >
         <div class="flex flex-wrap items-center gap-2">
-          <UBadge
+          <KitBadge
             v-if="exportedReady"
-            color="success"
-            variant="subtle"
-            icon="i-lucide-badge-check"
+            tone="success"
+            icon="badge-check"
             data-handoff-claim="ready"
             translate="no"
           >
             implementation-ready
-          </UBadge>
-          <UBadge
+          </KitBadge>
+          <KitBadge
             v-else
-            color="neutral"
-            variant="subtle"
-            icon="i-lucide-file-search"
+            icon="file-search"
             data-handoff-claim="diagnostic"
           >
             {{ t('handoff.diagnostic') }}
-          </UBadge>
+          </KitBadge>
           <span class="text-sm text-muted">{{ exportedReady ? t('handoff.result.readyNote') : t('handoff.result.diagnosticNote') }}</span>
         </div>
         <dl class="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 text-sm">
@@ -190,11 +191,12 @@ function middle(value: string | undefined): string {
             {{ middle(result.bundleIdentity) }}
           </dd>
           <dd>
-            <UButton
+            <KitButton
               size="xs"
               variant="ghost"
-              icon="i-lucide-copy"
-              :aria-label="t('handoff.result.copyBundle')"
+              icon="copy"
+              icon-only
+              :label="t('handoff.result.copyBundle')"
               @click="copy(result.bundleIdentity)"
             />
           </dd>
@@ -205,11 +207,12 @@ function middle(value: string | undefined): string {
             {{ middle(result.manifestArtifactDigest) }}
           </dd>
           <dd>
-            <UButton
+            <KitButton
               size="xs"
               variant="ghost"
-              icon="i-lucide-copy"
-              :aria-label="t('handoff.result.copyManifest')"
+              icon="copy"
+              icon-only
+              :label="t('handoff.result.copyManifest')"
               @click="copy(result.manifestArtifactDigest)"
             />
           </dd>
@@ -269,33 +272,41 @@ function middle(value: string | undefined): string {
             <h3 class="text-title font-semibold text-highlighted">
               {{ t('handoff.assessment') }}
             </h3>
-            <UButton
+            <KitButton
               size="xs"
               variant="ghost"
-              icon="i-lucide-refresh-cw"
+              icon="refresh-cw"
               :loading="entry?.status === 'loading'"
               :disabled="!roots.length"
               @click="readiness.assess(roots, { force: true })"
             >
               {{ t('ready.recheck') }}
-            </UButton>
+            </KitButton>
           </div>
 
           <div
             v-if="!entry || entry.status === 'loading' && !entry.readiness"
             class="space-y-2"
           >
-            <USkeleton
-              class="h-5 w-48"
-              :aria-label="t('common.loading')"
+            <KitSkeleton
+              class="wb-skeleton animate-pulse"
+              :width="192"
+              :height="20"
+              :radius="6"
+              :label="t('common.loading')"
             />
-            <USkeleton
-              class="h-4 w-full"
-              :aria-label="t('common.loading')"
+            <KitSkeleton
+              class="wb-skeleton animate-pulse"
+              :height="16"
+              :radius="6"
+              :label="t('common.loading')"
             />
-            <USkeleton
-              class="h-4 w-2/3"
-              :aria-label="t('common.loading')"
+            <KitSkeleton
+              class="wb-skeleton animate-pulse"
+              width="66.667%"
+              :height="16"
+              :radius="6"
+              :label="t('common.loading')"
             />
           </div>
 
@@ -326,10 +337,7 @@ function middle(value: string | undefined): string {
               data-handoff-state
               :data-ready="ready"
             >
-              <UIcon
-                :name="ready ? 'i-lucide-badge-check' : 'i-lucide-triangle-alert'"
-                class="size-4"
-              />
+              <KitIcon :name="ready ? 'badge-check' : 'triangle-alert'" />
               {{ ready ? 'implementation-ready' : t('ready.notReady') }}
             </p>
             <div
@@ -374,44 +382,39 @@ function middle(value: string | undefined): string {
           class="me-auto flex items-center gap-1.5 text-sm text-muted"
           data-access-notice
         >
-          <UIcon
-            name="i-lucide-user-lock"
-            class="size-4"
-          />
+          <KitIcon name="user-lock" />
           {{ access.can('handoff.export') ? t('handoff.unsupported') : t('access.requiresKey', { key: 'handoff.export' }) }}
         </p>
         <template v-if="result">
-          <UButton
-            icon="i-lucide-download"
+          <KitButton
+            icon="download"
             :disabled="!result.manifest"
             @click="downloadManifest"
           >
             {{ t('handoff.result.download') }}
-          </UButton>
-          <UButton
-            color="primary"
-            variant="solid"
+          </KitButton>
+          <KitButton
+            variant="primary"
             @click="open = false"
           >
             {{ t('common.close') }}
-          </UButton>
+          </KitButton>
         </template>
         <template v-else>
-          <UButton @click="open = false">
+          <KitButton @click="open = false">
             {{ canExport ? t('common.cancel') : t('common.close') }}
-          </UButton>
-          <UButton
+          </KitButton>
+          <KitButton
             v-if="canExport"
-            color="primary"
-            variant="solid"
-            icon="i-lucide-package"
+            variant="primary"
+            icon="package"
             :loading="exporting"
             :disabled="!roots.length || entry?.status !== 'ok'"
             data-handoff-export
             @click="runExport"
           >
             {{ ready ? t('handoff.exportReady') : t('handoff.exportSnapshot') }}
-          </UButton>
+          </KitButton>
         </template>
       </div>
     </template>

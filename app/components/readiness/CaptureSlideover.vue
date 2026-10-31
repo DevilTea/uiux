@@ -8,6 +8,8 @@ import { useWorkbenchFeedback } from '../../composables/useWorkbenchFeedback'
 import type { FetchErrorDetails } from '../../utils/fetch-error'
 import { contextKey, expandContexts, type CaptureContext, type CaptureDimension } from '../../utils/readiness'
 import { diagnosticLines } from '../../utils/diagnostic-copy'
+import KitButton from '~/components/kit/ui/Button.vue'
+import KitIcon from '~/components/kit/ui/Icon.vue'
 
 /**
  * Capture Evidence for the current View (brief f, section 5): an explicit list of resolved
@@ -186,11 +188,11 @@ onBeforeUnmount(() => {
 })
 
 const statusIcon: Record<RowStatus, string> = {
-	idle: 'i-lucide-circle-dashed',
-	queued: 'i-lucide-clock',
-	running: 'i-lucide-loader-circle',
-	captured: 'i-lucide-circle-check',
-	failed: 'i-lucide-circle-x',
+	idle: 'circle-dashed',
+	queued: 'clock',
+	running: 'loader-circle',
+	captured: 'circle-check',
+	failed: 'circle-x',
 }
 </script>
 
@@ -238,19 +240,19 @@ const statusIcon: Record<RowStatus, string> = {
           />
         </div>
         <div class="flex flex-wrap items-center gap-1.5">
-          <UButton
+          <KitButton
             size="sm"
-            icon="i-lucide-plus"
+            icon="plus"
             :disabled="running"
             data-capture-add
             @click="addDraft"
           >
             {{ t('evidence.addToList') }}
-          </UButton>
+          </KitButton>
         </div>
         <div class="flex flex-wrap items-center gap-1">
           <span class="me-1 text-xs text-muted">{{ t('evidence.expandLabel') }}</span>
-          <UButton
+          <KitButton
             v-for="dimension in (['variants', 'locales', 'viewports', 'themes'] as const)"
             :key="dimension"
             size="sm"
@@ -260,7 +262,7 @@ const statusIcon: Record<RowStatus, string> = {
             @click="expand(dimension)"
           >
             {{ t(`evidence.expand.${dimension}`) }}
-          </UButton>
+          </KitButton>
         </div>
       </section>
 
@@ -322,10 +324,9 @@ const statusIcon: Record<RowStatus, string> = {
                 :alt="t('evidence.thumbAlt', { view: selectedView?.resource.name ?? '', context: contextLabel(row.context) })"
                 class="h-8 w-12 rounded-sm border border-default object-cover object-top"
               >
-              <UIcon
+              <KitIcon
                 v-if="row.status !== 'idle'"
                 :name="statusIcon[row.status]"
-                class="size-4"
                 :class="{
                   'text-dimmed': row.status === 'queued',
                   'animate-spin text-muted': row.status === 'running',
@@ -334,13 +335,14 @@ const statusIcon: Record<RowStatus, string> = {
                 }"
               />
               <span class="sr-only">{{ t(`evidence.rowStatus.${row.status}`) }}</span>
-              <UButton
+              <KitButton
                 v-if="row.status === 'idle' || row.status === 'failed'"
                 size="xs"
                 variant="ghost"
-                icon="i-lucide-x"
+                icon="x"
+                icon-only
                 :disabled="running"
-                :aria-label="t('evidence.removeRow', { context: contextLabel(row.context) })"
+                :label="t('evidence.removeRow', { context: contextLabel(row.context) })"
                 @click="remove(row.key)"
               />
             </div>
@@ -371,29 +373,28 @@ const statusIcon: Record<RowStatus, string> = {
             v-if="total"
             class="me-auto text-xs text-muted tabular-nums"
           >{{ t('evidence.progress', { done, total }) }}</span>
-          <UButton
+          <KitButton
             v-if="running"
             @click="requestStop"
           >
             {{ t('evidence.stop') }}
-          </UButton>
-          <UButton
+          </KitButton>
+          <KitButton
             v-else
             @click="open = false"
           >
             {{ done ? t('common.close') : t('common.cancel') }}
-          </UButton>
-          <UButton
-            color="primary"
-            variant="solid"
-            icon="i-lucide-camera"
+          </KitButton>
+          <KitButton
+            variant="primary"
+            icon="camera"
             :loading="running"
             :disabled="!checkedRows.length"
             data-capture-run
             @click="capture"
           >
             {{ t('evidence.captureN', checkedRows.length) }}
-          </UButton>
+          </KitButton>
         </div>
       </div>
     </template>

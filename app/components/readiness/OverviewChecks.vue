@@ -45,6 +45,9 @@ import type { I18nResource, I18nWarning } from '../../../src/domain/i18n/schema'
 import WbErrorDescription from '../workbench/WbErrorDescription.vue'
 import { diagnosticText } from '../../utils/diagnostic-copy'
 import { missingDefaultLocaleDiagnostic } from '../../../src/i18n/runtime'
+import KitButton from '~/components/kit/ui/Button.vue'
+import KitIcon from '~/components/kit/ui/Icon.vue'
+import KitSkeleton from '~/components/kit/ui/Skeleton.vue'
 import {
 	MAX_CHECKS_RUN_CODE_LENGTH,
 	MAX_CHECKS_RUN_IDENTIFIER_LENGTH,
@@ -511,13 +514,13 @@ const kitRows = computed(() => KIT_CHECKS.map((check) => {
 }))
 
 const KIT_STATE_ICON: Record<string, string> = {
-	checking: 'i-lucide-loader-circle',
-	completed: 'i-lucide-circle-check',
-	incomplete: 'i-lucide-circle-dashed',
-	failed: 'i-lucide-circle-x',
-	not_applicable: 'i-lucide-circle-minus',
-	not_permitted: 'i-lucide-lock',
-	not_run: 'i-lucide-circle',
+	checking: 'loader-circle',
+	completed: 'circle-check',
+	incomplete: 'circle-dashed',
+	failed: 'circle-x',
+	not_applicable: 'circle-minus',
+	not_permitted: 'lock',
+	not_run: 'circle',
 }
 
 // ---- Sources and their check states ------------------------------------------------------------
@@ -526,11 +529,11 @@ const KIT_STATE_ICON: Record<string, string> = {
 type SourceRow = Readonly<{ id: FindingSource; state: CheckState; count: number; note?: string; requiredKey?: string }>
 
 const SOURCE_STATE_ICON: Record<CheckState, string> = {
-	not_checked: 'i-lucide-circle',
-	checking: 'i-lucide-loader-circle',
-	completed: 'i-lucide-circle-check',
-	incomplete: 'i-lucide-circle-dashed',
-	failed: 'i-lucide-circle-x',
+	not_checked: 'circle',
+	checking: 'loader-circle',
+	completed: 'circle-check',
+	incomplete: 'circle-dashed',
+	failed: 'circle-x',
 }
 
 /** The Product Kit source as one state: its checks' own states, or why they did not run. */
@@ -646,12 +649,12 @@ function clearFilters(): void {
 }
 
 const RESOURCE_ICON: Record<FindingResource['kind'], string> = {
-	'product-kit': 'i-lucide-package',
-	workspace: 'i-lucide-settings-2',
-	view: 'i-lucide-app-window',
-	flow: 'i-lucide-workflow',
-	locale: 'i-lucide-globe',
-	asset: 'i-lucide-image',
+	'product-kit': 'package',
+	workspace: 'settings-2',
+	view: 'app-window',
+	flow: 'workflow',
+	locale: 'globe',
+	asset: 'image',
 }
 
 type CheckTreeItem = TreeItem & {
@@ -739,7 +742,7 @@ function problemItems(list: readonly Finding[], prefix: string): CheckTreeItem[]
 			severity: group.severity,
 			count: group.resources.length,
 			countKey: catalog ? 'checks.viewCount' : 'checks.resourceCount',
-			icon: 'i-lucide-triangle-alert',
+			icon: 'triangle-alert',
 			defaultExpanded: true,
 			children: group.resources.map(({ resource, findings: members }) => ({
 				id: `${prefix}resource:${group.key.replaceAll('\u0000', '|')}:${resource.kind}:${resource.key}`,
@@ -757,7 +760,7 @@ function problemItems(list: readonly Finding[], prefix: string): CheckTreeItem[]
 					detail: finding.widgetId || finding.source === 'runtime' ? findingDetail(finding) : finding.translationKey !== undefined ? diagnosticText(finding) : finding.path,
 					meta: { severity: finding.severity, source: finding.source, state: finding.checkState, scope: findingScope(finding) },
 					action: finding.translationKey !== undefined ? t('checks.openCell') : finding.widgetId ? t('checks.openWidget') : t('checks.open'),
-					icon: finding.translationKey !== undefined ? 'i-lucide-table-cells-merge' : finding.widgetId ? 'i-lucide-crosshair' : 'i-lucide-arrow-up-right',
+					icon: finding.translationKey !== undefined ? 'table-cells-merge' : finding.widgetId ? 'crosshair' : 'arrow-up-right',
 					onSelect: () => { void open(finding) },
 				})),
 			})),
@@ -778,7 +781,7 @@ const items = computed<CheckTreeItem[]>(() => sectionFindings(filtered.value, gr
 		label,
 		count: section.findings.length,
 		countKey: 'checks.findingCount',
-		icon: groupBy.value === 'view' ? 'i-lucide-app-window' : groupBy.value === 'source' ? 'i-lucide-layers' : 'i-lucide-gauge',
+		icon: groupBy.value === 'view' ? 'app-window' : groupBy.value === 'source' ? 'layers' : 'gauge',
 		defaultExpanded: true,
 		children: problemItems(section.findings, `${section.key}:`),
 	}]
@@ -791,16 +794,15 @@ const items = computed<CheckTreeItem[]>(() => sectionFindings(filtered.value, gr
     data-overview-checks
   >
     <div class="flex flex-wrap items-center gap-2">
-      <UButton
-        color="primary"
-        variant="solid"
-        icon="i-lucide-play"
+      <KitButton
+        variant="primary"
+        icon="play"
         :loading="running"
         data-run-checks
         @click="runChecks"
       >
         {{ t('checks.run') }}
-      </UButton>
+      </KitButton>
       <span
         class="text-sm text-muted"
         role="status"
@@ -856,9 +858,9 @@ const items = computed<CheckTreeItem[]>(() => sectionFindings(filtered.value, gr
           :data-check-source="row.id"
           :data-check-source-state="row.state"
         >
-          <UIcon
+          <KitIcon
             :name="SOURCE_STATE_ICON[row.state]"
-            class="mt-0.5 size-4 shrink-0"
+            class="mt-0.5"
             :class="[row.state === 'failed' ? 'text-error' : row.state === 'completed' ? 'text-success' : 'text-muted', row.state === 'checking' ? 'animate-spin' : '']"
           />
           <span class="text-default">{{ t(`checks.source.${row.id}`) }}</span>
@@ -928,17 +930,16 @@ const items = computed<CheckTreeItem[]>(() => sectionFindings(filtered.value, gr
         class="w-40"
         data-check-filter="variant"
       />
-      <UButton
+      <KitButton
         v-if="filterActive"
-        color="neutral"
         variant="ghost"
         size="sm"
-        icon="i-lucide-filter-x"
+        icon="filter-x"
         data-check-clear-filters
         @click="clearFilters"
       >
         {{ t('checks.clearFilters') }}
-      </UButton>
+      </KitButton>
     </div>
 
     <UAlert
@@ -1001,9 +1002,9 @@ const items = computed<CheckTreeItem[]>(() => sectionFindings(filtered.value, gr
           :data-kit-check="row.check"
           :data-kit-check-state="row.state"
         >
-          <UIcon
+          <KitIcon
             :name="KIT_STATE_ICON[row.state]!"
-            class="mt-0.5 size-4 shrink-0"
+            class="mt-0.5"
             :class="[row.state === 'failed' ? 'text-error' : row.state === 'completed' ? 'text-success' : 'text-muted', row.state === 'checking' ? 'animate-spin' : '']"
           />
           <span class="text-default">{{ t(`checks.kit.checks.${row.check}`) }}</span>
@@ -1039,11 +1040,13 @@ const items = computed<CheckTreeItem[]>(() => sectionFindings(filtered.value, gr
       v-if="running && !lastRun && !findings.length"
       class="space-y-2"
     >
-      <USkeleton
+      <KitSkeleton
         v-for="index in 4"
         :key="index"
-        class="h-7 w-full"
-        :aria-label="t('common.loading')"
+        class="wb-skeleton animate-pulse"
+        :height="28"
+        :radius="6"
+        :label="t('common.loading')"
       />
     </div>
 
@@ -1093,9 +1096,9 @@ const items = computed<CheckTreeItem[]>(() => sectionFindings(filtered.value, gr
       data-checks-tree
     >
       <template #item-leading="{ item }">
-        <UIcon
+        <KitIcon
           :name="item.icon!"
-          class="mt-0.5 size-4 shrink-0"
+          class="mt-0.5"
           :class="(item as CheckTreeItem).level === 'problem' ? ((item as CheckTreeItem).severity === 'error' ? 'text-error' : 'text-warning') : 'text-muted'"
         />
       </template>
@@ -1144,18 +1147,18 @@ const items = computed<CheckTreeItem[]>(() => sectionFindings(filtered.value, gr
           class="ms-auto shrink-0 text-xs text-muted tabular-nums"
           data-check-count
         >{{ t((item as CheckTreeItem).countKey!, (item as CheckTreeItem).count ?? 0) }}</span>
-        <UIcon
+        <KitIcon
           v-if="(item as CheckTreeItem).level !== 'finding'"
-          name="i-lucide-chevron-down"
-          class="size-4 shrink-0 text-dimmed transition-transform"
+          name="chevron-down"
+          class="text-dimmed transition-transform"
           :class="expanded ? 'rotate-180' : ''"
         />
         <span
           v-else
           class="ms-auto inline-flex shrink-0 items-center gap-0.5 text-xs text-muted"
-        >{{ (item as CheckTreeItem).action }}<UIcon
-          name="i-lucide-chevron-right"
-          class="size-3.5"
+        >{{ (item as CheckTreeItem).action }}<KitIcon
+          name="chevron-right"
+          :size="14"
         /></span>
       </template>
     </UTree>
