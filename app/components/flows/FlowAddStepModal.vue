@@ -4,6 +4,7 @@ import { useI18n } from '#imports'
 import { injectFlowEditor } from '../../composables/useFlowEditor'
 import { useWorkbench } from '../../composables/useWorkbench'
 import { orderSteps } from '../../utils/flow-graph'
+import KitButton from '~/components/kit/ui/Button.vue'
 
 /**
  * Adds a step together with the transition that reaches it, so the draft never gains an unreachable
@@ -185,18 +186,16 @@ const viewSearch = computed(() => ({ placeholder: t('flows.inspector.searchViews
     </template>
     <template #footer>
       <div class="flex w-full justify-end gap-2">
-        <UButton
-          color="neutral"
+        <KitButton
           variant="ghost"
           :label="t('common.cancel')"
           @click="open = false"
         />
-        <UButton
+        <KitButton
           type="submit"
           :form="formId"
-          color="primary"
-          variant="solid"
-          icon="i-lucide-plus"
+          variant="primary"
+          icon="plus"
           :label="t('flows.addStep.submit')"
         />
       </div>
