@@ -10,6 +10,7 @@ import type { CitableEvidenceEntry, EvidenceFreshness } from '../../utils/readin
 import { isSubmittable, preselectedCitations, withUsableSelection, type ReviewSubmissionDraft } from '../../utils/review-submission'
 import { viewLocation } from '../../utils/workbench-routes'
 import WbErrorDescription from './WbErrorDescription.vue'
+import KitButton from '~/components/kit/ui/Button.vue'
 import KitLinkButton from '~/components/KitLinkButton.vue'
 
 /**
@@ -264,9 +265,8 @@ async function send(): Promise<void> {
             v-if="usable.length > 1"
             class="-mt-1 flex justify-end"
           >
-            <UButton
-              variant="link"
-              color="neutral"
+            <KitButton
+              variant="link-muted"
               size="xs"
               class="px-0"
               :label="allUsableSelected ? t('submit.clearEvidence') : t('submit.selectCurrent', usable.length)"
@@ -408,17 +408,16 @@ async function send(): Promise<void> {
           >
             {{ t('submit.needs') }}
           </p>
-          <UButton
-            color="neutral"
+          <KitButton
             variant="ghost"
             :label="t('common.cancel')"
+            data-submit-cancel
             @click="open = false"
           />
-          <UButton
+          <KitButton
             type="submit"
-            color="primary"
-            variant="solid"
-            icon="i-lucide-eye"
+            variant="primary"
+            icon="eye"
             :loading="busy"
             :disabled="!ready"
             :label="t('submit.action')"
