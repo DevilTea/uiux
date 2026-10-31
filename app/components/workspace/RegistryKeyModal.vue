@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from '#imports'
+import KitButton from '~/components/kit/ui/Button.vue'
+import KitCheckbox from '~/components/kit/ui/Checkbox.vue'
+import KitIcon from '~/components/kit/ui/Icon.vue'
 
 /**
  * Reference-impact check for an identity-changing registry edit (Part 10): renaming or
@@ -90,9 +93,9 @@ function confirm(): void {
           </h3>
           <ul class="flex flex-col gap-1.5 text-sm">
             <li class="flex items-start gap-2">
-              <UIcon
-                :name="evidenceCount ? 'i-lucide-history' : 'i-lucide-camera'"
-                class="mt-0.5 size-4 shrink-0 text-muted"
+              <KitIcon
+                :name="evidenceCount ? 'history' : 'camera'"
+                class="mt-0.5 shrink-0 text-muted"
               />
               <span v-if="evidenceFailed">{{ t('settings.registry.evidenceUnknown') }}</span>
               <span v-else-if="evidenceCount === undefined">{{ t('settings.registry.checking') }}</span>
@@ -112,9 +115,9 @@ function confirm(): void {
               </i18n-t>
             </li>
             <li class="flex items-start gap-2">
-              <UIcon
-                name="i-lucide-link-2-off"
-                class="mt-0.5 size-4 shrink-0 text-muted"
+              <KitIcon
+                name="link-2-off"
+                class="mt-0.5 shrink-0 text-muted"
               />
               <i18n-t
                 keypath="settings.registry.links"
@@ -129,30 +132,29 @@ function confirm(): void {
           </ul>
         </section>
 
-        <UCheckbox
-          v-model="acknowledged"
+        <KitCheckbox
+          :checked="acknowledged"
           :label="t('settings.registry.acknowledge', { key: registryKey })"
           data-registry-acknowledge
+          @toggle="acknowledged = $event"
         />
       </form>
     </template>
     <template #footer>
       <div class="flex w-full justify-end gap-2">
-        <UButton
-          color="neutral"
+        <KitButton
           variant="outline"
           @click="open = false"
         >
           {{ t('common.cancel') }}
-        </UButton>
-        <UButton
-          :color="mode === 'remove' ? 'error' : 'primary'"
-          :variant="mode === 'remove' ? 'soft' : 'solid'"
+        </KitButton>
+        <KitButton
+          :variant="mode === 'remove' ? 'danger' : 'primary'"
           :disabled="!canConfirm"
           @click="confirm"
         >
           {{ mode === 'rename' ? t('settings.registry.confirmRename') : t('settings.registry.confirmRemove') }}
-        </UButton>
+        </KitButton>
       </div>
     </template>
   </UModal>

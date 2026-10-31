@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, shallowRef } from 'vue'
 import { useI18n } from '#imports'
+import KitButton from '~/components/kit/ui/Button.vue'
+import KitIcon from '~/components/kit/ui/Icon.vue'
+import KitSkeleton from '~/components/kit/ui/Skeleton.vue'
 import { useWorkbenchFormat } from '../../composables/useWorkbenchFormat'
 import { describeFetchError, type FetchErrorDetails } from '../../utils/fetch-error'
 import { kitFileTree, kitPathAncestors, visibleKitTreeRows, type KitFileEntry } from '../../utils/kit-file-tree'
@@ -125,19 +128,17 @@ onMounted(() => { void loadListing() })
           {{ t('productKit.files.description') }}
         </p>
       </div>
-      <UButton
+      <KitButton
         v-if="canBrowse"
-        color="neutral"
         variant="ghost"
         size="sm"
-        icon="i-lucide-refresh-cw"
-        class="shrink-0"
+        icon="refresh-cw"
         :loading="listingLoading"
         data-kit-files-reload
         @click="loadListing"
       >
         {{ t('productKit.files.reload') }}
-      </UButton>
+      </KitButton>
     </header>
 
     <p
@@ -146,9 +147,9 @@ onMounted(() => { void loadListing() })
       data-access-notice="kit-files"
       data-missing-key="product-kit.source.read"
     >
-      <UIcon
-        name="i-lucide-user-lock"
-        class="size-4 shrink-0"
+      <KitIcon
+        name="user-lock"
+        class="shrink-0"
       />
       {{ t('productKit.files.requiresKey', { key: 'product-kit.source.read' }) }}
     </p>
@@ -203,10 +204,12 @@ onMounted(() => { void loadListing() })
           >
             {{ t('productKit.files.empty') }}
           </p>
-          <USkeleton
+          <KitSkeleton
             v-else-if="!listing && listingLoading"
-            class="m-2 h-5 w-3/4"
-            :aria-label="t('common.loading')"
+            class="wb-skeleton animate-pulse m-2"
+            width="75%"
+            :height="20"
+            :label="t('common.loading')"
           />
           <ul
             v-else
@@ -228,9 +231,10 @@ onMounted(() => { void loadListing() })
                 translate="no"
                 @click="row.node.kind === 'directory' ? toggle(row.node.path) : open(row.node.path)"
               >
-                <UIcon
-                  :name="row.node.kind === 'directory' ? (row.expanded ? 'i-lucide-folder-open' : 'i-lucide-folder') : 'i-lucide-file'"
-                  class="size-3.5 shrink-0 text-muted"
+                <KitIcon
+                  :name="row.node.kind === 'directory' ? (row.expanded ? 'folder-open' : 'folder') : 'file'"
+                  :size="14"
+                  class="shrink-0 text-muted"
                 />
                 <span class="min-w-0 truncate">{{ row.node.name }}</span>
               </button>
@@ -249,10 +253,11 @@ onMounted(() => { void loadListing() })
           >
             {{ t('productKit.files.pick') }}
           </p>
-          <USkeleton
+          <KitSkeleton
             v-else-if="fileLoading && !file"
-            class="h-40 w-full"
-            :aria-label="t('common.loading')"
+            class="wb-skeleton animate-pulse"
+            :height="160"
+            :label="t('common.loading')"
           />
           <template v-else-if="file">
             <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">

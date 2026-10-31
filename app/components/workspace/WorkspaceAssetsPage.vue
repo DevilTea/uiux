@@ -2,6 +2,11 @@
 import { computed, onMounted, ref, shallowRef, watch } from 'vue'
 import type { TableColumn } from '@nuxt/ui'
 import { useI18n } from '#imports'
+import KitBadge from '~/components/kit/ui/Badge.vue'
+import KitButton from '~/components/kit/ui/Button.vue'
+import KitButtonGroup from '~/components/kit/ui/ButtonGroup.vue'
+import KitIcon from '~/components/kit/ui/Icon.vue'
+import KitSkeleton from '~/components/kit/ui/Skeleton.vue'
 import { useWorkbench } from '../../composables/useWorkbench'
 import { touchesKinds, useLiveEvents } from '../../composables/useLiveEvents'
 import { useUiuxClient } from '../../composables/useUiuxClient'
@@ -215,15 +220,14 @@ const columns = computed<TableColumn<AssetEntry>[]>(() => [
               {{ t('assets.subtitle') }}
             </p>
           </div>
-          <UButton
+          <KitButton
             v-if="canEdit"
-            color="primary"
-            variant="solid"
-            icon="i-lucide-upload"
+            variant="primary"
+            icon="upload"
             @click="uploading = true"
           >
             {{ t('assets.upload') }}
-          </UButton>
+          </KitButton>
         </header>
         <AuthoringAccessNotice
           :access="access"
@@ -253,31 +257,31 @@ const columns = computed<TableColumn<AssetEntry>[]>(() => [
             :aria-label="t('assets.filter.usage')"
             class="w-40"
           />
-          <UFieldGroup
+          <KitButtonGroup
             v-if="!isMobile"
             class="ms-auto"
           >
             <UTooltip :text="t('assets.layout.grid')">
-              <UButton
-                color="neutral"
-                :variant="layout === 'grid' ? 'soft' : 'outline'"
-                icon="i-lucide-layout-grid"
-                :aria-label="t('assets.layout.grid')"
-                :aria-pressed="layout === 'grid'"
+              <KitButton
+                icon="layout-grid"
+                icon-only
+                :label="t('assets.layout.grid')"
+                :pressed="layout === 'grid'"
+                title=""
                 @click="layout = 'grid'"
               />
             </UTooltip>
             <UTooltip :text="t('assets.layout.list')">
-              <UButton
-                color="neutral"
-                :variant="layout === 'list' ? 'soft' : 'outline'"
-                icon="i-lucide-list"
-                :aria-label="t('assets.layout.list')"
-                :aria-pressed="layout === 'list'"
+              <KitButton
+                icon="list"
+                icon-only
+                :label="t('assets.layout.list')"
+                :pressed="layout === 'list'"
+                title=""
                 @click="layout = 'list'"
               />
             </UTooltip>
-          </UFieldGroup>
+          </KitButtonGroup>
         </div>
 
         <UAlert
@@ -304,11 +308,13 @@ const columns = computed<TableColumn<AssetEntry>[]>(() => [
           class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5"
           aria-hidden="true"
         >
-          <USkeleton
+          <KitSkeleton
             v-for="n in 5"
             :key="n"
-            class="aspect-4/3 w-full rounded-lg"
-            :aria-label="t('common.loading')"
+            class="wb-skeleton animate-pulse aspect-4/3"
+            height="auto"
+            :radius="8"
+            :label="t('common.loading')"
           />
         </div>
 
@@ -358,10 +364,11 @@ const columns = computed<TableColumn<AssetEntry>[]>(() => [
                     loading="lazy"
                     class="max-h-full max-w-full object-contain"
                   >
-                  <UIcon
+                  <KitIcon
                     v-else
-                    :name="entry.diagnostics.length ? 'i-lucide-file-x-2' : 'i-lucide-file'"
-                    class="size-8 text-muted"
+                    :name="entry.diagnostics.length ? 'file-x-2' : 'file'"
+                    :size="32"
+                    class="text-muted"
                   />
                 </span>
                 <span class="flex flex-col gap-1 px-3 pt-2.5">
@@ -370,31 +377,25 @@ const columns = computed<TableColumn<AssetEntry>[]>(() => [
                 </span>
               </button>
               <div class="flex items-center gap-1.5 px-3 pt-2 pb-2.5">
-                <UBadge
+                <KitBadge
                   v-if="entry.diagnostics.length"
-                  color="error"
-                  variant="subtle"
-                  size="sm"
-                  icon="i-lucide-circle-alert"
+                  tone="danger"
+                  icon="circle-alert"
                 >
                   {{ t('assets.problems', { n: entry.diagnostics.length }, entry.diagnostics.length) }}
-                </UBadge>
-                <UBadge
+                </KitBadge>
+                <KitBadge
                   v-if="entry.usedBy.length"
-                  color="neutral"
                   variant="soft"
-                  size="sm"
                 >
                   {{ t('assets.usedBy', { n: entry.usedBy.length }, entry.usedBy.length) }}
-                </UBadge>
-                <UBadge
+                </KitBadge>
+                <KitBadge
                   v-else
-                  color="neutral"
                   variant="outline"
-                  size="sm"
                 >
                   {{ t('assets.unused') }}
-                </UBadge>
+                </KitBadge>
                 <UTooltip :text="t('assets.download')">
                   <UButton
                     v-if="contentUrl(entry)"
@@ -429,9 +430,9 @@ const columns = computed<TableColumn<AssetEntry>[]>(() => [
               class="flex items-center gap-2 text-start font-medium text-highlighted hover:underline"
               @click="openDetail(row.original)"
             >
-              <UIcon
-                :name="row.original.diagnostics.length ? 'i-lucide-file-x-2' : isImageMediaType(row.original.mediaType) ? 'i-lucide-image' : 'i-lucide-file'"
-                class="size-4 shrink-0 text-muted"
+              <KitIcon
+                :name="row.original.diagnostics.length ? 'file-x-2' : isImageMediaType(row.original.mediaType) ? 'image' : 'file'"
+                class="shrink-0 text-muted"
               />{{ row.original.name || t('assets.unnamedAsset') }}
             </button>
           </template>
@@ -446,31 +447,25 @@ const columns = computed<TableColumn<AssetEntry>[]>(() => [
           </template>
           <template #usage-cell="{ row }">
             <span class="flex flex-wrap gap-1.5">
-              <UBadge
+              <KitBadge
                 v-if="row.original.diagnostics.length"
-                color="error"
-                variant="subtle"
-                size="sm"
-                icon="i-lucide-circle-alert"
+                tone="danger"
+                icon="circle-alert"
               >
                 {{ t('assets.problems', { n: row.original.diagnostics.length }, row.original.diagnostics.length) }}
-              </UBadge>
-              <UBadge
+              </KitBadge>
+              <KitBadge
                 v-if="row.original.usedBy.length"
-                color="neutral"
                 variant="soft"
-                size="sm"
               >
                 {{ t('assets.usedBy', { n: row.original.usedBy.length }, row.original.usedBy.length) }}
-              </UBadge>
-              <UBadge
+              </KitBadge>
+              <KitBadge
                 v-else
-                color="neutral"
                 variant="outline"
-                size="sm"
               >
                 {{ t('assets.unused') }}
-              </UBadge>
+              </KitBadge>
             </span>
           </template>
           <template #download-cell="{ row }">

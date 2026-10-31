@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from '#imports'
+import KitButton from '~/components/kit/ui/Button.vue'
 import { isCanonicalLocaleTag } from '../../../src/domain/validation'
 import { describeFetchError, type FetchErrorDetails } from '../../utils/fetch-error'
 import AuthoringErrorAlert from './AuthoringErrorAlert.vue'
@@ -129,21 +130,19 @@ async function create(): Promise<void> {
     </template>
     <template #footer>
       <div class="flex w-full justify-end gap-2">
-        <UButton
-          color="neutral"
+        <KitButton
           variant="outline"
           @click="open = false"
         >
           {{ t('common.cancel') }}
-        </UButton>
-        <UButton
-          color="primary"
-          variant="solid"
+        </KitButton>
+        <KitButton
+          variant="primary"
           :loading="creating"
           @click="create"
         >
           {{ t('locales.create.submit') }}
-        </UButton>
+        </KitButton>
       </div>
     </template>
   </UModal>

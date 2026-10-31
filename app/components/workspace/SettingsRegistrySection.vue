@@ -2,6 +2,9 @@
 import { computed, h, nextTick, ref } from 'vue'
 import type { DropdownMenuItem, TableColumn } from '@nuxt/ui'
 import { useI18n } from '#imports'
+import KitBadge from '~/components/kit/ui/Badge.vue'
+import KitButton from '~/components/kit/ui/Button.vue'
+import KitIcon from '~/components/kit/ui/Icon.vue'
 import type { Diagnostic } from '../../composables/workbench-types'
 import type { SettingsSection } from '../../composables/useSettingsSection'
 import { nextRowUid, registryRowIssues, type RegistryKind, type RegistryRow, type RegistryRowIssue } from '../../utils/workspace-authoring'
@@ -140,14 +143,13 @@ defineExpose({ save })
           {{ kind === 'viewports' ? t('settings.registry.viewportsDescription') : t('settings.registry.themesDescription') }}
         </p>
       </div>
-      <UButton
+      <KitButton
         v-if="canEdit"
-        icon="i-lucide-plus"
-        class="shrink-0"
+        icon="plus"
         @click="add"
       >
         {{ kind === 'viewports' ? t('settings.registry.addViewport') : t('settings.registry.addTheme') }}
-      </UButton>
+      </KitButton>
     </header>
 
     <AuthoringConflictAlert
@@ -201,31 +203,28 @@ defineExpose({ save })
             class="flex min-h-8 min-w-0 items-center gap-2"
           >
             <span class="truncate font-mono text-xs text-highlighted">{{ row.original.key }}</span>
-            <UBadge
+            <KitBadge
               v-if="row.original.savedKey !== undefined && row.original.savedKey !== row.original.key"
-              color="warning"
-              variant="subtle"
-              size="sm"
-              icon="i-lucide-pencil-line"
-            >{{ t('settings.registry.renamedFrom', { key: row.original.savedKey }) }}</UBadge>
+              tone="warning"
+              icon="pencil-line"
+            >{{ t('settings.registry.renamedFrom', { key: row.original.savedKey }) }}</KitBadge>
           </span>
-          <UBadge
+          <KitBadge
             v-if="canEdit && row.original.savedKey === undefined"
-            color="neutral"
             variant="outline"
-            size="sm"
             class="self-start"
           >
             {{ t('settings.registry.new') }}
-          </UBadge>
+          </KitBadge>
           <p
             v-for="message in rowIssues(row.original)"
             :key="message"
             class="flex items-center gap-1 text-xs text-error"
           >
-            <UIcon
-              name="i-lucide-circle-alert"
-              class="size-3.5 shrink-0"
+            <KitIcon
+              name="circle-alert"
+              :size="14"
+              class="shrink-0"
             />{{ message }}
           </p>
         </div>
@@ -291,11 +290,11 @@ defineExpose({ save })
           :items="rowActions(row.original)"
           :content="{ align: 'end' }"
         >
-          <UButton
-            color="neutral"
+          <KitButton
             variant="ghost"
-            icon="i-lucide-ellipsis"
-            :aria-label="t('settings.registry.actionsFor', { key: row.original.key || t('settings.registry.new') })"
+            icon="ellipsis"
+            icon-only
+            :label="t('settings.registry.actionsFor', { key: row.original.key || t('settings.registry.new') })"
           />
         </UDropdownMenu>
       </template>
@@ -305,9 +304,10 @@ defineExpose({ save })
       v-if="canEdit"
       class="flex items-start gap-2 text-xs text-muted"
     >
-      <UIcon
-        name="i-lucide-info"
-        class="mt-0.5 size-3.5 shrink-0"
+      <KitIcon
+        name="info"
+        :size="14"
+        class="mt-0.5 shrink-0"
       />{{ t('settings.keyChange') }}
     </p>
     <p

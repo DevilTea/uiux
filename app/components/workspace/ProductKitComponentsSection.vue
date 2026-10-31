@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, shallowRef } from 'vue'
 import { useI18n, useToast } from '#imports'
+import KitButton from '~/components/kit/ui/Button.vue'
+import KitIcon from '~/components/kit/ui/Icon.vue'
+import KitSkeleton from '~/components/kit/ui/Skeleton.vue'
 import type { ProductKitComponent, ProductKitWidgetMapping } from '../../../src/domain/product-kit/schema'
 import { describeFetchError, type FetchErrorDetails } from '../../utils/fetch-error'
 import { componentDeclarations } from '../../utils/component-interface'
@@ -254,30 +257,28 @@ const emitsDeclarations = computed(() => declarations.value.filter(item => item.
               </td>
               <td class="px-3 py-2">
                 <div class="flex justify-end gap-1">
-                  <UButton
+                  <KitButton
                     v-if="canBrowse"
-                    color="neutral"
                     variant="ghost"
                     size="xs"
-                    icon="i-lucide-file-code"
+                    icon="file-code"
                     :aria-label="t('productKit.components.browseNamed', { name })"
-                    :aria-pressed="selected === name"
+                    :pressed="selected === name"
                     data-component-browse
                     @click="browse(name)"
                   >
                     {{ t('productKit.components.browse') }}
-                  </UButton>
-                  <UButton
-                    color="neutral"
+                  </KitButton>
+                  <KitButton
                     variant="ghost"
                     size="xs"
-                    icon="i-lucide-copy"
+                    icon="copy"
                     :aria-label="t('productKit.components.copyCommandNamed', { name })"
                     data-component-copy-cli
                     @click="copy(cliCommand(name))"
                   >
                     {{ t('productKit.components.copyCommand') }}
-                  </UButton>
+                  </KitButton>
                 </div>
               </td>
             </tr>
@@ -291,9 +292,10 @@ const emitsDeclarations = computed(() => declarations.value.filter(item => item.
         data-access-notice="component-source"
         data-missing-key="product-kit.source.read"
       >
-        <UIcon
-          name="i-lucide-user-lock"
-          class="size-3.5 shrink-0"
+        <KitIcon
+          name="user-lock"
+          :size="14"
+          class="shrink-0"
         />
         {{ t('productKit.components.browseRequiresKey', { key: 'product-kit.source.read' }) }}
       </p>
@@ -314,12 +316,12 @@ const emitsDeclarations = computed(() => declarations.value.filter(item => item.
           >
             {{ selected }}
           </h3>
-          <UButton
-            color="neutral"
+          <KitButton
             variant="ghost"
             size="xs"
-            icon="i-lucide-x"
-            :aria-label="t('common.close')"
+            icon="x"
+            icon-only
+            :label="t('common.close')"
             @click="selected = undefined"
           />
         </div>
@@ -342,21 +344,22 @@ const emitsDeclarations = computed(() => declarations.value.filter(item => item.
               translate="no"
               :data-component-command="command.id"
             >{{ command.text }}</code>
-            <UButton
-              color="neutral"
+            <KitButton
               variant="ghost"
               size="xs"
-              icon="i-lucide-copy"
-              :aria-label="t('productKit.components.copyNamed', { what: command.label })"
+              icon="copy"
+              icon-only
+              :label="t('productKit.components.copyNamed', { what: command.label })"
               @click="copy(command.text)"
             />
           </div>
         </section>
 
-        <USkeleton
+        <KitSkeleton
           v-if="sourceLoading"
-          class="h-24 w-full"
-          :aria-label="t('common.loading')"
+          class="wb-skeleton animate-pulse"
+          :height="96"
+          :label="t('common.loading')"
         />
         <UAlert
           v-else-if="sourceError"

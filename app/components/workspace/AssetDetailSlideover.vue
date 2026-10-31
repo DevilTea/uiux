@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n, useToast } from '#imports'
+import KitButton from '~/components/kit/ui/Button.vue'
+import KitIcon from '~/components/kit/ui/Icon.vue'
 import { useWorkbenchFeedback } from '../../composables/useWorkbenchFeedback'
 import { useWorkbenchFormat } from '../../composables/useWorkbenchFormat'
 import { describeFetchError, isLockedError, type FetchErrorDetails, type FetchErrorLock } from '../../utils/fetch-error'
@@ -212,9 +214,9 @@ const details = computed(() => [
           v-else
           class="flex flex-col items-center gap-2 text-center text-sm text-muted"
         >
-          <UIcon
-            :name="entry.diagnostics.length ? 'i-lucide-file-x-2' : 'i-lucide-file'"
-            class="size-8"
+          <KitIcon
+            :name="entry.diagnostics.length ? 'file-x-2' : 'file'"
+            :size="32"
           />
           <span>{{ entry.diagnostics.length ? t('assets.previewUnavailable') : t('assets.noPreviewDescription', { mediaType: entry.mediaType || t('assets.notSet') }) }}</span>
         </div>
@@ -341,9 +343,9 @@ const details = computed(() => [
               :to="viewPath(use.viewId)"
               class="inline-flex items-center gap-1.5 text-sm text-default hover:underline"
             >
-              <UIcon
-                name="i-lucide-app-window"
-                class="size-4 text-muted"
+              <KitIcon
+                name="app-window"
+                class="text-muted"
               />{{ use.name }}
             </ULink>
           </li>
@@ -357,15 +359,15 @@ const details = computed(() => [
       </section>
 
       <UCollapsible>
-        <UButton
-          color="neutral"
-          variant="link"
-          trailing-icon="i-lucide-chevron-down"
-          class="px-0"
-          :ui="{ trailingIcon: 'group-data-[state=open]:rotate-180 transition-transform' }"
-        >
-          {{ t('assets.details') }}
-        </UButton>
+        <template #default="{ open: expanded }">
+          <KitButton
+            variant="link-muted"
+            trailing-icon="chevron-down"
+            :expanded="expanded"
+          >
+            {{ t('assets.details') }}
+          </KitButton>
+        </template>
         <template #content>
           <dl class="grid grid-cols-[auto_1fr_auto] items-center gap-x-3 gap-y-1 pt-2 text-sm">
             <template
@@ -378,12 +380,12 @@ const details = computed(() => [
               <dd class="min-w-0 truncate font-mono text-xs">
                 {{ item.value }}
               </dd>
-              <UButton
-                color="neutral"
+              <KitButton
                 variant="ghost"
                 size="sm"
-                icon="i-lucide-copy"
-                :aria-label="t('assets.copyValue', { label: item.label })"
+                icon="copy"
+                icon-only
+                :label="t('assets.copyValue', { label: item.label })"
                 @click="copy(item.value)"
               />
             </template>

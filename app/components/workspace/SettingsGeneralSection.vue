@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useI18n } from '#imports'
+import KitIcon from '~/components/kit/ui/Icon.vue'
 import { isCanonicalLocaleTag } from '../../../src/domain/validation'
 import type { WorkspaceManifest } from '../../../src/domain/workspace/schema'
 import type { Diagnostic } from '../../composables/workbench-types'
@@ -122,9 +123,10 @@ defineExpose({ save })
       v-if="!tagHasFile"
       class="flex items-start gap-2 text-xs text-muted"
     >
-      <UIcon
-        name="i-lucide-triangle-alert"
-        class="mt-0.5 size-3.5 shrink-0 text-warning"
+      <KitIcon
+        name="triangle-alert"
+        :size="14"
+        class="mt-0.5 shrink-0 text-warning"
       />
       <i18n-t
         keypath="settings.locale.noFile"

@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, nextTick, ref } from 'vue'
 import { useI18n } from '#imports'
+import KitBadge from '~/components/kit/ui/Badge.vue'
+import KitButton from '~/components/kit/ui/Button.vue'
 import type { ProductKit } from '../../../src/domain/product-kit/schema'
 import type { SettingsSection } from '../../composables/useSettingsSection'
 import {
@@ -182,18 +184,16 @@ defineExpose({ save })
             {{ t('productKit.styles.help') }}
           </p>
         </div>
-        <UButton
+        <KitButton
           v-if="canEdit"
-          color="neutral"
           variant="outline"
           size="sm"
-          icon="i-lucide-plus"
-          class="shrink-0"
+          icon="plus"
           data-style-add
           @click="addStyle"
         >
           {{ t('productKit.styles.add') }}
-        </UButton>
+        </KitButton>
       </div>
       <p
         v-if="!draft.styles.length"
@@ -228,32 +228,32 @@ defineExpose({ save })
                 :data-style-input="row.uid"
                 @update:model-value="value => setStyle(index, String(value ?? ''))"
               />
-              <UButton
-                color="neutral"
+              <KitButton
                 variant="ghost"
                 size="xs"
-                icon="i-lucide-arrow-up"
+                icon="arrow-up"
+                icon-only
+                :label="t('productKit.styles.moveUp')"
                 :disabled="index === 0"
-                :aria-label="t('productKit.styles.moveUp')"
                 data-move="up"
                 @click="moveStyle(index, index - 1)"
               />
-              <UButton
-                color="neutral"
+              <KitButton
                 variant="ghost"
                 size="xs"
-                icon="i-lucide-arrow-down"
+                icon="arrow-down"
+                icon-only
+                :label="t('productKit.styles.moveDown')"
                 :disabled="index === draft.styles.length - 1"
-                :aria-label="t('productKit.styles.moveDown')"
                 data-move="down"
                 @click="moveStyle(index, index + 1)"
               />
-              <UButton
-                color="neutral"
+              <KitButton
                 variant="ghost"
                 size="xs"
-                icon="i-lucide-trash-2"
-                :aria-label="t('productKit.styles.remove')"
+                icon="trash-2"
+                icon-only
+                :label="t('productKit.styles.remove')"
                 @click="removeStyle(index)"
               />
             </template>
@@ -298,17 +298,15 @@ defineExpose({ save })
           v-if="canEdit && mapItems.length"
           :items="mapItems"
         >
-          <UButton
-            color="neutral"
+          <KitButton
             variant="outline"
             size="sm"
-            icon="i-lucide-plus"
-            trailing-icon="i-lucide-chevron-down"
-            class="shrink-0"
+            icon="plus"
+            trailing-icon="chevron-down"
             data-theme-map
           >
             {{ t('productKit.themes.map') }}
-          </UButton>
+          </KitButton>
         </UDropdownMenu>
       </div>
       <p
@@ -334,23 +332,21 @@ defineExpose({ save })
               v-if="themeLabels.get(theme.id)"
               class="truncate text-xs text-muted"
             >{{ themeLabels.get(theme.id) }}</span>
-            <UBadge
+            <KitBadge
               v-else
-              color="warning"
-              variant="subtle"
-              size="sm"
+              tone="warning"
               data-theme-unknown
             >
               {{ t('productKit.themes.notWorkspaceTheme') }}
-            </UBadge>
+            </KitBadge>
           </div>
-          <UButton
+          <KitButton
             v-if="canEdit"
-            color="neutral"
             variant="ghost"
             size="xs"
-            icon="i-lucide-trash-2"
-            :aria-label="t('productKit.themes.unmap', { id: theme.id })"
+            icon="trash-2"
+            icon-only
+            :label="t('productKit.themes.unmap', { id: theme.id })"
             @click="unmapTheme(theme.id)"
           />
         </div>
@@ -393,12 +389,12 @@ defineExpose({ save })
                 :data-theme-attribute-value="row.uid"
                 @update:model-value="value => setAttribute(theme.id, row.uid, 'value', String(value ?? ''))"
               />
-              <UButton
-                color="neutral"
+              <KitButton
                 variant="ghost"
                 size="xs"
-                icon="i-lucide-x"
-                :aria-label="t('productKit.themes.removeAttribute')"
+                icon="x"
+                icon-only
+                :label="t('productKit.themes.removeAttribute')"
                 @click="removeAttribute(theme.id, row.uid)"
               />
             </div>
@@ -420,16 +416,15 @@ defineExpose({ save })
           </li>
         </ul>
         <div v-if="canEdit">
-          <UButton
-            color="neutral"
+          <KitButton
             variant="ghost"
             size="xs"
-            icon="i-lucide-plus"
+            icon="plus"
             data-theme-attribute-add
             @click="addAttribute(theme.id)"
           >
             {{ t('productKit.themes.addAttribute') }}
-          </UButton>
+          </KitButton>
         </div>
       </div>
     </div>

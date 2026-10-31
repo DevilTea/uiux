@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed, ref, shallowRef } from 'vue'
 import { useI18n } from '#imports'
+import KitBadge from '~/components/kit/ui/Badge.vue'
+import KitButton from '~/components/kit/ui/Button.vue'
+import KitIcon from '~/components/kit/ui/Icon.vue'
 import type { KitBuildState, KitBuildStatus } from '../../../src/application/ports/kit-build'
 import { describeFetchError, type FetchErrorDetails } from '../../utils/fetch-error'
 import { useWorkbenchFeedback } from '../../composables/useWorkbenchFeedback'
@@ -25,11 +28,11 @@ const feedback = useWorkbenchFeedback()
 // Untyped request helper: Nitro's typed-route inference overflows on this many routes.
 const api = $fetch as unknown as <T = unknown>(url: string, options?: Readonly<Record<string, unknown>>) => Promise<T>
 
-const STATE: Record<KitBuildState, { color: 'neutral' | 'info' | 'success' | 'error'; icon: string }> = {
-	none: { color: 'neutral', icon: 'i-lucide-circle-dashed' },
-	building: { color: 'info', icon: 'i-lucide-loader-circle' },
-	ready: { color: 'success', icon: 'i-lucide-check' },
-	failed: { color: 'error', icon: 'i-lucide-circle-alert' },
+const STATE: Record<KitBuildState, { tone: 'neutral' | 'info' | 'success' | 'danger'; icon: string }> = {
+	none: { tone: 'neutral', icon: 'circle-dashed' },
+	building: { tone: 'info', icon: 'loader-circle' },
+	ready: { tone: 'success', icon: 'check' },
+	failed: { tone: 'danger', icon: 'circle-alert' },
 }
 const state = computed(() => STATE[props.build.state])
 
@@ -97,16 +100,15 @@ function onLogOpen(open: boolean): void {
           {{ t('productKit.build.description') }}
         </p>
       </div>
-      <UButton
+      <KitButton
         v-if="canRestart"
-        icon="i-lucide-refresh-cw"
-        class="shrink-0"
+        icon="refresh-cw"
         :loading="restarting"
         data-kit-build-restart
         @click="restart"
       >
         {{ t('productKit.build.restart') }}
-      </UButton>
+      </KitButton>
     </header>
 
     <div
@@ -116,15 +118,13 @@ function onLogOpen(open: boolean): void {
       :data-state="build.state"
     >
       <div class="flex items-center gap-2">
-        <UBadge
-          :color="state.color"
-          variant="subtle"
-          size="sm"
+        <KitBadge
+          :tone="state.tone"
           :icon="state.icon"
-          :ui="build.state === 'building' ? { leadingIcon: 'animate-spin motion-reduce:animate-none' } : undefined"
+          :spin="build.state === 'building'"
         >
           {{ t(`productKit.build.state.${build.state}`) }}
-        </UBadge>
+        </KitBadge>
         <span class="text-xs text-muted">{{ t(`productKit.build.stateHelp.${build.state}`) }}</span>
       </div>
       <p
@@ -149,9 +149,10 @@ function onLogOpen(open: boolean): void {
       data-access-notice="build-log"
       data-missing-key="product-kit.source.read"
     >
-      <UIcon
-        name="i-lucide-user-lock"
-        class="size-3.5 shrink-0"
+      <KitIcon
+        name="user-lock"
+        :size="14"
+        class="shrink-0"
       />
       {{ t('productKit.build.logRequiresKey', { key: 'product-kit.source.read' }) }}
     </p>
@@ -160,16 +161,16 @@ function onLogOpen(open: boolean): void {
       :open="logOpen"
       @update:open="onLogOpen"
     >
-      <UButton
-        color="neutral"
-        variant="link"
-        trailing-icon="i-lucide-chevron-down"
-        class="px-0"
-        :ui="{ trailingIcon: 'group-data-[state=open]:rotate-180 transition-transform' }"
-        data-kit-build-log-toggle
-      >
-        {{ t('productKit.build.log') }}
-      </UButton>
+      <template #default="{ open }">
+        <KitButton
+          variant="link-muted"
+          trailing-icon="chevron-down"
+          :expanded="open"
+          data-kit-build-log-toggle
+        >
+          {{ t('productKit.build.log') }}
+        </KitButton>
+      </template>
       <template #content>
         <div class="flex flex-col gap-2 pt-1">
           <UAlert
@@ -196,16 +197,15 @@ function onLogOpen(open: boolean): void {
             {{ t('productKit.build.logEmpty') }}
           </p>
           <div>
-            <UButton
-              color="neutral"
+            <KitButton
               variant="ghost"
               size="sm"
-              icon="i-lucide-refresh-cw"
+              icon="refresh-cw"
               :loading="logLoading"
               @click="loadLog"
             >
               {{ t('productKit.build.reloadLog') }}
-            </UButton>
+            </KitButton>
           </div>
         </div>
       </template>

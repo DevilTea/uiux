@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { useI18n, useRoute, useRouter } from '#imports'
+import KitSkeleton from '~/components/kit/ui/Skeleton.vue'
 import KitBadge from '~/components/kit/ui/Badge.vue'
 import { useAccess } from '../../composables/useAccess'
 import { useWorkbench } from '../../composables/useWorkbench'
@@ -537,17 +538,22 @@ onBeforeUnmount(() => {
             class="flex flex-col gap-3"
             aria-hidden="true"
           >
-            <USkeleton
-              class="h-5 w-40"
-              :aria-label="t('common.loading')"
+            <KitSkeleton
+              class="wb-skeleton animate-pulse"
+              :width="160"
+              :height="20"
+              :label="t('common.loading')"
             />
-            <USkeleton
-              class="h-8 w-full"
-              :aria-label="t('common.loading')"
+            <KitSkeleton
+              class="wb-skeleton animate-pulse"
+              :height="32"
+              :label="t('common.loading')"
             />
-            <USkeleton
-              class="h-8 w-2/3"
-              :aria-label="t('common.loading')"
+            <KitSkeleton
+              class="wb-skeleton animate-pulse"
+              width="66.67%"
+              :height="32"
+              :label="t('common.loading')"
             />
           </div>
         </section>
@@ -592,13 +598,16 @@ onBeforeUnmount(() => {
             class="flex flex-col gap-3"
             aria-hidden="true"
           >
-            <USkeleton
-              class="h-5 w-40"
-              :aria-label="t('common.loading')"
+            <KitSkeleton
+              class="wb-skeleton animate-pulse"
+              :width="160"
+              :height="20"
+              :label="t('common.loading')"
             />
-            <USkeleton
-              class="h-8 w-full"
-              :aria-label="t('common.loading')"
+            <KitSkeleton
+              class="wb-skeleton animate-pulse"
+              :height="32"
+              :label="t('common.loading')"
             />
           </div>
         </template>

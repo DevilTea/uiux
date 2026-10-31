@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useI18n } from '#imports'
+import KitButton from '~/components/kit/ui/Button.vue'
 
 /** Section footer while a draft exists: "{n} unsaved · Discard · Save" (brief g, section 7). */
 defineProps<{
@@ -28,22 +29,20 @@ const { t } = useI18n()
       class="text-xs text-muted"
       role="status"
     >{{ t('settings.unsaved', { n: count }, count) }}</span>
-    <UButton
-      color="neutral"
+    <KitButton
       variant="ghost"
       :disabled="saving"
       @click="emit('discard')"
     >
       {{ t('authoring.discard') }}
-    </UButton>
-    <UButton
-      color="primary"
-      variant="solid"
+    </KitButton>
+    <KitButton
+      variant="primary"
       :loading="saving"
       :disabled="disabled"
       @click="emit('save')"
     >
       {{ saveLabel || t('authoring.saveChanges') }}
-    </UButton>
+    </KitButton>
   </div>
 </template>

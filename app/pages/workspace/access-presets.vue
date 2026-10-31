@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed, h, onMounted, reactive, ref, shallowRef, watch } from 'vue'
 import { useI18n } from '#imports'
+import KitBadge from '~/components/kit/ui/Badge.vue'
+import KitButton from '~/components/kit/ui/Button.vue'
+import KitIcon from '~/components/kit/ui/Icon.vue'
 import type { DropdownMenuItem, TableColumn } from '@nuxt/ui'
 import { BUILT_IN_ACCESS_PRESETS, isHumanOnlyKey } from '../../../src/application/access/keys'
 import type { MemberLabel } from '../../../src/application/access/labels'
@@ -422,17 +425,16 @@ const unknownHelp = (preset: AccessPreset) => t('access.presets.unknownKeysHelp'
             :write-key="writeKey"
           />
         </div>
-        <UButton
+        <KitButton
           v-if="canEdit"
-          color="primary"
-          variant="solid"
-          icon="i-lucide-plus"
+          variant="primary"
+          icon="plus"
           :disabled="writing"
           data-preset-add
           @click="openAdd"
         >
           {{ t('access.presets.add') }}
-        </UButton>
+        </KitButton>
       </header>
 
       <UAlert
@@ -524,30 +526,27 @@ const unknownHelp = (preset: AccessPreset) => t('access.presets.unknownKeysHelp'
                 v-if="unknownPresetKeys(row.original.preset).length > 0"
                 :text="unknownHelp(row.original.preset)"
               >
-                <UBadge
-                  color="warning"
-                  variant="subtle"
-                  icon="i-lucide-triangle-alert"
+                <KitBadge
+                  tone="warning"
+                  icon="triangle-alert"
                   data-preset-unknown-keys
                   :aria-description="unknownHelp(row.original.preset)"
                 >
                   {{ t('access.presets.unknownKeys') }}
-                </UBadge>
+                </KitBadge>
               </UTooltip>
             </div>
           </template>
           <template #keys-cell="{ row }">
-            <UButton
-              color="neutral"
-              variant="link"
+            <KitButton
+              variant="link-muted"
               size="sm"
-              class="px-0"
               data-preset-key-count
               :aria-label="canEdit ? t('access.presets.editTitle', { name: row.original.preset.name }) : t('access.presets.viewTitle', { name: row.original.preset.name })"
               @click="openPreset(row.original.index)"
             >
               {{ t('access.keys.count', { n: row.original.preset.keys.length }, row.original.preset.keys.length) }}
-            </UButton>
+            </KitButton>
           </template>
           <template #members-cell="{ row }">
             <span
@@ -573,13 +572,13 @@ const unknownHelp = (preset: AccessPreset) => t('access.presets.unknownKeysHelp'
                 :items="presetActions(row.original.index)"
                 :content="{ align: 'end' }"
               >
-                <UButton
-                  color="neutral"
+                <KitButton
                   variant="ghost"
-                  icon="i-lucide-ellipsis"
                   size="sm"
+                  icon="ellipsis"
+                  icon-only
+                  :label="t('access.presets.actionsLabel', { name: row.original.preset.name })"
                   :disabled="writing"
-                  :aria-label="t('access.presets.actionsLabel', { name: row.original.preset.name })"
                   data-preset-actions
                 />
               </UDropdownMenu>
@@ -666,24 +665,22 @@ const unknownHelp = (preset: AccessPreset) => t('access.presets.unknownKeysHelp'
             v-if="!editor.readonly"
             class="flex justify-end gap-2"
           >
-            <UButton
-              color="neutral"
+            <KitButton
               variant="outline"
               :disabled="writing"
               @click="editorOpen = false"
             >
               {{ t('common.cancel') }}
-            </UButton>
-            <UButton
+            </KitButton>
+            <KitButton
+              variant="primary"
               type="submit"
-              color="primary"
-              variant="solid"
               :loading="writing"
               :disabled="!canSave"
               data-preset-editor-save
             >
               {{ editor.id !== undefined ? t('access.presets.save') : t('access.presets.add') }}
-            </UButton>
+            </KitButton>
           </div>
         </UForm>
       </template>
@@ -708,24 +705,22 @@ const unknownHelp = (preset: AccessPreset) => t('access.presets.unknownKeysHelp'
             {{ t('access.presets.deleteCount', { n: labeledCount(deletingPreset) }, labeledCount(deletingPreset)!) }}
           </p>
           <div class="flex justify-end gap-2">
-            <UButton
-              color="neutral"
+            <KitButton
               variant="outline"
               :disabled="writing"
               @click="deleting = undefined"
             >
               {{ t('common.cancel') }}
-            </UButton>
-            <UButton
-              color="error"
-              variant="soft"
-              icon="i-lucide-trash-2"
+            </KitButton>
+            <KitButton
+              variant="danger"
+              icon="trash-2"
               :loading="writing"
               data-preset-delete-confirm
               @click="deletePreset"
             >
               {{ t('access.presets.deleteConfirm') }}
-            </UButton>
+            </KitButton>
           </div>
         </div>
       </template>
@@ -753,10 +748,10 @@ const unknownHelp = (preset: AccessPreset) => t('access.presets.unknownKeysHelp'
               :data-preset-update-member="update.member.nickname"
             >
               <p class="flex items-center gap-1.5 text-sm">
-                <UIcon
+                <KitIcon
                   v-if="update.member.kind === 'agent'"
-                  name="i-lucide-bot"
-                  class="size-4 text-muted"
+                  name="bot"
+                  class="text-muted"
                 />
                 <span class="font-medium text-highlighted">{{ update.member.nickname }}</span>
               </p>
@@ -823,24 +818,22 @@ const unknownHelp = (preset: AccessPreset) => t('access.presets.unknownKeysHelp'
             </template>
           </UAlert>
           <div class="flex justify-end gap-2">
-            <UButton
-              color="neutral"
+            <KitButton
               variant="outline"
               :disabled="updating"
               @click="updateOpen = false"
             >
               {{ t('common.cancel') }}
-            </UButton>
-            <UButton
-              color="primary"
-              variant="solid"
+            </KitButton>
+            <KitButton
+              variant="primary"
               :loading="updating"
               :disabled="updates.length === 0 || !access.can('members.manage')"
               data-preset-update-confirm
               @click="updateMembers"
             >
               {{ t('access.presets.update.confirm') }}
-            </UButton>
+            </KitButton>
           </div>
         </div>
       </template>
