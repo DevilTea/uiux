@@ -61,8 +61,10 @@ function focusCancel(event: Event): void {
           data-impact-cancel
           @click="open = false"
         />
-        <KitButton
-          variant="primary"
+        <!-- Nuxt UI until the Kit has a warning variant (a later Kit batch); then this moves to KitButton. -->
+        <UButton
+          color="warning"
+          variant="solid"
           :loading="submitting"
           :label="confirmLabel"
           data-impact-acknowledge

@@ -918,14 +918,16 @@ function switchToBase(): void {
             data-pins-overcap
             @click="showNotOnCanvas"
           />
-          <KitButton
+          <!-- Nuxt UI until the Kit has a warning variant (a later Kit batch); then this moves to KitButton. -->
+          <UButton
             v-if="unplacedThreads.length"
-            class="pointer-events-auto text-warning! shadow-overlay"
+            class="pointer-events-auto shadow-overlay"
+            color="warning"
             variant="soft"
             size="sm"
-            icon="triangle-alert"
-            truncate
+            icon="i-lucide-triangle-alert"
             :label="t('pins.unplaced', unplacedThreads.length)"
+            :ui="{ label: 'truncate' }"
             data-comment-tray
             @click="comments.open(unplacedThreads[0]!.id)"
           />
