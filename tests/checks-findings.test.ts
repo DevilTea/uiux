@@ -325,6 +325,17 @@ describe('the findings of the live Preview (issue #347)', () => {
 		expect(severityOf('preview-translation')).toBe('warning')
 	})
 
+	// Rule 01a115cd-b91d-7230-9041-b56ff70b814b: the Catalog mapping names the Catalog field of the result Property.
+	it('attributes a warning to the Catalog field of its result Property through the Catalog mapping', () => {
+		const catalogFields = new Map([['Button', new Map([['labelResult', 'label']])]])
+		const warnings = [{ widgetId: 'b1', resultProperty: 'labelResult', warning: missing('cta') }, { widgetId: 'b1', resultProperty: 'titleResult', warning: missing('cta') }]
+		const [named, unmapped] = previewTranslationFindings(report({ translationWarnings: warnings }), { ...input, catalogFields })
+		expect(named).toMatchObject({ widgetType: 'Button', property: 'labelResult', catalogField: 'label' })
+		// A Property the Catalog does not map is not guessed.
+		expect(unmapped!.catalogField).toBeUndefined()
+		expect(previewTranslationFindings(report({ translationWarnings: warnings }), input)[0]!.catalogField).toBeUndefined()
+	})
+
 	it('groups by code, then key and missing parameter, each group listing its Widget and Property occurrences in order', () => {
 		const list = previewTranslationFindings(report({ translationWarnings: [
 			{ widgetId: 'b2', resultProperty: 'labelResult', warning: missing('cta') },

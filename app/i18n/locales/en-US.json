@@ -204,6 +204,7 @@
     },
     "preview": {
       "property": "Property {name}",
+      "catalogField": "Authoring field {name}",
       "warning": {
         "missingTranslation": "\"{key}\" has no translation in {locale}; the {fallback} text is shown.",
         "unresolvedKey": "\"{key}\" is not in the Locale files; it renders as the ⟦missing:{key}⟧ marker.",

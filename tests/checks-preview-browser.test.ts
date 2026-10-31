@@ -128,6 +128,8 @@ describe('Checks gathers the live Preview (issue #347)', () => {
 			expect(await finding.count()).toBe(1)
 			const text = await finding.textContent()
 			expect(text).toContain('Property labelResult')
+			// Rule 01a115cd-b91d-7230-9041-b56ff70b814b: the row names the Catalog field (the authoring field) the result Property derives from.
+			expect(text).toContain('Authoring field label')
 			expect(text).toContain('Warning')
 			expect(text).toContain('Preview translation warnings')
 			expect(await finding.getAttribute('data-finding-state')).toBe('incomplete')
