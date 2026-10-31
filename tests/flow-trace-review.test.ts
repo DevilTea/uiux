@@ -86,5 +86,13 @@ describe('a Review submission that names the Flow change domain and cites a Flow
 			flows: [{ key: FLOW_ID, flowInputDigest: flowInputDigest(flow) }],
 			captures: new Map(),
 		})).toEqual({ isStale: true, reason: FLOW_CHANGED_REASON })
+
+		// A reference-only edit of the Flow keeps the input digest, so the same submission affects no trace of it.
+		const recorded = flowInputDigest(flow)
+		const edited: FlowResource = { ...flow, requirements: ['r-1'] }
+		expect(flowInputDigest(edited)).toBe(recorded)
+		expect(changeAffectsFlowEvidence(scope, FLOW_ID, { recordedFlowInputDigest: recorded, currentFlowInputDigest: flowInputDigest(edited) })).toBe(false)
+		// The recorded trace above holds another digest, so it stays affected.
+		expect(changeAffectsFlowEvidence(scope, FLOW_ID, { recordedFlowInputDigest: trace.provenance.flowInputDigest, currentFlowInputDigest: recorded })).toBe(true)
 	})
 })
