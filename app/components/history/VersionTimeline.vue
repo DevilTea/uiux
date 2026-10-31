@@ -9,6 +9,10 @@ import { groupVersionsByDay } from '../../utils/version-history'
 import VersionDetails from './VersionDetails.vue'
 import RestoredFrom from './RestoredFrom.vue'
 import WbErrorDescription from '../workbench/WbErrorDescription.vue'
+import KitBadge from '~/components/kit/ui/Badge.vue'
+import KitButton from '~/components/kit/ui/Button.vue'
+import KitIcon from '~/components/kit/ui/Icon.vue'
+import KitSkeleton from '~/components/kit/ui/Skeleton.vue'
 
 /**
  * The version timeline (Rule 01a11a5e-1946-7217-aff5-db13df3a2977): newest first, grouped by day,
@@ -79,11 +83,13 @@ function toggle(id: string): void {
       v-if="loading && !loaded"
       class="space-y-2"
     >
-      <USkeleton
+      <KitSkeleton
         v-for="index in 4"
         :key="index"
-        class="h-12 w-full"
-        :aria-label="t('common.loading')"
+        class="wb-skeleton animate-pulse"
+        :height="48"
+        :radius="6"
+        :label="t('common.loading')"
       />
     </div>
     <UEmpty
@@ -123,10 +129,11 @@ function toggle(id: string): void {
               class="flex items-start gap-2.5"
               :class="[compact ? 'px-2.5 py-2' : 'px-3 py-2.5', entry.version.id === selected ? 'bg-elevated' : '']"
             >
-              <UIcon
+              <KitIcon
                 :name="VERSION_TYPE_ICONS[entry.version.type]"
-                class="mt-0.5 size-4 shrink-0"
+                class="mt-0.5 shrink-0"
                 :class="entry.version.type === 'checkpoint' ? 'text-highlighted' : 'text-muted'"
+                :size="16"
               />
               <div class="min-w-0 flex-1 space-y-0.5">
                 <p class="flex min-w-0 flex-wrap items-baseline gap-x-2">
@@ -136,14 +143,13 @@ function toggle(id: string): void {
                     :title="labels.storedName(entry.version)"
                     data-version-title
                   >{{ labels.versionTitle(entry.version) }}</span>
-                  <UBadge
+                  <KitBadge
                     v-if="entry.version.type === 'checkpoint'"
-                    color="neutral"
                     variant="soft"
-                    icon="i-lucide-flag"
+                    icon="flag"
                   >
                     {{ t('history.type.checkpoint') }}
-                  </UBadge>
+                  </KitBadge>
                   <span
                     v-if="entry.version.id === selected"
                     class="text-xs text-muted"
@@ -156,9 +162,10 @@ function toggle(id: string): void {
                     :title="labels.dateTime(entry.version.at)"
                   >{{ labels.time(entry.version.at) }}</time>
                   <span aria-hidden="true">·</span>
-                  <UIcon
+                  <KitIcon
                     :name="labels.actorIcon(entry.version.actor)"
-                    class="size-3.5 shrink-0"
+                    class="shrink-0"
+                    :size="14"
                   />
                   <span class="truncate">{{ labels.actorName(entry.version.actor) }}</span>
                   <span aria-hidden="true">·</span>
@@ -180,9 +187,9 @@ function toggle(id: string): void {
                   v-if="entry.version.recordingGap"
                   class="flex items-center gap-1 text-xs text-warning"
                 >
-                  <UIcon
-                    name="i-lucide-triangle-alert"
-                    class="size-3.5"
+                  <KitIcon
+                    name="triangle-alert"
+                    :size="14"
                   />{{ t('history.row.recordingGap') }}
                 </p>
               </div>
@@ -220,24 +227,24 @@ function toggle(id: string): void {
                   v-if="canDelete && entry.version.type === 'checkpoint'"
                   :text="t('history.delete.action')"
                 >
-                  <UButton
+                  <KitButton
                     size="xs"
-                    color="neutral"
                     variant="ghost"
-                    icon="i-lucide-trash-2"
-                    :aria-label="t('history.delete.actionNamed', { name: labels.versionTitle(entry.version) })"
+                    icon="trash-2"
+                    icon-only
+                    :label="t('history.delete.actionNamed', { name: labels.versionTitle(entry.version) })"
                     data-version-delete
                     @click="emit('delete', entry.version)"
                   />
                 </UTooltip>
-                <UButton
+                <KitButton
                   size="xs"
-                  color="neutral"
                   variant="ghost"
-                  :icon="expanded.has(entry.version.id) ? 'i-lucide-chevron-down' : 'i-lucide-chevron-right'"
-                  :aria-expanded="expanded.has(entry.version.id)"
+                  :icon="expanded.has(entry.version.id) ? 'chevron-down' : 'chevron-right'"
+                  icon-only
+                  :expanded="expanded.has(entry.version.id)"
                   :aria-controls="expanded.has(entry.version.id) ? `${baseId}-details-${entry.version.id}` : undefined"
-                  :aria-label="t(expanded.has(entry.version.id) ? 'history.row.collapse' : 'history.row.expand', { name: labels.versionTitle(entry.version) })"
+                  :label="t(expanded.has(entry.version.id) ? 'history.row.collapse' : 'history.row.expand', { name: labels.versionTitle(entry.version) })"
                   data-version-expand
                   @click="toggle(entry.version.id)"
                 />
@@ -262,14 +269,16 @@ function toggle(id: string): void {
               data-quiet-toggle
               @click="toggle(`quiet-${entry.id}`)"
             >
-              <UIcon
-                name="i-lucide-circle-dashed"
-                class="size-4 shrink-0"
+              <KitIcon
+                name="circle-dashed"
+                class="shrink-0"
+                :size="16"
               />
               <span class="flex-1">{{ t('history.quiet', entry.versions.length) }}</span>
-              <UIcon
-                :name="expanded.has(`quiet-${entry.id}`) ? 'i-lucide-chevron-down' : 'i-lucide-chevron-right'"
-                class="size-4 shrink-0"
+              <KitIcon
+                :name="expanded.has(`quiet-${entry.id}`) ? 'chevron-down' : 'chevron-right'"
+                class="shrink-0"
+                :size="16"
               />
             </button>
             <ul
@@ -310,8 +319,7 @@ function toggle(id: string): void {
       v-if="hasMore"
       class="flex justify-center"
     >
-      <UButton
-        color="neutral"
+      <KitButton
         variant="outline"
         size="sm"
         :loading="loadingMore"

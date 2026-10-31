@@ -5,6 +5,7 @@ import type { ResourceDiff } from '../../../src/domain/history/diff'
 import { CHANGE_ICONS } from '../../composables/useHistoryLabels'
 import { describeResourceDiff, formatDiffValue, pointerItems } from '../../utils/version-diff'
 import HistoryImage from './HistoryImage.vue'
+import KitIcon from '~/components/kit/ui/Icon.vue'
 
 /**
  * The semantic diff of one resource (Rule 01a11a5e-11e0-7f39-84a7-fde3faa43340), rendered from the
@@ -39,9 +40,10 @@ const hasContent = computed(() => described.value.sections.length > 0 || !!descr
       class="flex items-start gap-1.5 text-sm text-muted"
       data-diff-unsupported
     >
-      <UIcon
-        name="i-lucide-info"
-        class="mt-0.5 size-4 shrink-0"
+      <KitIcon
+        name="info"
+        class="mt-0.5 shrink-0"
+        :size="16"
       />{{ t('history.diff.unsupported') }}
     </p>
     <p
@@ -112,9 +114,10 @@ const hasContent = computed(() => described.value.sections.length > 0 || !!descr
           :data-op="item.op"
         >
           <p class="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5">
-            <UIcon
+            <KitIcon
               :name="CHANGE_ICONS[item.op]!"
-              class="size-3.5 shrink-0 text-muted"
+              class="shrink-0 text-muted"
+              :size="14"
             />
             <span class="shrink-0 font-medium text-default">{{ t(`history.diff.op.${item.op}`) }}</span>
             <span
@@ -137,10 +140,11 @@ const hasContent = computed(() => described.value.sections.length > 0 || !!descr
               class="min-w-0 text-muted"
               :class="valueClass(item.before)"
             >{{ formatDiffValue(item.before) }}</del>
-            <UIcon
+            <KitIcon
               v-if="item.before !== undefined && item.after !== undefined"
-              name="i-lucide-arrow-right"
-              class="size-3 shrink-0 self-center text-muted"
+              name="arrow-right"
+              class="shrink-0 self-center text-muted"
+              :size="12"
             />
             <ins
               v-if="item.after !== undefined"
@@ -157,9 +161,10 @@ const hasContent = computed(() => described.value.sections.length > 0 || !!descr
               :key="changeIndex"
               class="flex min-w-0 flex-wrap items-baseline gap-x-1.5"
             >
-              <UIcon
+              <KitIcon
                 :name="CHANGE_ICONS[change.op]!"
-                class="size-3 shrink-0 self-center text-muted"
+                class="shrink-0 self-center text-muted"
+                :size="12"
               />
               <span class="sr-only">{{ t(`history.diff.op.${change.op}`) }}</span>
               <code
@@ -172,10 +177,11 @@ const hasContent = computed(() => described.value.sections.length > 0 || !!descr
                 :class="valueClass(change.before)"
                 translate="no"
               >{{ formatDiffValue(change.before) }}</del>
-              <UIcon
+              <KitIcon
                 v-if="change.before !== undefined && change.after !== undefined"
-                name="i-lucide-arrow-right"
-                class="size-3 shrink-0 self-center text-muted"
+                name="arrow-right"
+                class="shrink-0 self-center text-muted"
+                :size="12"
               />
               <ins
                 v-if="change.after !== undefined"

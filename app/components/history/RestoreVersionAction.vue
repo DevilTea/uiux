@@ -11,6 +11,9 @@ import { CURRENT_COMPARE, type HistoryResourceRef } from '../../utils/version-hi
 import { classifyRestoreAnswer, matchesCurrent, restoreExtraKeys, type ReceivedImpact } from '../../utils/version-restore'
 import ImpactList from '../workbench/ImpactList.vue'
 import WbErrorDescription from '../workbench/WbErrorDescription.vue'
+import KitButton from '~/components/kit/ui/Button.vue'
+import KitIcon from '~/components/kit/ui/Icon.vue'
+import KitSkeleton from '~/components/kit/ui/Skeleton.vue'
 
 /**
  * "Restore this version" on a resource's diff (Rule 01a11a5e-18f2-7991-8f7d-aa4c8015d14a; offered
@@ -223,11 +226,10 @@ const lockUntil = computed(() => {
 
 <template>
   <div>
-    <UButton
+    <KitButton
       size="xs"
-      color="neutral"
       variant="outline"
-      icon="i-lucide-history"
+      icon="history"
       :label="t('history.restore.action')"
       :aria-label="t('history.restore.actionNamed', { resource: resourceName })"
       aria-haspopup="dialog"
@@ -292,17 +294,21 @@ const lockUntil = computed(() => {
                 data-access-notice="restore"
                 :data-missing-key="key"
               >
-                <UIcon
-                  name="i-lucide-user-lock"
-                  class="size-3.5 shrink-0"
+                <KitIcon
+                  name="user-lock"
+                  class="shrink-0"
+                  :size="14"
                 />
                 {{ t('access.requiresKey', { key }) }}
               </p>
             </template>
-            <USkeleton
+            <KitSkeleton
               v-if="reading || unchanged === undefined"
-              class="h-4 w-48"
-              :aria-label="t('history.restore.reading')"
+              class="wb-skeleton animate-pulse"
+              :width="192"
+              :height="16"
+              :radius="6"
+              :label="t('history.restore.reading')"
             />
           </div>
 
@@ -368,41 +374,37 @@ const lockUntil = computed(() => {
       </template>
       <template #footer>
         <div class="flex w-full flex-wrap justify-end gap-2">
-          <UButton
+          <KitButton
             ref="cancelButton"
-            color="neutral"
             variant="outline"
             :disabled="submitting"
             :label="stage === 'confirm' || stage === 'impact' ? t('common.cancel') : t('common.close')"
             data-restore-cancel
             @click="open = false"
           />
-          <UButton
+          <KitButton
             v-if="stage === 'confirm'"
-            color="primary"
-            variant="solid"
-            icon="i-lucide-history"
+            variant="primary"
+            icon="history"
             :loading="submitting"
             :disabled="reading || expectedRevision === undefined || unchanged !== false || missingKeys.length > 0"
             :label="t('history.restore.confirm')"
             data-restore-confirm
             @click="restore(false)"
           />
-          <UButton
+          <KitButton
             v-else-if="stage === 'impact'"
-            color="primary"
-            variant="solid"
-            icon="i-lucide-history"
+            variant="primary"
+            icon="history"
             :loading="submitting"
             :label="t('history.restore.impact.confirm')"
             data-restore-acknowledge
             @click="restore(true)"
           />
-          <UButton
+          <KitButton
             v-else-if="stage === 'conflict' || stage === 'locked' || (stage === 'refused' && readFailed)"
-            color="primary"
-            variant="solid"
-            icon="i-lucide-refresh-cw"
+            variant="primary"
+            icon="refresh-cw"
             :loading="reading"
             :label="stage === 'conflict' ? t('history.restore.conflict.reload') : t('common.retry')"
             data-restore-reload

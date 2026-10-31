@@ -3,6 +3,8 @@ import { ref, watch } from 'vue'
 import { useI18n } from '#imports'
 import { versionBlobUrl } from '../../composables/useUiuxClient'
 import { blobToDataUrl } from '../../utils/workspace-authoring'
+import KitIcon from '~/components/kit/ui/Icon.vue'
+import KitSkeleton from '~/components/kit/ui/Skeleton.vue'
 
 /**
  * One side of an Asset image change, fetched by its content digest (Rule
@@ -67,9 +69,9 @@ watch(() => [props.digest, props.current?.digest, props.current?.url], () => { v
       v-else-if="missing"
       class="flex flex-col items-center gap-1 text-center text-xs text-muted"
     >
-      <UIcon
-        name="i-lucide-image-off"
-        class="size-5"
+      <KitIcon
+        name="image-off"
+        :size="20"
       />
       {{ t('history.diff.imageUnavailable') }}
       <code
@@ -77,10 +79,12 @@ watch(() => [props.digest, props.current?.digest, props.current?.url], () => { v
         translate="no"
       >{{ digest.slice(0, 19) }}…</code>
     </p>
-    <USkeleton
+    <KitSkeleton
       v-else
-      class="h-24 w-full"
-      :aria-label="t('common.loading')"
+      class="wb-skeleton animate-pulse"
+      :height="96"
+      :radius="6"
+      :label="t('common.loading')"
     />
   </div>
 </template>

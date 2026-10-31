@@ -11,6 +11,8 @@ import { activityLocation, historyQuery, parseHistoryAddress, resolveHistorySele
 import VersionTimeline from './VersionTimeline.vue'
 import VersionComparison from './VersionComparison.vue'
 import VersionCanvasSwitch from './VersionCanvasSwitch.vue'
+import KitButton from '~/components/kit/ui/Button.vue'
+import KitIcon from '~/components/kit/ui/Icon.vue'
 
 /**
  * The View page's history panel (Rule 01a11a5e-1aa5-7d13-939a-8d99245f7906): the projection of the
@@ -62,10 +64,11 @@ const fullComparison = computed(() => selection.value && view.value
         <h2 class="me-auto text-sm font-semibold text-highlighted">
           {{ t('history.view.title') }}
         </h2>
-        <UButton
+        <KitButton
           v-if="checkpoints.canCreate.value"
+          variant="outline"
           size="sm"
-          icon="i-lucide-flag"
+          icon="flag"
           :label="t('history.checkpoint.create')"
           data-create-checkpoint
           @click="shell.checkpointOpen.value = true"
@@ -114,9 +117,10 @@ const fullComparison = computed(() => selection.value && view.value
         data-access-notice="history"
         data-missing-key="history.read"
       >
-        <UIcon
-          name="i-lucide-user-lock"
-          class="size-4 shrink-0"
+        <KitIcon
+          name="user-lock"
+          class="shrink-0"
+          :size="16"
         />
         {{ t('access.requiresKey', { key: 'history.read' }) }}
       </p>
