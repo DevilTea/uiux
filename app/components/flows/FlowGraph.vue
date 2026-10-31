@@ -13,6 +13,8 @@ import {
 	type FlowNode,
 	type FlowSelection,
 } from '../../utils/flow-graph'
+import KitBadge from '~/components/kit/ui/Badge.vue'
+import KitIcon from '~/components/kit/ui/Icon.vue'
 
 /**
  * The UX Flow graph (brief g, sections 5, 6 and 8): a layered DOM/SVG projection of the keyed-steps
@@ -241,37 +243,32 @@ defineExpose({ focusStep })
         @keydown="onNodeKeydown($event, node)"
       >
         <span class="flex min-w-0 items-center gap-1.5">
-          <UIcon
+          <KitIcon
             v-if="node.isEntry"
-            name="i-lucide-flag"
-            class="size-3.5 shrink-0"
+            name="flag"
+            :size="14"
             :class="selectedStepId === node.stepId ? 'text-selection-text' : 'text-muted'"
           />
           <span
             class="min-w-0 flex-1 truncate text-sm font-medium"
             :class="selectedStepId === node.stepId ? 'text-selection-text' : 'text-highlighted'"
           >{{ editor.stepLabel(node.stepId) }}</span>
-          <UBadge
+          <KitBadge
             v-if="problemsByStep.get(node.stepId)"
-            color="error"
-            variant="subtle"
-            size="sm"
-            icon="i-lucide-circle-alert"
-            class="shrink-0"
+            tone="danger"
+            icon="circle-alert"
           >
             {{ problemsByStep.get(node.stepId) }}
-          </UBadge>
+          </KitBadge>
         </span>
         <span class="flex min-w-0 items-center gap-1.5">
-          <UBadge
+          <KitBadge
             v-if="node.variantName"
-            color="neutral"
             variant="soft"
-            size="sm"
-            class="min-w-0 font-mono"
-          >
-            <span class="truncate">{{ node.variantName }}</span>
-          </UBadge>
+            :label="node.variantName"
+            truncate
+            class="font-mono"
+          />
           <span
             v-else
             class="truncate text-xs text-muted"

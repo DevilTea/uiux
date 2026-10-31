@@ -3,6 +3,8 @@ import { computed } from 'vue'
 import { useI18n } from '#imports'
 import { injectFlowEditor } from '../../composables/useFlowEditor'
 import { edgeKey, orderSteps, triggerLabel, type FlowSelection } from '../../utils/flow-graph'
+import KitBadge from '~/components/kit/ui/Badge.vue'
+import KitIcon from '~/components/kit/ui/Icon.vue'
 
 /**
  * The Flow as an ordered list (brief g, section 9): every step in breadth-first order from the entry
@@ -76,38 +78,30 @@ const selectedEdgeKey = computed(() => props.selection?.kind === 'edge' ? props.
                 class="min-w-0 truncate text-sm font-medium"
                 :class="selectedStepId === row.stepId ? 'text-selection-text' : 'text-highlighted'"
               >{{ editor.stepLabel(row.stepId) }}</span>
-              <UBadge
+              <KitBadge
                 v-if="row.variantName"
-                color="neutral"
                 variant="soft"
-                size="sm"
                 class="font-mono"
-              >{{ row.variantName }}</UBadge>
+              >{{ row.variantName }}</KitBadge>
               <span
                 v-else
                 class="text-xs text-muted"
               >{{ t('ctx.base') }}</span>
-              <UBadge
+              <KitBadge
                 v-if="row.isEntry"
-                color="neutral"
                 variant="outline"
-                size="sm"
-                icon="i-lucide-flag"
-              >{{ t('flows.graph.entry') }}</UBadge>
-              <UBadge
+                icon="flag"
+              >{{ t('flows.graph.entry') }}</KitBadge>
+              <KitBadge
                 v-if="!row.reachable"
-                color="error"
-                variant="subtle"
-                size="sm"
-                icon="i-lucide-circle-alert"
-              >{{ t('flows.unreachable') }}</UBadge>
-              <UBadge
+                tone="danger"
+                icon="circle-alert"
+              >{{ t('flows.unreachable') }}</KitBadge>
+              <KitBadge
                 v-else-if="row.problemCount"
-                color="error"
-                variant="subtle"
-                size="sm"
-                icon="i-lucide-circle-alert"
-              >{{ t('flows.toolbar.problems', row.problemCount) }}</UBadge>
+                tone="danger"
+                icon="circle-alert"
+              >{{ t('flows.toolbar.problems', row.problemCount) }}</KitBadge>
             </span>
           </span>
         </component>
@@ -137,17 +131,19 @@ const selectedEdgeKey = computed(() => props.selection?.kind === 'edge' ? props.
                 :class="transition.problem ? 'text-error' : 'text-muted'"
               >{{ transition.trigger }}</span>
               <span class="flex min-w-0 flex-1 basis-40 items-center gap-2">
-                <UIcon
-                  name="i-lucide-arrow-right"
-                  class="size-3.5 shrink-0 text-dimmed"
+                <KitIcon
+                  name="arrow-right"
+                  :size="14"
+                  class="text-dimmed"
                 />
                 <span class="sr-only">{{ t('flows.list.goesTo') }}</span>
                 <span class="min-w-0 truncate">{{ transition.target }}</span>
               </span>
-              <UIcon
+              <KitIcon
                 v-if="transition.problem"
-                name="i-lucide-circle-alert"
-                class="size-3.5 shrink-0 text-error"
+                name="circle-alert"
+                :size="14"
+                class="text-error"
               />
             </component>
           </li>

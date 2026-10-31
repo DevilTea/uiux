@@ -5,6 +5,9 @@ import { useWorkbench } from '../../composables/useWorkbench'
 import { useMediaQuery, WORKBENCH_BREAKPOINTS } from '../../composables/useMediaQuery'
 import { flowPath } from '../../utils/workbench-routes'
 import FlowCreateModal from '../../components/flows/FlowCreateModal.vue'
+import KitBadge from '~/components/kit/ui/Badge.vue'
+import KitButton from '~/components/kit/ui/Button.vue'
+import KitIcon from '~/components/kit/ui/Icon.vue'
 
 /**
  * UX Flows: the list of every Flow, on every device. It is where the "UX Flows" crumb lands, so
@@ -42,12 +45,10 @@ function onCreated(flowId: string): void {
             <h1 class="text-headline font-semibold text-highlighted">
               {{ t('flows.title') }}
             </h1>
-            <UButton
+            <KitButton
               v-if="canCreate && flows.length"
-              color="neutral"
-              variant="outline"
               size="sm"
-              icon="i-lucide-plus"
+              icon="plus"
               :label="t('flows.newFlow')"
               @click="createOpen = true"
             />
@@ -84,23 +85,21 @@ function onCreated(flowId: string): void {
                 :to="flowPath(flow.key)"
                 class="flex min-h-(--wb-target) items-center gap-3 px-4 py-3 text-sm text-default hover:bg-muted"
               >
-                <UIcon
-                  name="i-lucide-workflow"
-                  class="size-4 shrink-0 text-dimmed"
+                <KitIcon
+                  name="workflow"
+                  class="text-dimmed"
                 />
                 <span class="min-w-0 flex-1 truncate font-medium text-highlighted">{{ flow.summary.name || t('flows.list.unnamed') }}</span>
-                <UBadge
+                <KitBadge
                   v-if="flow.diagnosticCount"
-                  color="error"
-                  variant="subtle"
-                  size="sm"
-                  icon="i-lucide-circle-alert"
+                  tone="danger"
+                  icon="circle-alert"
                 >
                   {{ t('flows.toolbar.problems', flow.diagnosticCount) }}
-                </UBadge>
-                <UIcon
-                  name="i-lucide-chevron-right"
-                  class="size-4 shrink-0 text-dimmed"
+                </KitBadge>
+                <KitIcon
+                  name="chevron-right"
+                  class="text-dimmed"
                 />
               </ULink>
             </li>

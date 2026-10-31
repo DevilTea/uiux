@@ -20,6 +20,8 @@ import {
 	type PlayerVisit,
 } from '../../utils/prototype-player'
 import PreviewCanvas from '../workbench/PreviewCanvas.vue'
+import KitButton from '~/components/kit/ui/Button.vue'
+import KitIcon from '~/components/kit/ui/Icon.vue'
 
 /**
  * The Prototype player (brief g, section 5; Discussion #6, items 6 and 10c). It reuses the View
@@ -284,9 +286,9 @@ defineExpose({ follow, restart })
       }"
     >
       <template #left>
-        <UIcon
-          name="i-lucide-play"
-          class="size-4 shrink-0 text-dimmed"
+        <KitIcon
+          name="play"
+          class="text-dimmed"
         />
         <div class="min-w-0 flex-1">
           <!-- Neutral like the navbar breadcrumb: the current step is a location, not a selection.
@@ -350,28 +352,27 @@ defineExpose({ follow, restart })
           :text="commentBlocked ?? t('tool.comment')"
           :kbds="commentBlocked || !shell.singleKeyShortcuts.value ? undefined : ['C']"
         >
-          <UButton
-            color="neutral"
+          <KitButton
             variant="ghost"
             size="sm"
-            icon="i-lucide-message-circle-plus"
+            icon="message-circle-plus"
             :label="t('tool.comment')"
-            :aria-pressed="preview.isCommentMode.value"
+            :pressed="preview.isCommentMode.value"
             :aria-disabled="commentBlocked ? 'true' : undefined"
             :aria-description="commentBlocked"
-            :class="commentBlocked ? 'cursor-not-allowed text-dimmed hover:bg-transparent' : preview.isCommentMode.value ? 'bg-comment-subtle text-annotation ring-1 ring-inset ring-annotation/35 hover:bg-comment-subtle' : 'text-muted'"
-            :ui="{ label: 'max-sm:sr-only' }"
+            :class="[
+              'max-sm:[&>span]:sr-only',
+              commentBlocked ? 'cursor-not-allowed text-dimmed! hover:bg-transparent!' : preview.isCommentMode.value ? 'bg-comment-subtle! text-annotation! ring-1 ring-inset ring-annotation/35 hover:bg-comment-subtle!' : '',
+            ]"
             data-flow-player-comment
             @click="comments.toggleCommentMode()"
           />
         </UTooltip>
-        <UButton
-          color="neutral"
-          variant="outline"
+        <KitButton
           size="sm"
-          icon="i-lucide-rotate-ccw"
+          icon="rotate-ccw"
           :label="t('flows.restart')"
-          :ui="{ label: 'max-sm:sr-only' }"
+          class="max-sm:[&>span]:sr-only"
           data-flow-player-restart
           @click="restart"
         />
@@ -379,13 +380,12 @@ defineExpose({ follow, restart })
           :text="t('flows.exit')"
           :kbds="['esc']"
         >
-          <UButton
-            color="neutral"
+          <KitButton
             variant="ghost"
             size="sm"
-            icon="i-lucide-x"
+            icon="x"
             :label="t('flows.exit')"
-            :ui="{ label: 'max-sm:sr-only' }"
+            class="max-sm:[&>span]:sr-only"
             data-flow-player-exit
             @click="emit('exit')"
           />
@@ -420,13 +420,12 @@ defineExpose({ follow, restart })
               :text="t('flows.player.goesTo', { step: stepTitle(item.transition.targetStepId) })"
               :kbds="shell.singleKeyShortcuts.value && item.index < 9 ? [String(item.index + 1)] : undefined"
             >
-              <UButton
-                color="neutral"
+              <KitButton
                 variant="ghost"
                 size="sm"
-                trailing-icon="i-lucide-arrow-right"
-                class="min-w-0"
-                :ui="{ base: 'gap-1.5 px-2', trailingIcon: 'text-dimmed' }"
+                trailing-icon="arrow-right"
+                truncate
+                class="[&>svg]:text-dimmed"
                 :aria-keyshortcuts="shell.singleKeyShortcuts.value && item.index < 9 ? String(item.index + 1) : undefined"
                 data-flow-player-next
                 @click="advanceFromDock($event, item)"
@@ -441,16 +440,15 @@ defineExpose({ follow, restart })
                     <code class="font-mono text-xs text-highlighted">{{ item.transition.trigger.event }} #{{ item.transition.trigger.widgetId }}</code>
                   </template>
                 </i18n-t>
-              </UButton>
+              </KitButton>
             </UTooltip>
           </template>
           <template v-else>
             <span class="px-2 text-sm text-muted">{{ t('flows.player.end') }}</span>
-            <UButton
-              color="primary"
-              variant="solid"
+            <KitButton
+              variant="primary"
               size="sm"
-              icon="i-lucide-rotate-ccw"
+              icon="rotate-ccw"
               :label="t('flows.restart')"
               @click="restart"
             />

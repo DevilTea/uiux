@@ -17,6 +17,10 @@ import LockBadge from '../../components/workbench/LockBadge.vue'
 import LockedSaveAlert from '../../components/workbench/LockedSaveAlert.vue'
 import WbDiagnosticList from '../../components/workbench/WbDiagnosticList.vue'
 import { useAccess } from '../../composables/useAccess'
+import KitButton from '~/components/kit/ui/Button.vue'
+import KitButtonGroup from '~/components/kit/ui/ButtonGroup.vue'
+import KitIcon from '~/components/kit/ui/Icon.vue'
+import KitSkeleton from '~/components/kit/ui/Skeleton.vue'
 
 /**
  * One UX Flow (brief g): the graph with a structured editor for the selected step or transition, an
@@ -226,37 +230,33 @@ const stepCount = computed(() => Object.keys(draft.value?.steps ?? {}).length)
               }"
             >
               <template #left>
-                <UFieldGroup
+                <KitButtonGroup
                   v-if="!isPhone"
-                  size="sm"
-                  role="group"
-                  :aria-label="t('flows.graph.layout')"
+                  :label="t('flows.graph.layout')"
                 >
-                  <UButton
-                    color="neutral"
-                    :variant="layout === 'graph' ? 'soft' : 'ghost'"
-                    icon="i-lucide-workflow"
+                  <KitButton
+                    size="sm"
+                    icon="workflow"
                     :label="t('flows.graph.graphView')"
-                    :aria-pressed="layout === 'graph'"
+                    :pressed="layout === 'graph'"
                     @click="preferredLayout = 'graph'"
                   />
-                  <UButton
-                    color="neutral"
-                    :variant="layout === 'list' ? 'soft' : 'ghost'"
-                    icon="i-lucide-list"
+                  <KitButton
+                    size="sm"
+                    icon="list"
                     :label="t('flows.graph.listView')"
-                    :aria-pressed="layout === 'list'"
+                    :pressed="layout === 'list'"
                     @click="preferredLayout = 'list'"
                   />
-                </UFieldGroup>
+                </KitButtonGroup>
                 <span class="truncate text-xs text-muted">{{ t('flows.toolbar.steps', stepCount) }}</span>
                 <span
                   v-if="showEditOnDesktop"
                   class="hidden items-center gap-1 text-xs text-muted sm:inline-flex"
                 >
-                  <UIcon
-                    name="i-lucide-monitor"
-                    class="size-3.5"
+                  <KitIcon
+                    name="monitor"
+                    :size="14"
                   />
                   {{ t('common.editOnDesktop') }}
                 </span>
@@ -267,8 +267,7 @@ const stepCount = computed(() => Object.keys(draft.value?.steps ?? {}).length)
                     class="px-1 text-xs text-muted"
                     role="status"
                   >{{ t('flows.toolbar.unsaved') }}</span>
-                  <UButton
-                    color="neutral"
+                  <KitButton
                     variant="ghost"
                     size="sm"
                     :label="t('flows.toolbar.discard')"
@@ -279,11 +278,10 @@ const stepCount = computed(() => Object.keys(draft.value?.steps ?? {}).length)
                     :text="saveBlockedReason ?? t('common.save')"
                     :kbds="saveBlockedReason ? undefined : ['meta', 's']"
                   >
-                    <UButton
-                      color="primary"
-                      variant="solid"
+                    <KitButton
+                      variant="primary"
                       size="sm"
-                      icon="i-lucide-save"
+                      icon="save"
                       :label="saving ? t('common.saving') : t('common.save')"
                       :loading="saving"
                       :disabled="!!saveBlockedReason"
@@ -301,11 +299,9 @@ const stepCount = computed(() => Object.keys(draft.value?.steps ?? {}).length)
                   :text="t('flows.toolbar.addStep')"
                   :kbds="shell.singleKeyShortcuts.value ? ['a'] : undefined"
                 >
-                  <UButton
-                    color="neutral"
-                    variant="outline"
+                  <KitButton
                     size="sm"
-                    icon="i-lucide-plus"
+                    icon="plus"
                     :label="t('flows.toolbar.addStep')"
                     :disabled="saving"
                     data-flow-add-step
@@ -320,25 +316,24 @@ const stepCount = computed(() => Object.keys(draft.value?.steps ?? {}).length)
                   @deleted="router.push('/flows')"
                 />
                 <UTooltip :text="playBlockedReason ?? t('flows.play')">
-                  <UButton
-                    :color="dirty && canEdit ? 'neutral' : 'primary'"
-                    :variant="dirty && canEdit ? 'outline' : 'solid'"
+                  <KitButton
+                    :variant="dirty && canEdit ? 'secondary' : 'primary'"
                     size="sm"
-                    icon="i-lucide-play"
+                    icon="play"
                     :label="t('flows.play')"
                     :disabled="!!playBlockedReason"
                     data-flow-play
                     @click="play"
                   />
                 </UTooltip>
-                <UButton
+                <KitButton
                   v-if="!isDesktop && !isPhone"
-                  color="neutral"
                   variant="ghost"
                   size="sm"
-                  icon="i-lucide-panel-right-open"
-                  :aria-label="t('shell.openPanel')"
-                  :aria-expanded="inspectorOpen"
+                  icon="panel-right-open"
+                  icon-only
+                  :label="t('shell.openPanel')"
+                  :expanded="inspectorOpen"
                   @click="inspectorOpen = true"
                 />
               </template>
@@ -472,10 +467,13 @@ const stepCount = computed(() => Object.keys(draft.value?.steps ?? {}).length)
               variant="naked"
               :actions="[{ label: t('common.retry'), color: 'neutral', variant: 'outline', onClick: () => { void editor.load() } }]"
             />
-            <USkeleton
+            <KitSkeleton
               v-else-if="loading"
-              class="h-24 w-64 rounded-lg"
-              :aria-label="t('common.loading')"
+              class="wb-skeleton animate-pulse"
+              :width="256"
+              :height="96"
+              :radius="8"
+              :label="t('common.loading')"
             />
           </div>
         </main>
@@ -544,15 +542,13 @@ const stepCount = computed(() => Object.keys(draft.value?.steps ?? {}).length)
     >
       <template #footer>
         <div class="flex w-full justify-end gap-2">
-          <UButton
-            color="neutral"
+          <KitButton
             variant="ghost"
             :label="t('flows.leave.stay')"
             @click="leaveOpen = false"
           />
-          <UButton
-            color="error"
-            variant="soft"
+          <KitButton
+            variant="danger"
             :label="t('flows.leave.confirm')"
             @click="confirmLeave"
           />

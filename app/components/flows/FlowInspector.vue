@@ -6,6 +6,9 @@ import { useWorkbench } from '../../composables/useWorkbench'
 import { useDeclaredWidgetEvents } from '../../composables/useDeclaredWidgetEvents'
 import { viewLocation } from '../../utils/workbench-routes'
 import RequirementRefs from '../workbench/RequirementRefs.vue'
+import KitBadge from '~/components/kit/ui/Badge.vue'
+import KitButton from '~/components/kit/ui/Button.vue'
+import KitIcon from '~/components/kit/ui/Icon.vue'
 import { edgeKey, orderSteps, parseEdgeKey, triggerLabel, type FlowSelection } from '../../utils/flow-graph'
 
 /**
@@ -231,13 +234,11 @@ const widgetSearch = computed(() => ({ placeholder: t('flows.inspector.searchWid
     <!-- A step -->
     <template v-if="step">
       <div class="flex items-center gap-1 border-b border-default px-2 py-1.5">
-        <UButton
-          color="neutral"
+        <KitButton
           variant="ghost"
           size="sm"
-          icon="i-lucide-arrow-left"
+          icon="arrow-left"
           :label="t('flows.inspector.flow')"
-          class="text-muted"
           @click="emit('select', undefined)"
         />
       </div>
@@ -246,15 +247,13 @@ const widgetSearch = computed(() => ({ placeholder: t('flows.inspector.searchWid
           <h2 class="min-w-0 flex-1 truncate text-title font-semibold text-highlighted">
             {{ editor.stepLabel(step.id) }}
           </h2>
-          <UBadge
+          <KitBadge
             v-if="isEntry"
-            color="neutral"
             variant="outline"
-            size="sm"
-            icon="i-lucide-flag"
+            icon="flag"
           >
             {{ t('flows.graph.entry') }}
-          </UBadge>
+          </KitBadge>
         </div>
 
         <UAlert
@@ -321,12 +320,10 @@ const widgetSearch = computed(() => ({ placeholder: t('flows.inspector.searchWid
             :label="t('flows.inspector.openView')"
             :to="viewLocation(step.value.target.viewId, { variant: step.value.target.variantName })"
           />
-          <UButton
+          <KitButton
             v-if="!readOnly && !isEntry"
-            color="neutral"
-            variant="outline"
             size="sm"
-            icon="i-lucide-flag"
+            icon="flag"
             :label="t('flows.inspector.makeEntry')"
             :disabled="locked"
             @click="editor.setEntry(step.id)"
@@ -339,12 +336,11 @@ const widgetSearch = computed(() => ({ placeholder: t('flows.inspector.searchWid
           <h3 class="text-sm font-semibold text-highlighted">
             {{ t('flows.inspector.transitions') }}
           </h3>
-          <UButton
+          <KitButton
             v-if="!readOnly && !addingTransition"
-            color="neutral"
             variant="ghost"
             size="sm"
-            icon="i-lucide-plus"
+            icon="plus"
             :label="t('flows.inspector.addTransition')"
             :disabled="locked"
             @click="openAddTransition"
@@ -367,9 +363,10 @@ const widgetSearch = computed(() => ({ placeholder: t('flows.inspector.searchWid
                 class="min-w-0 truncate font-mono text-xs"
                 :class="edgeProblems(edgeKey(step.id, index)).length ? 'text-error' : 'text-muted'"
               >{{ triggerLabel(item.trigger) }}</span>
-              <UIcon
-                name="i-lucide-arrow-right"
-                class="size-3.5 shrink-0 text-dimmed"
+              <KitIcon
+                name="arrow-right"
+                :size="14"
+                class="text-dimmed"
               />
               <span class="min-w-0 flex-1 truncate">{{ draft?.steps[item.targetStepId] ? editor.stepLabel(item.targetStepId) : t('flows.graph.missingStep') }}</span>
             </button>
@@ -435,19 +432,16 @@ const widgetSearch = computed(() => ({ placeholder: t('flows.inspector.searchWid
             />
           </UFormField>
           <div class="flex justify-end gap-2">
-            <UButton
-              color="neutral"
+            <KitButton
               variant="ghost"
               size="sm"
               :label="t('common.cancel')"
               @click="addingTransition = false"
             />
-            <UButton
+            <KitButton
               type="submit"
-              color="neutral"
-              variant="outline"
               size="sm"
-              icon="i-lucide-plus"
+              icon="plus"
               :label="t('common.add')"
               :disabled="!canAddTransition"
             />
@@ -471,16 +465,14 @@ const widgetSearch = computed(() => ({ placeholder: t('flows.inspector.searchWid
             {{ t('flows.inspector.removeStepConfirm', incomingCount) }}
           </p>
           <div class="flex gap-2">
-            <UButton
-              color="error"
-              variant="soft"
+            <KitButton
+              variant="danger"
               size="sm"
-              icon="i-lucide-trash-2"
+              icon="trash-2"
               :label="t('flows.inspector.removeStep')"
               @click="removeStep"
             />
-            <UButton
-              color="neutral"
+            <KitButton
               variant="ghost"
               size="sm"
               :label="t('common.cancel')"
@@ -493,29 +485,28 @@ const widgetSearch = computed(() => ({ placeholder: t('flows.inspector.searchWid
           :text="isEntry ? t('flows.inspector.entryCantRemove') : undefined"
           :disabled="!isEntry"
         >
-          <UButton
-            color="neutral"
+          <KitButton
             variant="ghost"
             size="sm"
-            icon="i-lucide-trash-2"
+            icon="trash-2"
             :label="t('flows.inspector.removeStep')"
             :disabled="locked || isEntry"
-            class="text-muted"
             @click="confirmingRemove = true"
           />
         </UTooltip>
       </section>
 
       <UCollapsible class="border-t border-default px-3 py-2">
-        <UButton
-          color="neutral"
-          variant="ghost"
-          size="sm"
-          trailing-icon="i-lucide-chevron-down"
-          :label="t('flows.inspector.details')"
-          class="-mx-2 text-muted"
-          :ui="{ trailingIcon: 'group-data-[state=open]:rotate-180 transition-transform duration-120' }"
-        />
+        <template #default="{ open: detailsOpen }">
+          <KitButton
+            variant="ghost"
+            size="sm"
+            trailing-icon="chevron-down"
+            :expanded="detailsOpen"
+            :label="t('flows.inspector.details')"
+            class="-mx-2"
+          />
+        </template>
         <template #content>
           <dl class="grid gap-1 pb-2 text-xs">
             <dt class="text-muted">
@@ -540,14 +531,12 @@ const widgetSearch = computed(() => ({ placeholder: t('flows.inspector.searchWid
     <!-- A transition -->
     <template v-else-if="transition">
       <div class="flex items-center gap-1 border-b border-default px-2 py-1.5">
-        <UButton
-          color="neutral"
+        <KitButton
           variant="ghost"
           size="sm"
-          icon="i-lucide-arrow-left"
+          icon="arrow-left"
           :label="editor.stepLabel(transition.stepId)"
-          class="min-w-0 text-muted"
-          :ui="{ label: 'truncate' }"
+          truncate
           @click="emit('select', { kind: 'step', stepId: transition.stepId })"
         />
       </div>
@@ -642,12 +631,10 @@ const widgetSearch = computed(() => ({ placeholder: t('flows.inspector.searchWid
           </dd>
         </dl>
 
-        <UButton
+        <KitButton
           v-if="draft?.steps[transition.value.targetStepId]"
-          color="neutral"
-          variant="outline"
           size="sm"
-          icon="i-lucide-arrow-right"
+          icon="arrow-right"
           :label="t('flows.inspector.selectTarget')"
           @click="emit('select', { kind: 'step', stepId: transition.value.targetStepId })"
         />
@@ -657,14 +644,12 @@ const widgetSearch = computed(() => ({ placeholder: t('flows.inspector.searchWid
         v-if="!readOnly"
         class="border-t border-default px-3 py-4"
       >
-        <UButton
-          color="neutral"
+        <KitButton
           variant="ghost"
           size="sm"
-          icon="i-lucide-trash-2"
+          icon="trash-2"
           :label="t('flows.inspector.removeTransition')"
           :disabled="locked"
-          class="text-muted"
           @click="removeTransition"
         />
       </section>
@@ -737,15 +722,16 @@ const widgetSearch = computed(() => ({ placeholder: t('flows.inspector.searchWid
       </section>
 
       <UCollapsible class="border-t border-default px-3 py-2">
-        <UButton
-          color="neutral"
-          variant="ghost"
-          size="sm"
-          trailing-icon="i-lucide-chevron-down"
-          :label="t('flows.inspector.details')"
-          class="-mx-2 text-muted"
-          :ui="{ trailingIcon: 'group-data-[state=open]:rotate-180 transition-transform duration-120' }"
-        />
+        <template #default="{ open: detailsOpen }">
+          <KitButton
+            variant="ghost"
+            size="sm"
+            trailing-icon="chevron-down"
+            :expanded="detailsOpen"
+            :label="t('flows.inspector.details')"
+            class="-mx-2"
+          />
+        </template>
         <template #content>
           <dl class="grid gap-1 pb-2 text-xs">
             <dt class="text-muted">

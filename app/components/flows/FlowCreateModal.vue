@@ -7,6 +7,7 @@ import { describeFetchError, type FetchErrorDetails } from '../../utils/fetch-er
 import { focusFirstProblem } from '../../utils/focus-problem'
 import { randomUuid } from '../../utils/random-uuid'
 import WbDiagnosticList from '../workbench/WbDiagnosticList.vue'
+import KitButton from '~/components/kit/ui/Button.vue'
 
 /** `create_flow` from the Workbench: a name and the View of the entry step. */
 const open = defineModel<boolean>('open', { default: false })
@@ -131,17 +132,15 @@ async function submit(): Promise<void> {
     </template>
     <template #footer>
       <div class="flex w-full justify-end gap-2">
-        <UButton
-          color="neutral"
+        <KitButton
           variant="ghost"
           :label="t('common.cancel')"
           @click="open = false"
         />
-        <UButton
+        <KitButton
           type="submit"
           :form="formId"
-          color="primary"
-          variant="solid"
+          variant="primary"
           :loading="creating"
           :label="t('flows.create.submit')"
         />
