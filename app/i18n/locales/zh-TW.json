@@ -206,7 +206,7 @@
       "property": "屬性 {name}",
       "warning": {
         "missingTranslation": "「{key}」在 {locale} 沒有翻譯，改顯示 {fallback} 的文字。",
-        "unresolvedKey": "「{key}」不在任何 Locale 檔案中，直接顯示翻譯鍵。",
+        "unresolvedKey": "「{key}」不在任何 Locale 檔案中，會顯示為「⟦missing:{key}⟧」標記。",
         "missingParameter": "「{key}」缺少參數 {parameter}。"
       },
       "runtime": {
