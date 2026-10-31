@@ -18,6 +18,9 @@ import CaptureSlideover from './CaptureSlideover.vue'
 import EvidenceSheet from './EvidenceSheet.vue'
 import HandoffDiagnosticList from './HandoffDiagnosticList.vue'
 import HandoffExportModal from './HandoffExportModal.vue'
+import KitBadge from '~/components/kit/ui/Badge.vue'
+import KitButton from '~/components/kit/ui/Button.vue'
+import KitIcon from '~/components/kit/ui/Icon.vue'
 
 /**
  * A View's Readiness tab (brief f): four facets, each a status icon, a plain sentence and one
@@ -179,24 +182,24 @@ async function recheck(): Promise<void> {
 
 type Facet = Readonly<{ icon: string; tone: string }>
 const validationFacet = computed<Facet>(() => findings.value.length
-	? { icon: 'i-lucide-triangle-alert', tone: 'text-warning' }
-	: { icon: 'i-lucide-circle-check', tone: 'text-success' })
+	? { icon: 'triangle-alert', tone: 'text-warning' }
+	: { icon: 'circle-check', tone: 'text-success' })
 const evidenceFacet = computed<Facet>(() => {
 	const counts = evidenceCounts.value
-	if (!counts.total) return { icon: 'i-lucide-circle-dashed', tone: 'text-dimmed' }
-	if (counts.stale) return { icon: 'i-lucide-history', tone: 'text-warning' }
-	if (counts.fresh) return { icon: 'i-lucide-circle-check', tone: 'text-success' }
-	return { icon: 'i-lucide-circle-help', tone: 'text-muted' }
+	if (!counts.total) return { icon: 'circle-dashed', tone: 'text-dimmed' }
+	if (counts.stale) return { icon: 'history', tone: 'text-warning' }
+	if (counts.fresh) return { icon: 'circle-check', tone: 'text-success' }
+	return { icon: 'circle-help', tone: 'text-muted' }
 })
 const reviewsFacet = computed<Facet>(() => {
-	if (readyHere.value) return { icon: 'i-lucide-eye', tone: 'text-info' }
-	if (openHere.value) return { icon: 'i-lucide-circle-dot', tone: 'text-annotation' }
-	return { icon: 'i-lucide-circle-check', tone: 'text-success' }
+	if (readyHere.value) return { icon: 'eye', tone: 'text-info' }
+	if (openHere.value) return { icon: 'circle-dot', tone: 'text-annotation' }
+	return { icon: 'circle-check', tone: 'text-success' }
 })
 const handoffFacet = computed<Facet>(() => {
-	if (!entry.value || entry.value.status === 'loading' && !entry.value.readiness) return { icon: 'i-lucide-loader-circle', tone: 'text-muted animate-spin' }
-	if (entry.value.status === 'failed') return { icon: 'i-lucide-circle-alert', tone: 'text-error' }
-	return ready.value ? { icon: 'i-lucide-badge-check', tone: 'text-success' } : { icon: 'i-lucide-circle-x', tone: 'text-error' }
+	if (!entry.value || entry.value.status === 'loading' && !entry.value.readiness) return { icon: 'loader-circle', tone: 'text-muted animate-spin' }
+	if (entry.value.status === 'failed') return { icon: 'circle-alert', tone: 'text-error' }
+	return ready.value ? { icon: 'badge-check', tone: 'text-success' } : { icon: 'circle-x', tone: 'text-error' }
 })
 </script>
 
@@ -210,32 +213,32 @@ const handoffFacet = computed<Facet>(() => {
         {{ t('ready.title', { view: viewName }) }}
       </h2>
       <div class="flex shrink-0 items-center gap-1">
-        <UBadge
+        <KitBadge
           v-if="entry?.status === 'ok' && ready"
-          color="success"
-          variant="subtle"
-          icon="i-lucide-badge-check"
+          tone="success"
+          icon="badge-check"
           data-readiness-badge="ready"
         >
           {{ t('ready.ready') }}
-        </UBadge>
-        <UBadge
+        </KitBadge>
+        <KitBadge
           v-else-if="entry?.status === 'ok'"
-          color="error"
-          variant="subtle"
-          icon="i-lucide-circle-x"
+          tone="danger"
+          icon="circle-x"
           data-readiness-badge="blocked"
           :data-blocking-count="split.blocking.length"
         >
           {{ split.blocking.length ? t('ready.blockedBy', split.blocking.length) : t('ready.notReadyShort') }}
-        </UBadge>
+        </KitBadge>
         <UTooltip :text="t('ready.recheck')">
-          <UButton
+          <KitButton
             size="xs"
             variant="ghost"
-            icon="i-lucide-refresh-cw"
+            icon="refresh-cw"
+            icon-only
             :loading="entry?.status === 'loading' || readiness.evidenceLoading.value"
-            :aria-label="t('ready.recheck')"
+            :label="t('ready.recheck')"
+            title=""
             @click="recheck"
           />
         </UTooltip>
@@ -248,26 +251,25 @@ const handoffFacet = computed<Facet>(() => {
         class="grid grid-cols-[16px_minmax(0,1fr)] gap-x-2 px-3 py-2.5"
         data-facet="validation"
       >
-        <UIcon
+        <KitIcon
           :name="validationFacet.icon"
-          class="mt-0.5 size-4"
+          class="mt-0.5"
           :class="validationFacet.tone"
         />
         <dl class="min-w-0 space-y-1">
           <dt class="flex items-center justify-between gap-2 text-sm font-medium text-highlighted">
             {{ t('ready.validation') }}
-            <UButton
+            <KitButton
               v-if="findings.length"
               size="xs"
-              variant="link"
-              color="neutral"
-              :trailing-icon="findingsOpen ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'"
-              :aria-expanded="findingsOpen"
+              variant="link-muted"
+              trailing-icon="chevron-down"
+              :expanded="findingsOpen"
               class="-me-2 -my-1.5 pointer-coarse:-my-3"
               @click="findingsOpen = !findingsOpen"
             >
               {{ findingsOpen ? t('ready.hide') : t('ready.show') }}
-            </UButton>
+            </KitButton>
           </dt>
           <dd class="text-sm text-muted">
             {{ findings.length ? t('ready.findings', findings.length) : t('ready.noFindings') }}
@@ -289,25 +291,24 @@ const handoffFacet = computed<Facet>(() => {
                 <span class="block font-mono text-xs text-warning">{{ finding.code }}</span>
                 <span class="block text-default">{{ diagnosticText(finding) }}</span>
                 <template v-if="finding.widgetId">
-                  <UButton
+                  <KitButton
                     size="xs"
-                    variant="link"
-                    color="neutral"
-                    icon="i-lucide-crosshair"
-                    class="-ms-2 font-mono"
+                    variant="link-muted"
+                    icon="crosshair"
+                    class="-ms-2 font-mono!"
                     @click="selectFinding(finding.widgetId!)"
                   >
                     {{ finding.widgetType ? `${finding.widgetType} · ` : '' }}#{{ finding.widgetId }}
-                  </UButton>
+                  </KitButton>
                   <!-- The marker of the notice beside the Preview highlight: current Preview state only, so it exists only here, where the Preview is live. It adds no finding. -->
                   <span
                     v-if="preview.translucentCoverage.value === finding.widgetId"
                     class="ms-1 inline-flex items-center gap-1 text-xs text-muted"
                     data-translucent-marker
                   >
-                    <UIcon
-                      name="i-lucide-layers"
-                      class="size-3 shrink-0"
+                    <KitIcon
+                      name="layers"
+                      :size="12"
                     />
                     {{ t('canvas.translucentNotice') }}
                   </span>
@@ -327,24 +328,24 @@ const handoffFacet = computed<Facet>(() => {
         class="grid grid-cols-[16px_minmax(0,1fr)] gap-x-2 px-3 py-2.5"
         data-facet="evidence"
       >
-        <UIcon
+        <KitIcon
           :name="evidenceFacet.icon"
-          class="mt-0.5 size-4"
+          class="mt-0.5"
           :class="evidenceFacet.tone"
         />
         <dl class="min-w-0 space-y-1">
           <dt class="flex items-center justify-between gap-2 text-sm font-medium text-highlighted">
             {{ t('ready.evidence') }}
-            <UButton
+            <KitButton
               v-if="canCapture"
               size="xs"
-              icon="i-lucide-camera"
+              icon="camera"
               class="-my-1.5 pointer-coarse:-my-3"
               data-capture-open
               @click="openCapture()"
             >
               {{ t('evidence.capture') }}
-            </UButton>
+            </KitButton>
           </dt>
           <dd class="text-sm text-muted">
             <template v-if="readiness.evidenceError.value">
@@ -363,9 +364,9 @@ const handoffFacet = computed<Facet>(() => {
             data-access-notice="capture"
             data-missing-key="evidence.capture"
           >
-            <UIcon
-              name="i-lucide-user-lock"
-              class="size-3.5"
+            <KitIcon
+              name="user-lock"
+              :size="14"
             />
             {{ t('access.requiresKey', { key: 'evidence.capture' }) }}
           </dd>
@@ -383,25 +384,24 @@ const handoffFacet = computed<Facet>(() => {
         class="grid grid-cols-[16px_minmax(0,1fr)] gap-x-2 px-3 py-2.5"
         data-facet="reviews"
       >
-        <UIcon
+        <KitIcon
           :name="reviewsFacet.icon"
-          class="mt-0.5 size-4"
+          class="mt-0.5"
           :class="reviewsFacet.tone"
         />
         <dl class="min-w-0 space-y-1">
           <dt class="flex items-center justify-between gap-2 text-sm font-medium text-highlighted">
             {{ t('ready.reviews') }}
-            <UButton
+            <KitButton
               v-if="threadsHere.length"
               size="xs"
-              variant="link"
-              color="neutral"
-              trailing-icon="i-lucide-chevron-right"
+              variant="link-muted"
+              trailing-icon="chevron-right"
               class="-me-2 -my-1.5 pointer-coarse:-my-3"
               @click="emit('openComments')"
             >
               {{ t('ready.openComments') }}
-            </UButton>
+            </KitButton>
           </dt>
           <dd class="text-sm text-muted">
             <template v-if="readyHere || openHere">
@@ -434,24 +434,24 @@ const handoffFacet = computed<Facet>(() => {
         class="grid grid-cols-[16px_minmax(0,1fr)] gap-x-2 px-3 py-2.5"
         data-facet="handoff"
       >
-        <UIcon
+        <KitIcon
           :name="handoffFacet.icon"
-          class="mt-0.5 size-4"
+          class="mt-0.5"
           :class="handoffFacet.tone"
         />
         <dl class="min-w-0 space-y-1.5">
           <dt class="flex items-center justify-between gap-2 text-sm font-medium text-highlighted">
             {{ t('ready.handoff') }}
-            <UButton
+            <KitButton
               v-if="canExport"
               size="xs"
-              icon="i-lucide-package"
+              icon="package"
               class="-my-1.5 pointer-coarse:-my-3"
               data-export-open
               @click="exportOpen = true"
             >
               {{ t('handoff.export') }}
-            </UButton>
+            </KitButton>
           </dt>
           <dd
             v-if="!entry || entry.status === 'loading' && !entry.readiness"
@@ -506,9 +506,9 @@ const handoffFacet = computed<Facet>(() => {
             data-access-notice="export"
             data-missing-key="handoff.export"
           >
-            <UIcon
-              name="i-lucide-user-lock"
-              class="size-3.5"
+            <KitIcon
+              name="user-lock"
+              :size="14"
             />
             {{ t('access.requiresKey', { key: 'handoff.export' }) }}
           </dd>
@@ -536,9 +536,9 @@ const handoffFacet = computed<Facet>(() => {
             :key="item.digest"
             class="grid grid-cols-[16px_minmax(0,1fr)] gap-x-2"
           >
-            <UIcon
-              :name="item.freshness.state === 'stale' ? 'i-lucide-history' : 'i-lucide-circle-help'"
-              class="mt-0.5 size-4"
+            <KitIcon
+              :name="item.freshness.state === 'stale' ? 'history' : 'circle-help'"
+              class="mt-0.5"
               :class="item.freshness.state === 'stale' ? 'text-warning' : 'text-muted'"
             />
             <span class="min-w-0">
@@ -547,27 +547,26 @@ const handoffFacet = computed<Facet>(() => {
             </span>
           </li>
         </ul>
-        <UButton
+        <KitButton
           v-if="needsCapture.length > STALE_PREVIEW"
           size="xs"
-          variant="link"
-          color="neutral"
+          variant="link-muted"
           class="ms-4"
-          :aria-expanded="staleExpanded"
+          :expanded="staleExpanded"
           @click="staleExpanded = !staleExpanded"
         >
           {{ staleExpanded ? t('evidence.showFewer') : t('evidence.showAll', { n: needsCapture.length }) }}
-        </UButton>
-        <UButton
+        </KitButton>
+        <KitButton
           v-if="canCapture"
           size="xs"
-          icon="i-lucide-camera"
+          icon="camera"
           class="ms-6"
           data-capture-stale
           @click="openCapture(needsCapture.flatMap(item => item.context ? [item.context] : []))"
         >
           {{ t('evidence.captureAllAgain') }}
-        </UButton>
+        </KitButton>
       </div>
 
       <div class="space-y-1.5">

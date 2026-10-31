@@ -8,6 +8,7 @@ import { viewLocation } from '../../utils/workbench-routes'
 import { isWidgetAnchor, isWorkspaceAnchor } from '../../../src/domain/reviews/schema'
 import WbErrorDetails from '../workbench/WbErrorDetails.vue'
 import { diagnosticText } from '../../utils/diagnostic-copy'
+import KitIcon from '../kit/ui/Icon.vue'
 
 /**
  * One side of a Handoff assessment: the blocking entries, or the advisory ones the server marks
@@ -90,9 +91,9 @@ const details = computed(() => props.diagnostics.map(diagnostic => ({ code: diag
         class="grid grid-cols-[16px_minmax(0,1fr)] gap-x-2 text-sm"
         :data-diagnostic-code="row.code"
       >
-        <UIcon
-          :name="tone === 'blocking' ? 'i-lucide-circle-x' : 'i-lucide-info'"
-          class="mt-0.5 size-4"
+        <KitIcon
+          :name="tone === 'blocking' ? 'circle-x' : 'info'"
+          class="mt-0.5"
           :class="tone === 'blocking' ? 'text-error' : 'text-muted'"
         />
         <span class="min-w-0">

@@ -32,6 +32,9 @@ import VersionTimeline from '../history/VersionTimeline.vue'
 import VersionComparison from '../history/VersionComparison.vue'
 import DeleteCheckpointModal from '../history/DeleteCheckpointModal.vue'
 import WbErrorDescription from '../workbench/WbErrorDescription.vue'
+import KitButton from '~/components/kit/ui/Button.vue'
+import KitIcon from '~/components/kit/ui/Icon.vue'
+import KitSkeleton from '~/components/kit/ui/Skeleton.vue'
 
 /**
  * Overview › Activity: the Workspace version timeline (Rules 01a11a5e-1946-7217-aff5-db13df3a2977,
@@ -321,10 +324,9 @@ const reviewTimeline = computed(() => events.value.map(item => ({ ...item, date:
                 role="alert"
                 data-since-failed
               >{{ (sinceStates.get(view.key) as { message: string }).message }}</span>
-              <UButton
+              <KitButton
                 size="xs"
-                color="neutral"
-                variant="link"
+                variant="link-muted"
                 class="shrink-0 underline underline-offset-2"
                 :loading="sinceStates.get(view.key)?.state === 'resolving'"
                 :label="t('history.since.compare')"
@@ -373,9 +375,9 @@ const reviewTimeline = computed(() => events.value.map(item => ({ ...item, date:
                 data-history-filter="checkpoints"
               />
             </template>
-            <UButton
+            <KitButton
               v-if="checkpoints.canCreate.value"
-              icon="i-lucide-flag"
+              icon="flag"
               :label="t('history.checkpoint.create')"
               data-create-checkpoint
               @click="shell.checkpointOpen.value = true"
@@ -440,10 +442,7 @@ const reviewTimeline = computed(() => events.value.map(item => ({ ...item, date:
             data-access-notice="history"
             data-missing-key="history.read"
           >
-            <UIcon
-              name="i-lucide-user-lock"
-              class="size-4 shrink-0"
-            />
+            <KitIcon name="user-lock" />
             {{ t('access.requiresKey', { key: 'history.read' }) }}
           </p>
         </section>
@@ -478,11 +477,13 @@ const reviewTimeline = computed(() => events.value.map(item => ({ ...item, date:
         v-else-if="reviewLoading && !events.length"
         class="space-y-3"
       >
-        <USkeleton
+        <KitSkeleton
           v-for="index in 3"
           :key="index"
-          class="h-8 w-full"
-          :aria-label="t('common.loading')"
+          class="wb-skeleton animate-pulse"
+          :height="32"
+          :radius="6"
+          :label="t('common.loading')"
         />
       </div>
       <p

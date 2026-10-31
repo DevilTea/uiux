@@ -6,6 +6,8 @@ import { useUiuxClient } from '../../composables/useUiuxClient'
 import { useWorkbenchFeedback } from '../../composables/useWorkbenchFeedback'
 import { copyText } from '../../utils/copy-text'
 import type { CaptureContext, EvidenceFreshness } from '../../utils/readiness'
+import KitBadge from '~/components/kit/ui/Badge.vue'
+import KitButton from '~/components/kit/ui/Button.vue'
 
 /**
  * The Evidence contact sheet (brief f, blueprint register): one tile per formal capture,
@@ -66,9 +68,9 @@ function altText(entry: EvidenceEntry): string {
 }
 
 const BADGE: Record<EvidenceFreshness['state'], { color: 'success' | 'warning' | 'neutral'; icon: string }> = {
-	fresh: { color: 'success', icon: 'i-lucide-circle-check' },
-	stale: { color: 'warning', icon: 'i-lucide-history' },
-	unknown: { color: 'neutral', icon: 'i-lucide-circle-help' },
+	fresh: { color: 'success', icon: 'circle-check' },
+	stale: { color: 'warning', icon: 'history' },
+	unknown: { color: 'neutral', icon: 'circle-help' },
 }
 
 function reasonText(freshness: EvidenceFreshness): string {
@@ -126,15 +128,13 @@ function open(entry: EvidenceEntry): void {
               class="truncate text-xs leading-4"
               :class="index === 0 ? 'font-medium text-highlighted' : 'font-mono text-muted'"
             >{{ line }}</span>
-            <UBadge
-              :color="BADGE[entry.freshness.state].color"
+            <KitBadge
+              :tone="BADGE[entry.freshness.state].color"
               :icon="BADGE[entry.freshness.state].icon"
-              variant="subtle"
-              size="sm"
               class="mt-0.5 self-start"
             >
               {{ t(`evidence.state.${entry.freshness.state}`) }}
-            </UBadge>
+            </KitBadge>
           </span>
         </button>
       </li>
@@ -151,7 +151,7 @@ function open(entry: EvidenceEntry): void {
             v-if="current.freshness.state !== 'fresh'"
             :color="current.freshness.state === 'stale' ? 'warning' : 'neutral'"
             variant="subtle"
-            :icon="BADGE[current.freshness.state].icon"
+            :icon="`i-lucide-${BADGE[current.freshness.state].icon}`"
             :title="t(`evidence.stateTitle.${current.freshness.state}`)"
             :description="reasonText(current.freshness)"
           />
@@ -168,14 +168,17 @@ function open(entry: EvidenceEntry): void {
             >
           </div>
           <UCollapsible :ui="{ content: 'pt-2' }">
-            <UButton
-              variant="ghost"
-              size="sm"
-              trailing-icon="i-lucide-chevron-down"
-              class="-ms-2"
-            >
-              {{ t('evidence.details') }}
-            </UButton>
+            <template #default="{ open: detailsOpen }">
+              <KitButton
+                variant="ghost"
+                size="sm"
+                trailing-icon="chevron-down"
+                :expanded="detailsOpen"
+                class="-ms-2"
+              >
+                {{ t('evidence.details') }}
+              </KitButton>
+            </template>
             <template #content>
               <dl class="grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 text-sm">
                 <dt class="text-muted">
@@ -185,11 +188,12 @@ function open(entry: EvidenceEntry): void {
                   {{ middle(current.digest) }}
                 </dd>
                 <dd>
-                  <UButton
+                  <KitButton
                     size="xs"
                     variant="ghost"
-                    icon="i-lucide-copy"
-                    :aria-label="t('evidence.copyDigest')"
+                    icon="copy"
+                    icon-only
+                    :label="t('evidence.copyDigest')"
                     @click="copy(current.digest)"
                   />
                 </dd>
@@ -223,31 +227,30 @@ function open(entry: EvidenceEntry): void {
           v-if="current"
           class="flex w-full flex-wrap items-center justify-end gap-2"
         >
-          <UButton
+          <KitButton
             variant="ghost"
-            :icon="actualSize ? 'i-lucide-minimize-2' : 'i-lucide-maximize-2'"
+            :icon="actualSize ? 'minimize-2' : 'maximize-2'"
             class="me-auto"
-            :aria-pressed="actualSize"
+            :pressed="actualSize"
             @click="actualSize = !actualSize"
           >
             {{ actualSize ? t('evidence.fit') : t('evidence.actualSize') }}
-          </UButton>
-          <UButton
+          </KitButton>
+          <KitButton
             v-if="current.context"
-            icon="i-lucide-crosshair"
+            icon="crosshair"
             @click="emit('apply', current.context!); viewerOpen = false"
           >
             {{ t('evidence.applyContext') }}
-          </UButton>
-          <UButton
+          </KitButton>
+          <KitButton
             v-if="canCapture && current.context && current.freshness.state !== 'fresh'"
-            color="primary"
-            variant="solid"
-            icon="i-lucide-camera"
+            variant="primary"
+            icon="camera"
             @click="emit('captureAgain', [current.context!]); viewerOpen = false"
           >
             {{ t('evidence.captureAgain') }}
-          </UButton>
+          </KitButton>
         </div>
       </template>
     </UModal>
