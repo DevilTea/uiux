@@ -3,6 +3,7 @@ import { useI18n } from '#imports'
 import { deriveRenderContextOptions, workspaceRenderContextKeys, type RenderContextKeys } from '../../src/preview/render-context-options'
 import { deriveWidgetTree, findWidgetInTree, flattenWidgetTree, type WidgetTreeNode } from '../../src/preview/widget-tree'
 import { describeFetchError } from '../utils/fetch-error'
+import { listAllResources } from '../utils/list-all-resources'
 import { useUiuxClient } from './useUiuxClient'
 import type { PermissionKey } from '../../src/application/access/keys'
 import { useAccess } from './useAccess'
@@ -20,8 +21,6 @@ import type {
 
 /** The kinds whose lists the shell holds, re-read when an event names them. */
 const LIVE_LIST_KINDS = ['view', 'locale', 'asset', 'flow', 'review'] as const
-/** The list pages a live re-read follows (100 summaries each). */
-const LIVE_LIST_MAX_PAGES = 20
 
 /**
  * Workbench data and selection state: the selected Workspace, its Views, the
@@ -210,21 +209,17 @@ export function createWorkbenchState() {
 		}
 	}
 
-	/** Every summary of one kind, following the list cursor (the Reviews inbox shows them all). */
+	/** Every summary of one kind, following the list cursor (the Reviews inbox shows them all); a failed page read rejects. */
+	async function listAllOrThrow<Summary>(kind: string): Promise<Summary[]> {
+		return (await listAllResources<Summary>(uiux, [kind])).items
+	}
+
+	/** The same read that keeps the last known list when it fails; the next event or resync reads again. */
 	async function listAll<Summary>(kind: string): Promise<Summary[] | undefined> {
 		try {
-			const items: Summary[] = []
-			let cursor: string | undefined
-			for (let page = 0; page < LIVE_LIST_MAX_PAGES; page++) {
-				const result = await uiux.listResources<Summary>([kind], { limit: 100, ...(cursor ? { cursor } : {}) })
-				items.push(...result.items)
-				cursor = result.nextCursor
-				if (!cursor) break
-			}
-			return items
+			return await listAllOrThrow<Summary>(kind)
 		}
 		catch {
-			// A failed re-read keeps the last known list; the next event or resync reads again.
 			return undefined
 		}
 	}
@@ -270,21 +265,21 @@ export function createWorkbenchState() {
 
 	/** Re-reads only the section counts shown in the navigation badges. */
 	async function refreshCounts(): Promise<void> {
-		const [viewPage, localePage, assetPage, flowPage, reviewPage] = await Promise.all([
-			uiux.listResources<ViewSummary>(['view'], { limit: 100 }).catch(() => undefined),
-			uiux.listResources<LocaleSummary>(['locale'], { limit: 100 }).catch(() => undefined),
-			uiux.listResources<unknown>(['asset'], { limit: 100 }).catch(() => undefined),
-			uiux.listResources<FlowSummary>(['flow'], { limit: 100 }).catch(() => undefined),
-			uiux.listResources<ReviewSummary>(['review'], { limit: 100 }).catch(() => undefined),
+		const [viewItems, localeItems, assetItems, flowItems, reviewItems] = await Promise.all([
+			listAll<ViewSummary>('view'),
+			listAll<LocaleSummary>('locale'),
+			listAll<unknown>('asset'),
+			listAll<FlowSummary>('flow'),
+			listAll<ReviewSummary>('review'),
 		])
-		if (viewPage) views.value = viewPage.items
-		if (localePage) {
-			discoveredLocales.value = localePage.items.map(item => item.key)
-			localeRevisions.value = Object.fromEntries(localePage.items.map(item => [item.key, item.revision]))
+		if (viewItems) views.value = viewItems
+		if (localeItems) {
+			discoveredLocales.value = localeItems.map(item => item.key)
+			localeRevisions.value = Object.fromEntries(localeItems.map(item => [item.key, item.revision]))
 		}
-		if (assetPage) assetCount.value = assetPage.items.length
-		if (flowPage) flows.value = flowPage.items
-		if (reviewPage) reviews.value = reviewPage.items
+		if (assetItems) assetCount.value = assetItems.length
+		if (flowItems) flows.value = flowItems
+		if (reviewItems) reviews.value = reviewItems
 	}
 
 	/**
@@ -293,14 +288,14 @@ export function createWorkbenchState() {
 	 * Discussion #7). A failed read keeps the last known state.
 	 */
 	async function refreshRenderContextKeys(): Promise<void> {
-		const [workspaceRead, localePage] = await Promise.all([
+		const [workspaceRead, localeItems] = await Promise.all([
 			uiux.readResource<WorkspaceRead>('workspace', 'workspace').catch(() => undefined),
-			uiux.listResources<LocaleSummary>(['locale'], { limit: 100 }).catch(() => undefined),
+			listAll<LocaleSummary>('locale'),
 		])
 		if (workspaceRead) workspace.value = workspaceRead
-		if (localePage) {
-			discoveredLocales.value = localePage.items.map(item => item.key)
-			localeRevisions.value = Object.fromEntries(localePage.items.map(item => [item.key, item.revision]))
+		if (localeItems) {
+			discoveredLocales.value = localeItems.map(item => item.key)
+			localeRevisions.value = Object.fromEntries(localeItems.map(item => [item.key, item.revision]))
 		}
 	}
 
@@ -308,24 +303,24 @@ export function createWorkbenchState() {
 		loading.value = true
 		error.value = undefined
 		try {
-			const [workspaceRead, viewPage, localePage, assetPage, flowPage, reviewPage] = await Promise.all([
+			const [workspaceRead, viewItems, localeItems, assetItems, flowItems, reviewItems] = await Promise.all([
 				uiux.readResource<WorkspaceRead>('workspace', 'workspace'),
-				uiux.listResources<ViewSummary>(['view'], { limit: 100 }),
-				uiux.listResources<LocaleSummary>(['locale'], { limit: 100 }),
-				uiux.listResources<unknown>(['asset'], { limit: 100 }).catch(() => ({ items: [] })),
-				uiux.listResources<FlowSummary>(['flow'], { limit: 100 }).catch(() => ({ items: [] as FlowSummary[] })),
-				uiux.listResources<ReviewSummary>(['review'], { limit: 100 }).catch(() => ({ items: [] as ReviewSummary[] })),
+				listAllOrThrow<ViewSummary>('view'),
+				listAllOrThrow<LocaleSummary>('locale'),
+				listAllOrThrow<unknown>('asset').catch(() => [] as unknown[]),
+				listAllOrThrow<FlowSummary>('flow').catch(() => [] as FlowSummary[]),
+				listAllOrThrow<ReviewSummary>('review').catch(() => [] as ReviewSummary[]),
 			])
 			if (!workspaceRead) throw new Error(t('workbench.errors.workspaceUnavailable'))
 			workspace.value = workspaceRead
-			views.value = viewPage.items
-			discoveredLocales.value = localePage.items.map(item => item.key)
-			localeRevisions.value = Object.fromEntries(localePage.items.map(item => [item.key, item.revision]))
-			assetCount.value = assetPage.items.length
-			flows.value = flowPage.items
-			reviews.value = reviewPage.items
-			const selectedStillExists = selectedViewId.value && viewPage.items.some(item => item.key === selectedViewId.value)
-			selectedViewId.value = selectedStillExists ? selectedViewId.value : viewPage.items[0]?.key
+			views.value = viewItems
+			discoveredLocales.value = localeItems.map(item => item.key)
+			localeRevisions.value = Object.fromEntries(localeItems.map(item => [item.key, item.revision]))
+			assetCount.value = assetItems.length
+			flows.value = flowItems
+			reviews.value = reviewItems
+			const selectedStillExists = selectedViewId.value && viewItems.some(item => item.key === selectedViewId.value)
+			selectedViewId.value = selectedStillExists ? selectedViewId.value : viewItems[0]?.key
 			await loadSelectedView(onViewLoaded)
 		}
 		catch (cause) {

@@ -15,6 +15,7 @@ import { useWorkbenchFormat } from '../../composables/useWorkbenchFormat'
 import { useAuthoringAccess } from '../../composables/useAuthoringAccess'
 import { useAccess } from '../../composables/useAccess'
 import { describeFetchError, type FetchErrorDetails } from '../../utils/fetch-error'
+import { listAllResources } from '../../utils/list-all-resources'
 import { collectAssetReferences, isImageMediaType } from '../../utils/workspace-authoring'
 import WorkbenchPage from '../workbench/WorkbenchPage.vue'
 import WorkspaceSubnav from './WorkspaceSubnav.vue'
@@ -85,7 +86,7 @@ async function load(options: Readonly<{ quiet?: boolean }> = {}): Promise<void> 
 	}
 	try {
 		const [list] = await Promise.all([
-			uiux.listResources<AssetSummary>(['asset'], { limit: 100 }),
+			listAllResources<AssetSummary>(uiux, ['asset']),
 			loadUsage(),
 		])
 		const reads = await Promise.all(list.items.map(item => uiux.readResource<AssetRead>('asset', item.key).catch(() => undefined)))

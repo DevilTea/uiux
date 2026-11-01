@@ -14,6 +14,7 @@ import {
 import { isDismissal } from '../utils/review-inbox'
 import type { Point } from '../../src/preview/protocol/schema'
 import { describeFetchError, type FetchErrorDetails } from '../utils/fetch-error'
+import { listAllResources } from '../utils/list-all-resources'
 import { actorInitials } from '../utils/widget-inspection'
 import { flattenWidgetTree } from '../../src/preview/widget-tree'
 import { accessEpoch, useAccess } from './useAccess'
@@ -229,8 +230,7 @@ function createCanvasComments(thread: Ref<string | undefined>) {
 	/** Re-reads the Review summaries after a mutation (the nav badges follow the same list). */
 	async function refreshReviews(): Promise<void> {
 		try {
-			const page = await uiux.listResources<ReviewSummary>(['review'], { limit: 100 })
-			reviews.value = page.items
+			reviews.value = (await listAllResources<ReviewSummary>(uiux, ['review'])).items
 			loadError.value = undefined
 		}
 		catch (cause) {

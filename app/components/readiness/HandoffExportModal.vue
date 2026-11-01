@@ -8,6 +8,7 @@ import { useWorkbench } from '../../composables/useWorkbench'
 import { useWorkbenchFeedback } from '../../composables/useWorkbenchFeedback'
 import { useUiuxClient } from '../../composables/useUiuxClient'
 import { copyText } from '../../utils/copy-text'
+import { listAllResources } from '../../utils/list-all-resources'
 import type { FetchErrorDetails } from '../../utils/fetch-error'
 import { splitReadinessDiagnostics } from '../../utils/readiness'
 import HandoffDiagnosticList from './HandoffDiagnosticList.vue'
@@ -90,8 +91,7 @@ function seed(): void {
 
 async function loadAssets(): Promise<void> {
 	try {
-		const page = await uiux.listResources<{ key: string; summary: { name?: string } }>(['asset'], { limit: 100 })
-		assets.value = page.items
+		assets.value = (await listAllResources<{ key: string; summary: { name?: string } }>(uiux, ['asset'])).items
 	}
 	catch { assets.value = [] }
 }

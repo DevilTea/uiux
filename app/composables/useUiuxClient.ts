@@ -2,6 +2,7 @@ import type { EvidenceAdapterProvenance } from '../../src/domain/evidence/adapte
 import type { HandoffRoot } from '../../src/domain/handoff/schema'
 import type { AssetResolutionTable } from '../../src/assets/bindings'
 import type { DescribedWidgetCatalog } from '../../src/preview/widget-catalog'
+import { MAX_RESOURCE_DISCOVERY_LIMIT } from '../../src/application/dto/resource-discovery'
 
 export type VersionResourceRead<T> = Readonly<{ versionId: string; kind: string; key: string; revision: string; workspaceSchemaVersion: number; resource: T }>
 
@@ -82,7 +83,7 @@ export function useUiuxClient() {
 				...(options.query ? { query: options.query } : {}),
 				...(options.cursor ? { cursor: options.cursor } : {}),
 				...(options.detail ? { detail: options.detail } : {}),
-				limit: options.limit ?? 100,
+				limit: options.limit ?? MAX_RESOURCE_DISCOVERY_LIMIT,
 			},
 		})
 	}

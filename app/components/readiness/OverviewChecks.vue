@@ -11,6 +11,7 @@ import { useWorkbenchFeedback } from '../../composables/useWorkbenchFeedback'
 import { useWorkbenchFormat } from '../../composables/useWorkbenchFormat'
 import type { Diagnostic } from '../../composables/workbench-types'
 import { describeFetchError, type FetchErrorDetails } from '../../utils/fetch-error'
+import { listAllResources } from '../../utils/list-all-resources'
 import {
 	catalogProblems,
 	categoryOf,
@@ -133,15 +134,7 @@ const MAX_LIST_PAGES = 50
 /** Every summary of one kind, following the list cursor; `complete` is false when the pages ran out first. */
 async function listAll<T>(kind: string): Promise<Readonly<{ items: readonly T[]; complete: boolean }> | undefined> {
 	try {
-		const items: T[] = []
-		let cursor: string | undefined
-		for (let page = 0; page < MAX_LIST_PAGES; page++) {
-			const result = await uiux.listResources<T>([kind], { limit: 100, ...(cursor ? { cursor } : {}) })
-			items.push(...result.items)
-			cursor = result.nextCursor
-			if (!cursor) return { items, complete: true }
-		}
-		return { items, complete: false }
+		return await listAllResources<T>(uiux, [kind], { maxPages: MAX_LIST_PAGES })
 	}
 	catch {
 		return undefined
