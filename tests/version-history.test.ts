@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { HISTORY_RESOURCE_KINDS } from '../src/domain/history/constants'
 import type { VersionListItem } from '../src/application/services/history-service'
 import type { ResourceDiff } from '../src/domain/history/diff'
 import {
@@ -15,6 +16,7 @@ import {
 	resolveHistorySelection,
 	revisionIn,
 	systemCheckpointTitle,
+	TIMELINE_KIND_FILTERS,
 	versionListQuery,
 } from '../app/utils/version-history'
 import { describeResourceDiff, formatDiffValue } from '../app/utils/version-diff'
@@ -132,6 +134,15 @@ describe('timeline grouping and filters', () => {
 		// The server applies the type and actor filters and the projection; the kind filter is the Workbench's.
 		expect(versionListQuery({ checkpointsOnly: true, actor: 'member:claude', kind: 'view' }, { resource: { kind: 'view', key: 'v1' }, limit: 50 }))
 			.toEqual({ type: ['checkpoint'], actor: 'member:claude', resource: 'view:v1', limit: '50' })
+	})
+
+	it('offers every known resource kind in the kind filter and filters by each', () => {
+		// Rule 01a11a5e-199c-712f-b982-bb506c4954c8: Product Kit and Access presets changes were missing.
+		expect(TIMELINE_KIND_FILTERS).toEqual([...HISTORY_RESOURCE_KINDS])
+		const versions = HISTORY_RESOURCE_KINDS.map((kind, index) => version(String(index), { summary: [{ kind, key: kind, status: 'modified' }] }))
+		for (const [index, kind] of HISTORY_RESOURCE_KINDS.entries()) {
+			expect(filterVersions(versions, { kind }).map(item => item.id), kind).toEqual([String(index)])
+		}
 	})
 
 	it('localizes system Checkpoint names by the creating actor and keeps member names as written', () => {
