@@ -2960,6 +2960,8 @@
     },
     "kind": {
       "workspace": "Workspace settings",
+      "product-kit": "Product Kit",
+      "access-presets": "Access presets",
       "view": "View",
       "flow": "Flow",
       "locale": "Locale",

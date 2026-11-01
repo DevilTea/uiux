@@ -2960,6 +2960,8 @@
     },
     "kind": {
       "workspace": "Workspace 設定",
+      "product-kit": "Product Kit",
+      "access-presets": "存取預設集",
       "view": "View",
       "flow": "Flow",
       "locale": "Locale",

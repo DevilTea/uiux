@@ -1,6 +1,7 @@
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { HISTORY_RESOURCE_KINDS } from '../src/domain/history/constants'
 import {
 	matchWorkbenchLocale,
 	resolveInitialWorkbenchLocale,
@@ -47,6 +48,15 @@ describe('Workbench chrome catalogs', () => {
 		for (const [key, value] of flattenEntries(readCatalog('en-US'))) {
 			const choices = value.split(' | ').length
 			if (choices > 1) expect(chinese.get(key)?.split(' | ').length, key).toBe(choices)
+		}
+	})
+
+	it('labels every known history resource kind in every catalog', () => {
+		// The History UI shows `history.kind.<kind>` and falls back to the raw kind key when it is missing.
+		for (const locale of WORKBENCH_LOCALES) {
+			const messages = new Map(flattenEntries(readCatalog(locale)))
+			for (const kind of HISTORY_RESOURCE_KINDS)
+				expect(messages.get(`history.kind.${kind}`), `${locale}:history.kind.${kind}`).toBeTruthy()
 		}
 	})
 
