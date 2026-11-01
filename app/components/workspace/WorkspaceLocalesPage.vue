@@ -15,6 +15,7 @@ import { useUnsavedGuard } from '../../composables/useUnsavedGuard'
 import type { Diagnostic } from '../../composables/workbench-types'
 import { useAccess } from '../../composables/useAccess'
 import { describeFetchError, isLockedError, type FetchErrorDetails, type FetchErrorLock } from '../../utils/fetch-error'
+import { listAllResources } from '../../utils/list-all-resources'
 import {
 	countMessageChanges,
 	isReminder,
@@ -98,7 +99,7 @@ async function load(options: Readonly<{ quiet?: boolean }> = {}): Promise<void> 
 		loadError.value = undefined
 	}
 	try {
-		const list = await uiux.listResources<LocaleSummary>(['locale'], { limit: 100 })
+		const list = await listAllResources<LocaleSummary>(uiux, ['locale'])
 		const reads = await Promise.all(list.items.map(item => readLocale(item.key)))
 		const next: LocaleState[] = []
 		for (const read of reads) {

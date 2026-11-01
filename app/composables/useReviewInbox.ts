@@ -4,6 +4,7 @@ import { anchorViewId, type ReviewResolution, type ReviewThread } from '../../sr
 import { deriveWidgetTree, flattenWidgetTree } from '../../src/preview/widget-tree'
 import { effectiveRenderContext } from '../../src/preview/render-context-options'
 import { describeFetchError, type FetchErrorDetails } from '../utils/fetch-error'
+import { listAllResources } from '../utils/list-all-resources'
 import { resolveBlock, resolveBlockMessage } from '../utils/comment-availability'
 import {
 	buildInboxThread,
@@ -56,10 +57,8 @@ import type { ReviewSummary, ViewRead } from './workbench-types'
 
 type ReviewRead = Readonly<{ kind: 'review'; key: string; revision: string; resource: ReviewThread }>
 type ViewIrInfo = Readonly<{ revision: string; widgetTypes?: ReadonlyMap<string, string>; variants: ReadonlySet<string> }>
-type ListPage = Readonly<{ items: readonly ReviewSummary[]; nextCursor?: string }>
 
 const SEEN_STORAGE_PREFIX = 'uiux.reviews.seen:'
-const MAX_PAGES = 20
 /** The Workbench lists Views one page of this size; a full page may be truncated. */
 const VIEW_LIST_LIMIT = 100
 const READ_BATCH = 8
@@ -179,14 +178,7 @@ function createReviewInbox() {
 	async function loadSummaries(): Promise<void> {
 		loading.value = true
 		try {
-			const items: ReviewSummary[] = []
-			let cursor: string | undefined
-			for (let page = 0; page < MAX_PAGES; page++) {
-				const result: ListPage = await $fetch<ListPage>('/api/resources/list', { method: 'POST', body: { kinds: ['review'], limit: 100, ...(cursor ? { cursor } : {}) } })
-				items.push(...result.items)
-				cursor = result.nextCursor
-				if (!cursor) break
-			}
+			const { items } = await listAllResources<ReviewSummary>(uiux, ['review'])
 			reviews.value = items
 			pruneSeen(items.map(item => item.key))
 			loadError.value = undefined

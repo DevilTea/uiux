@@ -2,6 +2,7 @@ import { computed, ref, shallowRef, watch } from 'vue'
 import { isWidgetAnchor } from '../../src/domain/reviews/schema'
 import type { ViewDiscoveryDetail } from '../../src/application/dto/resource-discovery'
 import { pendingDecisionRows } from '../utils/decisions'
+import { listAllResources } from '../utils/list-all-resources'
 import { useUiuxClient } from './useUiuxClient'
 import { useWorkbench } from './useWorkbench'
 import type { ViewRead } from './workbench-types'
@@ -36,13 +37,7 @@ export function usePendingDecisions() {
 		}
 		try {
 			type Item = { key: string; revision: string; detail?: ViewDiscoveryDetail }
-			const items: Item[] = []
-			let cursor: string | undefined
-			do {
-				const page: { items: readonly Item[]; nextCursor?: string } = await uiux.listResources<Item>(['view'], { detail: 'expanded', ...(cursor ? { cursor } : {}) })
-				items.push(...page.items)
-				cursor = page.nextCursor
-			} while (cursor)
+			const { items } = await listAllResources<Item>(uiux, ['view'], { detail: 'expanded' })
 			const holders = items.filter(item => (item.detail?.decisionCounts?.pending ?? 0) > 0)
 			const previous = reads.value
 			const next = new Map<string, ViewRead>()
