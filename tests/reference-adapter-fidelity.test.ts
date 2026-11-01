@@ -1201,3 +1201,542 @@ describe('the Kit and Adapter fidelity items left of issue #399 (no spec change)
 		})
 	})
 })
+
+describe('the Kit and Adapter capabilities of the second #399 batch (sheets, form controls and state-driven text; no spec change)', () => {
+	const text = (container: HTMLElement, id: string) => widget(container, id).textContent?.replace(/\s+/g, ' ').trim()
+	const fire = (element: Element, type: string) => element.dispatchEvent(new window.Event(type, { bubbles: true }) as never)
+	/** Vue drops an event that is dispatched in the millisecond its handler was attached, so wait a few milliseconds before pressing a node that just appeared. */
+	const settle = () => new Promise(resolve => setTimeout(resolve, 5))
+
+	describe('Sheet', () => {
+		const sheet = (config: Record<string, unknown> = {}): Widget => ({
+			type: 'Sheet',
+			id: 'sheet',
+			config: { title: 'Header logo', description: 'Edit the Asset', closable: true, closeLabel: 'Close', ...config },
+			slots: {
+				header: [{ type: 'Badge', id: 'badge', config: { label: 'Locked' } }],
+				content: [{ type: 'Text', id: 'body', config: { text: 'Body text' } }],
+				footer: [{ type: 'Button', id: 'save', config: { label: 'Save' } }],
+			},
+		})
+
+		it('is a named dialog with a header, a body and a footer, and the page behind it as a dimmed scrim', async () => {
+			const { container, bridge } = await mount([sheet()])
+			const root = widget(container, 'sheet')
+			expect(root.getAttribute('role')).toBe('dialog')
+			expect(root.getAttribute('aria-modal')).toBe('true')
+			expect(root.getAttribute('aria-label')).toBe('Header logo')
+			expect(root.querySelector('h2')!.textContent).toBe('Header logo')
+			expect(root.querySelector('.uiux-ref-sheet-description')!.textContent).toBe('Edit the Asset')
+			expect(root.querySelector('.uiux-ref-sheet-header [data-widget-id="badge"]')).not.toBeNull()
+			expect(root.querySelector('.uiux-ref-sheet-body [data-widget-id="body"]')).not.toBeNull()
+			expect(root.querySelector('.uiux-ref-sheet-footer [data-widget-id="save"]')).not.toBeNull()
+			expect(root.querySelector('.uiux-ref-sheet-scrim')!.getAttribute('aria-hidden')).toBe('true')
+			expect(root.classList.contains('has-backdrop')).toBe(true)
+			expect(root.classList.contains('side-end')).toBe(true)
+			bridge.dispose()
+		})
+
+		it('leaves the page undimmed with `backdrop: false`, and slides in from the start edge with `side: "start"`', async () => {
+			const { container, bridge } = await mount([sheet({ backdrop: false, side: 'start', width: '320px' })])
+			const root = widget(container, 'sheet')
+			expect(root.classList.contains('has-backdrop')).toBe(false)
+			expect(root.classList.contains('side-start')).toBe(true)
+			const panel = root.querySelector<HTMLElement>('.uiux-ref-sheet-panel')!
+			expect(panel.style.width).toBe('320px')
+			bridge.dispose()
+		})
+
+		it('becomes a bottom sheet with a drag handle on a phone through `responsive.compact`, and stays a slide-over on a desktop', async () => {
+			const responsive = { compact: { side: 'bottom', handle: true } }
+			const phone = await mount([sheet({ responsive })], { context: { viewportId: 'phone', viewport: { width: 390, height: 844 } } })
+			expect(widget(phone.container, 'sheet').classList.contains('side-bottom')).toBe(true)
+			expect(widget(phone.container, 'sheet').querySelector('.uiux-ref-sheet-handle')).not.toBeNull()
+			phone.bridge.dispose()
+			const desktop = await mount([sheet({ responsive })])
+			expect(widget(desktop.container, 'sheet').classList.contains('side-end')).toBe(true)
+			expect(widget(desktop.container, 'sheet').querySelector('.uiux-ref-sheet-handle')).toBeNull()
+			desktop.bridge.dispose()
+		})
+
+		it('reports the close press, and shows or hides with the `visible` state', async () => {
+			const { container, bridge } = await mount([sheet()], { variants: { gone: { state: { sheet: { visible: false } } } } })
+			await settle()
+			expect(bridge.interactionProbe!().watch('sheet', 'close')).toBe(true)
+			click(widget(container, 'sheet').querySelector('.uiux-ref-sheet-close')!)
+			await tick()
+			expect(events(bridge)).toContain('sheet:close')
+			expect(hidden(container, 'sheet')).toBe(false)
+			await applyVariant(bridge, 'gone')
+			expect(hidden(container, 'sheet')).toBe(true)
+			bridge.dispose()
+		})
+
+		it('swaps the title and description for another Locale key while a Variant sets `titleKey` and `descriptionKey`, interpolating {value}', async () => {
+			const locales = { 'en-US': { 't.add': 'Add a member', 'd.add': 'Choose a name', 't.edit': 'Edit {value}', 'd.edit': 'Change the keys of {value}' } }
+			const { container, bridge } = await mount(
+				[{ ...sheet(), config: { titleKey: 't.add', descriptionKey: 'd.add', value: 'ines', closable: true, closeLabel: 'Close' } }],
+				{ locales, variants: { edit: { state: { sheet: { titleKey: 't.edit', descriptionKey: 'd.edit' } } } } },
+			)
+			expect(widget(container, 'sheet').querySelector('h2')!.textContent).toBe('Add a member')
+			await applyVariant(bridge, 'edit')
+			expect(widget(container, 'sheet').querySelector('h2')!.textContent).toBe('Edit ines')
+			expect(widget(container, 'sheet').querySelector('.uiux-ref-sheet-description')!.textContent).toBe('Change the keys of ines')
+			expect(widget(container, 'sheet').getAttribute('aria-label')).toBe('Edit ines')
+			bridge.dispose()
+		})
+	})
+
+	describe('Panel title and description states', () => {
+		it('shows another Locale key while a Variant sets `descriptionKey`, and the Config\'s again before', async () => {
+			const locales = { 'en-US': { 'd.on': 'Single-key shortcuts are on', 'd.off': 'Single-key shortcuts are off' } }
+			const { container, bridge } = await mount(
+				[{ type: 'Panel', id: 'dialog', config: { title: 'Shortcuts', descriptionKey: 'd.on', variant: 'dialog' } }],
+				{ locales, variants: { off: { state: { dialog: { descriptionKey: 'd.off' } } } } },
+			)
+			expect(widget(container, 'dialog').querySelector('.uiux-ref-panel-description')!.textContent).toBe('Single-key shortcuts are on')
+			await applyVariant(bridge, 'off')
+			expect(widget(container, 'dialog').querySelector('.uiux-ref-panel-description')!.textContent).toBe('Single-key shortcuts are off')
+			bridge.dispose()
+		})
+	})
+
+	describe('RadioGroup and Radio', () => {
+		const group = (config: Record<string, unknown> = {}): Widget => ({
+			type: 'RadioGroup',
+			id: 'where',
+			config: { label: 'Where', appearance: 'card', ...config },
+			slots: {
+				options: [
+					{ type: 'Radio', id: 'ws', config: { label: 'Workspace', description: 'Applies to the whole product', selected: true } },
+					{ type: 'Radio', id: 'view', config: { labelKey: 'r.view', value: 'Checkout' } },
+					{ type: 'Radio', id: 'off', config: { label: 'Archived', disabled: true } },
+				],
+			},
+		})
+
+		it('is a named radiogroup of radios that state which one is chosen, with a visible legend', async () => {
+			const { container, bridge } = await mount([group()], { locales: { 'en-US': { 'r.view': 'View {value}' } } })
+			const root = widget(container, 'where')
+			expect(root.getAttribute('role')).toBe('radiogroup')
+			expect(root.getAttribute('aria-label')).toBe('Where')
+			expect(root.querySelector('.uiux-ref-radio-legend')!.textContent).toBe('Where')
+			expect(root.classList.contains('appearance-card')).toBe(true)
+			expect(['ws', 'view', 'off'].map(id => widget(container, id).getAttribute('role'))).toEqual(['radio', 'radio', 'radio'])
+			expect(['ws', 'view', 'off'].map(id => widget(container, id).getAttribute('aria-checked'))).toEqual(['true', 'false', 'false'])
+			expect(text(container, 'ws')).toContain('Applies to the whole product')
+			expect(text(container, 'view')).toBe('View Checkout')
+			expect(widget(container, 'off').getAttribute('aria-disabled')).toBe('true')
+			bridge.dispose()
+		})
+
+		it('keeps the name for assistive technology only with `hideLabel`', async () => {
+			const { container, bridge } = await mount([group({ hideLabel: true })])
+			expect(widget(container, 'where').querySelector('.uiux-ref-radio-legend')).toBeNull()
+			expect(widget(container, 'where').getAttribute('aria-label')).toBe('Where')
+			bridge.dispose()
+		})
+
+		it('draws the other choice while a Variant moves `selected`', async () => {
+			const { container, bridge } = await mount([group()], { variants: { view: { state: { ws: { selected: false }, view: { selected: true } } } } })
+			await applyVariant(bridge, 'view')
+			expect(['ws', 'view'].map(id => widget(container, id).getAttribute('aria-checked'))).toEqual(['false', 'true'])
+			expect(widget(container, 'view').classList.contains('is-selected')).toBe(true)
+			bridge.dispose()
+		})
+
+		it('reports the press of an enabled radio (also from the keyboard), and none of a disabled one', async () => {
+			const { container, bridge } = await mount([group()])
+			await settle()
+			expect(bridge.interactionProbe!().watch('view', 'click')).toBe(true)
+			expect(bridge.interactionProbe!().watch('ws', 'click')).toBe(true)
+			expect(bridge.interactionProbe!().watch('off', 'click')).toBe(true)
+			click(widget(container, 'view'))
+			widget(container, 'ws').dispatchEvent(new window.KeyboardEvent('keydown', { key: ' ', bubbles: true, cancelable: true }) as never)
+			click(widget(container, 'off'))
+			await tick()
+			expect(events(bridge)).toEqual(['view:click', 'ws:click'])
+			bridge.dispose()
+		})
+	})
+
+	describe('FileInput', () => {
+		const input = (config: Record<string, unknown> = {}): Widget => ({ type: 'FileInput', id: 'file', config: { title: 'Choose a file', description: 'or drop it here', removeLabel: 'Remove file', ...config } })
+
+		it('draws a dashed drop zone backed by a real file chooser, with no chip', async () => {
+			const { container, bridge } = await mount([input()])
+			const root = widget(container, 'file')
+			expect(root.querySelector('label.uiux-ref-file-drop input[type="file"]')).not.toBeNull()
+			expect(root.querySelector('.uiux-ref-file-drop-title')!.textContent).toBe('Choose a file')
+			expect(root.querySelector('.uiux-ref-file-drop-description')!.textContent).toBe('or drop it here')
+			expect(root.querySelector('.uiux-ref-file-drop svg')).not.toBeNull()
+			expect(root.querySelector('.uiux-ref-file-chip')).toBeNull()
+			bridge.dispose()
+		})
+
+		it('shows the chosen-file chip in place of the zone while `fileName` is set, and reports the remove press', async () => {
+			const { container, bridge } = await mount([input({ fileIcon: 'image' })], { variants: { chosen: { state: { file: { fileName: 'brand-mark-dark.svg', fileSize: '312 B' } } } } })
+			await applyVariant(bridge, 'chosen')
+			await settle()
+			const root = widget(container, 'file')
+			expect(root.querySelector('.uiux-ref-file-drop')).toBeNull()
+			expect(root.querySelector('.uiux-ref-file-chip-name')!.textContent).toBe('brand-mark-dark.svg')
+			expect(root.querySelector('.uiux-ref-file-chip-size')!.textContent).toBe('312 B')
+			expect(bridge.interactionProbe!().watch('file', 'remove')).toBe(true)
+			const remove = root.querySelector('button')!
+			expect(remove.getAttribute('aria-label')).toBe('Remove file')
+			click(remove)
+			await tick()
+			expect(events(bridge)).toEqual(['file:remove'])
+			bridge.dispose()
+		})
+
+		it('rings the zone for `invalid` and locks it for `disabled`', async () => {
+			const { container, bridge } = await mount([input({ invalid: true, disabled: true })])
+			const drop = widget(container, 'file').querySelector('.uiux-ref-file-drop')!
+			expect(drop.classList.contains('is-invalid')).toBe(true)
+			expect(drop.classList.contains('is-disabled')).toBe(true)
+			expect(drop.querySelector('input')!.hasAttribute('disabled')).toBe(true)
+			bridge.dispose()
+		})
+	})
+
+	describe('NumberField', () => {
+		it('is a narrow spinbutton named for assistive technology, with its limits, role description and mono digits', async () => {
+			const locales = { 'en-US': { 'n.label': 'Width of {value}', 'n.role': 'Number field' } }
+			const { container, bridge } = await mount(
+				[{ type: 'NumberField', id: 'w', config: { labelKey: 'n.label', roleDescriptionKey: 'n.role', hideLabel: true, value: 1280, min: 1, max: 4096 } }],
+				{ locales },
+			)
+			const field = widget(container, 'w')
+			const control = field.querySelector('input')!
+			expect(control.getAttribute('role')).toBe('spinbutton')
+			expect(control.getAttribute('inputmode')).toBe('numeric')
+			expect(control.getAttribute('aria-roledescription')).toBe('Number field')
+			expect(control.getAttribute('aria-valuemin')).toBe('1')
+			expect(control.getAttribute('aria-valuemax')).toBe('4096')
+			expect(control.getAttribute('aria-valuenow')).toBe('1280')
+			expect(control.value).toBe('1280')
+			expect(control.classList.contains('is-mono')).toBe(true)
+			expect(field.style.width).toBe('96px')
+			expect(field.querySelector('label')!.classList.contains('is-visually-hidden')).toBe(true)
+			bridge.dispose()
+		})
+
+		it('follows the typed text in its `value` state, and shows its error while `invalid`', async () => {
+			const { container, bridge } = await mount(
+				[{ type: 'NumberField', id: 'h', config: { label: 'Height', error: 'Enter a height', width: '120px' } }],
+				{ variants: { bad: { state: { h: { invalid: true, value: '' } } } } },
+			)
+			const control = widget(container, 'h').querySelector('input')!
+			control.value = '800'
+			fire(control, 'input')
+			await tick()
+			expect(control.value).toBe('800')
+			expect(widget(container, 'h').style.width).toBe('120px')
+			expect(widget(container, 'h').querySelector('.kit-field__error')).toBeNull()
+			await applyVariant(bridge, 'bad')
+			expect(widget(container, 'h').querySelector('.kit-field__error')!.textContent!.trim()).toBe('Enter a height')
+			expect(widget(container, 'h').querySelector('input')!.getAttribute('aria-invalid')).toBe('true')
+			bridge.dispose()
+		})
+	})
+
+	describe('Progress', () => {
+		const locales = { 'en-US': { 'p.label': '{value} of {value2} captured' } }
+
+		it('is a progressbar whose fill and name follow the `value` and `max` states a Variant sets', async () => {
+			const { container, bridge } = await mount(
+				[{ type: 'Progress', id: 'bar', config: { labelKey: 'p.label', value: 0, max: 3 } }],
+				{ locales, variants: { one: { state: { bar: { value: 1 } } } } },
+			)
+			const bar = widget(container, 'bar')
+			const fill = () => bar.querySelector<HTMLElement>('.uiux-ref-progress-fill')!.style.width
+			expect(bar.getAttribute('role')).toBe('progressbar')
+			expect(bar.getAttribute('aria-valuemin')).toBe('0')
+			expect(bar.getAttribute('aria-valuemax')).toBe('3')
+			expect(bar.getAttribute('aria-valuenow')).toBe('0')
+			expect(bar.getAttribute('aria-label')).toBe('0 of 3 captured')
+			expect(fill()).toBe('0%')
+			await applyVariant(bridge, 'one')
+			expect(bar.getAttribute('aria-valuenow')).toBe('1')
+			expect(bar.getAttribute('aria-label')).toBe('1 of 3 captured')
+			expect(parseFloat(fill())).toBeCloseTo(33.33, 1)
+			bridge.dispose()
+			const done = await mount([{ type: 'Progress', id: 'bar', config: { labelKey: 'p.label', value: 0, max: 3 } }], { locales, variants: { done: { state: { bar: { value: 3 } } } } })
+			await applyVariant(done.bridge, 'done')
+			expect(widget(done.container, 'bar').querySelector<HTMLElement>('.uiux-ref-progress-fill')!.style.width).toBe('100%')
+			done.bridge.dispose()
+		})
+
+		it('keeps the fill within its track and refuses a negative value', async () => {
+			const { container, bridge } = await mount(
+				[{ type: 'Progress', id: 'bar', config: { value: 250 } }],
+				{ variants: { negative: { state: { bar: { value: -1 } } } } },
+			)
+			expect(widget(container, 'bar').querySelector<HTMLElement>('.uiux-ref-progress-fill')!.style.width).toBe('100%')
+			expect(widget(container, 'bar').getAttribute('aria-valuenow')).toBe('100')
+			expect(bridge.applyVariantStateLive!('negative')).not.toEqual([])
+			bridge.dispose()
+		})
+	})
+
+	describe('Table plain look', () => {
+		it('leaves only the row hairlines with `plain`, and keeps the framed table without it', async () => {
+			const table = (id: string, plain: boolean): Widget => ({ type: 'Table', id, config: { columns: '1fr 1fr', plain }, slots: { rows: [{ type: 'TableRow', id: `${id}-row`, slots: { cells: [{ type: 'Text', id: `${id}-cell`, config: { text: 'a' } }] } }] } })
+			const { container, bridge } = await mount([table('plain', true), table('framed', false)])
+			expect(widget(container, 'plain').classList.contains('is-plain')).toBe(true)
+			expect(widget(container, 'framed').classList.contains('is-plain')).toBe(false)
+			bridge.dispose()
+		})
+	})
+
+	describe('Button count pill and composite shortcut', () => {
+		it('shows a count pill after the label while the `count` state is set, and none while it is empty', async () => {
+			const { container, bridge } = await mount(
+				[{ type: 'Button', id: 'filters', config: { label: 'Filters', icon: 'list-filter', trailingIcon: 'chevron-down' } }],
+				{ variants: { two: { state: { filters: { count: '2' } } } } },
+			)
+			expect(widget(container, 'filters').querySelector('.kit-badge')).toBeNull()
+			await applyVariant(bridge, 'two')
+			const pill = widget(container, 'filters').querySelector('.kit-badge')!
+			expect(pill.textContent!.trim()).toBe('2')
+			expect(pill.classList.contains('kit-badge--count')).toBe(true)
+			expect(widget(container, 'filters').querySelector('.kit-btn__trailing'), 'the trailing icon stays').not.toBeNull()
+			bridge.dispose()
+		})
+
+		it('draws one key cap for a string shortcut and one cap per entry of a list', async () => {
+			const { container, bridge } = await mount([
+				{ type: 'Button', id: 'one', config: { label: 'Send', kbd: '⌘↵' } },
+				{ type: 'Button', id: 'two', config: { label: 'Hide pins', size: 'xs', kbd: ['⇧', 'C'] } },
+				{ type: 'Button', id: 'none', config: { label: 'Plain' } },
+			])
+			const caps = (id: string) => Array.from(widget(container, id).querySelectorAll('kbd')).map(cap => cap.textContent)
+			expect(caps('one')).toEqual(['⌘↵'])
+			expect(caps('two')).toEqual(['⇧', 'C'])
+			expect(caps('none')).toEqual([])
+			bridge.dispose()
+		})
+	})
+
+	describe('TextInput error text and interpolation arguments as states', () => {
+		const locales = { 'en-US': { 'e.required': 'Enter a language tag', 'e.suggest': 'Did you mean {value}?', 'l.label': 'Tag for {value}' } }
+
+		it('shows a Locale key a Variant sets as `errorKey` while `invalid`, instead of the Config error', async () => {
+			const { container, bridge } = await mount(
+				[{ type: 'TextInput', id: 'tag', config: { label: 'Tag', error: 'Literal error' } }],
+				{ locales, variants: { required: { state: { tag: { invalid: true, errorKey: 'e.required' } } } } },
+			)
+			expect(widget(container, 'tag').querySelector('.kit-field__error')).toBeNull()
+			await applyVariant(bridge, 'required')
+			expect(widget(container, 'tag').querySelector('.kit-field__error')!.textContent!.trim()).toBe('Enter a language tag')
+			bridge.dispose()
+		})
+
+		it('fills {value} from the `argument` state a Variant sets, in the error and in the label', async () => {
+			const { container, bridge } = await mount(
+				[{ type: 'TextInput', id: 'tag', config: { labelKey: 'l.label', argument: 'start', errorKey: 'e.suggest' } }],
+				{ locales, variants: { suggest: { state: { tag: { invalid: true, argument: 'ja-JP' } } } } },
+			)
+			expect(widget(container, 'tag').querySelector('label')!.textContent).toBe('Tag for start')
+			await applyVariant(bridge, 'suggest')
+			expect(widget(container, 'tag').querySelector('label')!.textContent).toBe('Tag for ja-JP')
+			expect(widget(container, 'tag').querySelector('.kit-field__error')!.textContent!.trim()).toBe('Did you mean ja-JP?')
+			bridge.dispose()
+		})
+	})
+
+	describe('Alert items that are Locale keys', () => {
+		it('lists the translations of `itemKeys` after the literal `items`', async () => {
+			const locales = { 'en-US': { 'd.dup': 'Two presets share a name', 'd.bad': 'A preset has no keys' } }
+			const { container, bridge } = await mount([{ type: 'Alert', id: 'issues', config: { tone: 'warning', title: 'File issues', items: ['/presets/1'], itemKeys: ['d.dup', 'd.bad'] } }], { locales })
+			expect(Array.from(widget(container, 'issues').querySelectorAll('ul > li')).map(li => li.textContent)).toEqual(['/presets/1', 'Two presets share a name', 'A preset has no keys'])
+			bridge.dispose()
+		})
+
+		it('shows a missing key as its marker rather than leaving a blank line', async () => {
+			const { container, bridge } = await mount([{ type: 'Alert', id: 'issues', config: { title: 'File issues', itemKeys: ['no.such.key'] } }], { locales: { 'en-US': {} } })
+			expect(text(container, 'issues')).toContain('⟦missing:no.such.key⟧')
+			bridge.dispose()
+		})
+	})
+
+	describe('Tooltip text and shortcut as states', () => {
+		const tip = (config: Record<string, unknown> = {}): Widget => ({
+			type: 'Tooltip',
+			id: 'tip',
+			config: { text: 'Hide pins', open: true, ...config },
+			slots: { content: [{ type: 'Button', id: 'tip-button', config: { label: 'Pins', iconOnly: true, icon: 'eye' } }] },
+		})
+		const bubble = (container: HTMLElement) => widget(container, 'tip').querySelector<HTMLElement>('[role="tooltip"]')!
+
+		it('swaps the hint for a Locale key a Variant sets as `textKey`, interpolating {value}', async () => {
+			const locales = { 'en-US': { 't.stopped': 'Preview stopped: {value}' } }
+			const { container, bridge } = await mount([tip({ value: 'reconnect first' })], { locales, variants: { stopped: { state: { tip: { textKey: 't.stopped' } } } } })
+			expect(bubble(container).textContent).toBe('Hide pins')
+			await applyVariant(bridge, 'stopped')
+			expect(bubble(container).textContent).toBe('Preview stopped: reconnect first')
+			bridge.dispose()
+		})
+
+		it('draws one key cap per entry of `kbd`, and a Variant can change or remove it', async () => {
+			const variants = { one: { state: { tip: { kbd: ['C'] } } }, none: { state: { tip: { kbd: [] } } } }
+			const first = await mount([tip({ kbd: ['⇧', 'C'] })], { variants })
+			const caps = (container: HTMLElement) => Array.from(bubble(container).querySelectorAll('kbd')).map(cap => cap.textContent)
+			expect(caps(first.container)).toEqual(['⇧', 'C'])
+			await applyVariant(first.bridge, 'one')
+			expect(caps(first.container)).toEqual(['C'])
+			first.bridge.dispose()
+			const second = await mount([tip({ kbd: ['⇧', 'C'] })], { variants })
+			await applyVariant(second.bridge, 'none')
+			expect(caps(second.container)).toEqual([])
+			expect(bubble(second.container).querySelector('.uiux-ref-tooltip-kbd')).toBeNull()
+			second.bridge.dispose()
+		})
+	})
+
+	describe('Menu items with a description, meta text and badge, and Menu labels', () => {
+		it('draws the description under the label, the mono meta text and the soft badge at the end, and an icon tone', async () => {
+			const { container, bridge } = await mount([{
+				type: 'Menu',
+				id: 'menu',
+				config: { label: 'Locale', open: true },
+				slots: {
+					trigger: [{ type: 'Button', id: 'trigger', config: { label: 'Locale' } }],
+					items: [
+						{ type: 'MenuItem', id: 'en', config: { label: 'en-US', badge: 'Primary', checked: true } },
+						{ type: 'MenuItem', id: 'desktop', config: { label: 'FHD Desktop', meta: '1920 × 1080' } },
+						{ type: 'MenuItem', id: 'gone', config: { label: 'zh-CN', description: 'Not in this Workspace', icon: 'circle-alert', iconTone: 'danger', disabled: true } },
+					],
+				},
+			}])
+			expect(widget(container, 'en').querySelector('.kit-badge')!.textContent!.trim()).toBe('Primary')
+			expect(widget(container, 'desktop').querySelector('.uiux-ref-menu-item-meta')!.textContent).toBe('1920 × 1080')
+			expect(widget(container, 'gone').querySelector('.uiux-ref-menu-item-description')!.textContent).toBe('Not in this Workspace')
+			expect(widget(container, 'gone').querySelector('.uiux-ref-menu-item-icon')!.classList.contains('tone-danger')).toBe(true)
+			expect(widget(container, 'gone').getAttribute('aria-disabled')).toBe('true')
+			bridge.dispose()
+		})
+
+		it('draws a MenuLabel as a group heading with its description, that is not an item', async () => {
+			const locales = { 'en-US': { 'g.title': 'Theme for {value}', 'g.hint': 'Changes the Workbench only' } }
+			const { container, bridge } = await mount([{
+				type: 'Menu',
+				id: 'menu',
+				config: { label: 'Preferences', open: true },
+				slots: {
+					trigger: [{ type: 'Button', id: 'trigger', config: { label: 'Preferences' } }],
+					items: [
+						{ type: 'MenuLabel', id: 'theme', config: { labelKey: 'g.title', descriptionKey: 'g.hint', value: 'you' } },
+						{ type: 'MenuItem', id: 'light', config: { label: 'Light', checked: true } },
+					],
+				},
+			}], { locales })
+			const label = widget(container, 'theme')
+			expect(label.querySelector('.uiux-ref-menu-label-text')!.textContent).toBe('Theme for you')
+			expect(label.querySelector('.uiux-ref-menu-label-description')!.textContent).toBe('Changes the Workbench only')
+			expect(label.getAttribute('role')).toBe('presentation')
+			expect(label.hasAttribute('tabindex')).toBe(false)
+			expect(container.querySelectorAll('[role^="menuitem"]').length).toBe(1)
+			bridge.dispose()
+		})
+	})
+})
+
+describe('the second #399 batch: states that follow from the dogfood conversions', () => {
+	const fire = (element: Element, type: string) => element.dispatchEvent(new window.Event(type, { bubbles: true }) as never)
+	const settle = () => new Promise(resolve => setTimeout(resolve, 5))
+
+	describe('interpolation arguments as states of Panel and Sheet', () => {
+		const locales = { 'en-US': { 't.edit': 'Edit access for {value}', 'd.edit': '{value} holds {value2} keys' } }
+
+		it.each(['Panel', 'Sheet'])('fills {value} and {value2} of a %s title and description from the states a Variant sets', async (type) => {
+			const base = { titleKey: 't.edit', descriptionKey: 'd.edit', value: 'dana', value2: 8 }
+			const { container, bridge } = await mount([{ type, id: 'drawer', config: base }], { locales, variants: { other: { state: { drawer: { value: 'ines', value2: '17' } } } } })
+			const text = () => widget(container, 'drawer').textContent?.replace(/\s+/g, ' ').trim()
+			expect(text()).toContain('Edit access for dana')
+			expect(text()).toContain('dana holds 8 keys')
+			await applyVariant(bridge, 'other')
+			expect(text()).toContain('Edit access for ines')
+			expect(text()).toContain('ines holds 17 keys')
+			bridge.dispose()
+		})
+	})
+
+	describe('FileInput error line', () => {
+		it('shows the translated `error` under the zone only while `invalid`', async () => {
+			const locales = { 'en-US': { 'f.required': 'Choose a file to upload.' } }
+			const { container, bridge } = await mount(
+				[{ type: 'FileInput', id: 'file', config: { title: 'Drop a file', errorKey: 'f.required' } }],
+				{ locales, variants: { bad: { state: { file: { invalid: true } } } } },
+			)
+			expect(widget(container, 'file').querySelector('.uiux-ref-file-error')).toBeNull()
+			await applyVariant(bridge, 'bad')
+			expect(widget(container, 'file').querySelector('.uiux-ref-file-error')!.textContent).toBe('Choose a file to upload.')
+			expect(widget(container, 'file').querySelector('input')!.getAttribute('aria-invalid')).toBe('true')
+			bridge.dispose()
+		})
+	})
+
+	describe('RadioGroup orientation', () => {
+		it('lays the options side by side with `orientation: "horizontal"`', async () => {
+			const group = (id: string, config: Record<string, unknown>): Widget => ({ type: 'RadioGroup', id, config: { label: 'Roots', ...config }, slots: { options: [{ type: 'Radio', id: `${id}-a`, config: { label: 'Whole Workspace', selected: true } }] } })
+			const { container, bridge } = await mount([group('side', { orientation: 'horizontal' }), group('stack', {})])
+			expect(widget(container, 'side').classList.contains('orientation-horizontal')).toBe(true)
+			expect(widget(container, 'stack').classList.contains('orientation-vertical')).toBe(true)
+			bridge.dispose()
+		})
+	})
+
+	describe('Button count on an icon-only button', () => {
+		it('shows the icon and the count, no label, named by its label, while a phone layout makes the button icon-only', async () => {
+			const { container, bridge } = await mount(
+				[{ type: 'Button', id: 'filters', config: { label: 'Filters', icon: 'list-filter', responsive: { compact: { iconOnly: true } } } }],
+				{ variants: { two: { state: { filters: { count: '2' } } } }, context: { viewportId: 'phone', viewport: { width: 390, height: 844 } } },
+			)
+			expect(widget(container, 'filters').classList.contains('is-icon-only')).toBe(true)
+			await applyVariant(bridge, 'two')
+			const button = widget(container, 'filters')
+			expect(button.classList.contains('is-icon-only')).toBe(false)
+			expect(button.getAttribute('aria-label')).toBe('Filters')
+			expect(button.querySelector('.kit-badge')!.textContent!.trim()).toBe('2')
+			expect(button.querySelector('.kit-btn__label')!.textContent).toBe('')
+			bridge.dispose()
+		})
+	})
+
+	describe('Menu trigger swapped by a Variant', () => {
+		it('names the shown control of the trigger, and skips one a Variant hides', async () => {
+			const { container, bridge } = await mount([{
+				type: 'Menu',
+				id: 'menu',
+				config: { label: 'Viewport', open: true },
+				slots: {
+					trigger: [
+						{ type: 'Stack', id: 'normal', config: { visible: false }, slots: { content: [{ type: 'Button', id: 'chip', config: { label: 'FHD' } }] } },
+						{ type: 'Stack', id: 'missing', slots: { content: [{ type: 'Button', id: 'chip-bad', config: { label: 'phone-small' } }] } },
+					],
+					items: [{ type: 'MenuItem', id: 'item', config: { label: 'FHD Desktop' } }],
+				},
+			}])
+			await settle()
+			expect(widget(container, 'chip-bad').getAttribute('aria-expanded')).toBe('true')
+			expect(widget(container, 'chip-bad').getAttribute('aria-haspopup')).toBe('menu')
+			fire(widget(container, 'chip-bad'), 'focusin')
+			bridge.dispose()
+		})
+	})
+
+	describe('ContextBar overflow', () => {
+		it('clips (scrolls) only on a phone, so a Menu from a chip drops out of the bar on wider tiers', async () => {
+			const bar: Widget = { type: 'ContextBar', id: 'bar', config: { label: 'Render context' }, slots: { start: [{ type: 'Text', id: 'text', config: { text: 'Base state' } }] } }
+			const phone = await mount([bar], { context: { viewportId: 'phone', viewport: { width: 390, height: 844 } } })
+			expect(widget(phone.container, 'bar').classList.contains('is-scroll')).toBe(true)
+			phone.bridge.dispose()
+			const desktop = await mount([bar])
+			expect(widget(desktop.container, 'bar').classList.contains('is-scroll')).toBe(false)
+			desktop.bridge.dispose()
+		})
+	})
+})

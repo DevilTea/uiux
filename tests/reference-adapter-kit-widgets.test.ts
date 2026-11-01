@@ -63,18 +63,24 @@ describe('the catalog of the phase-5 Widgets', () => {
 	it('registers every new Widget with a plugin, a renderer and a Catalog entry, Image with an image Asset field', async () => {
 		const manifest = extractProductAdapterManifest(await import(pathToFileURL(ADAPTER).href) as Record<string, unknown>)
 		const ownership = await productAdapterRegistryInspector.inspect(manifest)
-		const types = ['Icon', 'Skeleton', 'ListItem', 'Checkbox', 'Select', 'SelectOption', 'Disclosure', 'CodeBlock', 'Table', 'TableRow', 'DiffItem', 'Breadcrumb', 'BreadcrumbItem', 'GraphCanvas', 'Image', 'Menu', 'MenuItem', 'Tooltip']
+		const types = ['Icon', 'Skeleton', 'ListItem', 'Checkbox', 'Select', 'SelectOption', 'Disclosure', 'CodeBlock', 'Table', 'TableRow', 'DiffItem', 'Breadcrumb', 'BreadcrumbItem', 'GraphCanvas', 'Image', 'Menu', 'MenuItem', 'MenuLabel', 'Tooltip', 'Sheet', 'RadioGroup', 'Radio', 'FileInput', 'NumberField', 'Progress']
 		expect(ownership.widgetTypes).toEqual(expect.arrayContaining(types))
 		expect(ownership.rendererKeys).toEqual(expect.arrayContaining(types))
 		for (const type of types) expect(manifest.catalog.widgets, type).toHaveProperty(type)
 		expect(manifest.catalog.widgets.Image?.assetFields).toEqual({ source: { acceptedCategories: ['image'] } })
 		expect(Object.keys(manifest.catalog.widgets.Select?.i18n?.fields ?? {})).toEqual(['label', 'help', 'placeholder', 'value', 'searchPlaceholder'])
 		// The Widgets whose text interpolates {value}, {value2} and {value3} map each parameter to its Property (Select and TextInput, whose own `value` is content, take them from `argument`).
-		for (const [type, field] of [['TextInput', 'label'], ['Checkbox', 'description'], ['Select', 'help'], ['SelectOption', 'label'], ['CodeBlock', 'label'], ['Menu', 'label'], ['MenuItem', 'label'], ['Tooltip', 'text']] as const) {
+		for (const [type, field] of [['TextInput', 'label'], ['Checkbox', 'description'], ['Select', 'help'], ['SelectOption', 'label'], ['CodeBlock', 'label'], ['Menu', 'label'], ['MenuItem', 'label'], ['MenuItem', 'description'], ['MenuLabel', 'label'], ['MenuLabel', 'description'], ['Radio', 'label'], ['Radio', 'description'], ['Tooltip', 'text']] as const) {
 			expect(manifest.catalog.widgets[type]?.i18n?.fields[field]?.params, `${type}.${field}`).toEqual({ value: 'valueText', value2: 'value2Text', value3: 'value3Text' })
 		}
 		expect(Object.keys(manifest.catalog.widgets.GraphCanvas?.i18n?.fields ?? {})).toEqual(['label', 'entryLabel', 'endLabel', 'unreachableLabel', 'baseLabel', 'problemsLabel'])
 		expect(Object.keys(manifest.catalog.widgets.Alert?.i18n?.fields ?? {})).toContain('dismissLabel')
+		// Sheet and Progress interpolate the same parameters; the form controls name plain fields.
+		for (const [type, field] of [['Sheet', 'title'], ['Sheet', 'description'], ['Progress', 'label']] as const) {
+			expect(manifest.catalog.widgets[type]?.i18n?.fields[field]?.params, `${type}.${field}`).toEqual({ value: 'valueText', value2: 'value2Text', value3: 'value3Text' })
+		}
+		expect(Object.keys(manifest.catalog.widgets.FileInput?.i18n?.fields ?? {})).toEqual(['title', 'description', 'removeLabel', 'error'])
+		expect(Object.keys(manifest.catalog.widgets.NumberField?.i18n?.fields ?? {})).toEqual(['label', 'help', 'error', 'roleDescription'])
 	})
 
 	it('translates a lowered `<field>Key` through the Locale, as every other Widget does', async () => {

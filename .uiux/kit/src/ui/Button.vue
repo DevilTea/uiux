@@ -35,8 +35,8 @@ const props = withDefaults(defineProps<{
   icon?: string
   /** Trailing Lucide icon name. */
   trailingIcon?: string
-  /** A keyboard shortcut hint shown after the label. */
-  kbd?: string
+  /** A keyboard shortcut hint shown after the label: a string is one key cap (`⌘↵`), a list is one cap per entry (`['⇧', 'C']`). */
+  kbd?: string | string[]
   iconOnly?: boolean
   fullWidth?: boolean
   /**
@@ -73,6 +73,8 @@ const props = withDefaults(defineProps<{
 /* eslint-enable vue/require-default-prop */
 
 const isLink = computed(() => props.href !== undefined)
+/** The key caps of the shortcut hint. */
+const kbdCaps = computed(() => (Array.isArray(props.kbd) ? props.kbd : props.kbd ? [props.kbd] : []).filter(cap => cap !== ''))
 const inert = computed(() => Boolean(props.disabled || props.loading))
 const linkRel = computed(() => props.rel ?? (props.target === '_blank' ? 'noopener' : undefined))
 
@@ -123,8 +125,9 @@ function onClick(event: MouseEvent): void {
       class="kit-btn__label"
     ><slot>{{ label }}</slot></span>
     <Kbd
-      v-if="kbd && !iconOnly"
-      :keys="kbd"
+      v-for="(cap, index) in (iconOnly ? [] : kbdCaps)"
+      :key="index"
+      :keys="cap"
       class="kit-btn__kbd"
     />
     <slot name="trailing">
@@ -202,5 +205,7 @@ a.kit-btn { text-decoration: none; }
 .kit-btn.is-expanded .kit-btn__trailing { transform: rotate(180deg); }
 @media (prefers-reduced-motion: reduce) { .kit-btn .kit-btn__trailing { transition: none; } }
 .kit-btn .kit-btn__kbd { margin-left: 2px; height: 18px; min-width: 18px; }
+.kit-btn .kit-btn__kbd + .kit-btn__kbd { margin-left: 0; }
+.kit-btn.kit-btn--xs .kit-btn__kbd { height: 16px; min-width: 16px; padding: 0 4px; line-height: 12px; }
 .kit-btn.kit-btn--primary .kit-btn__kbd { background: transparent; color: inherit; border-color: currentColor; opacity: 1; }
 </style>
