@@ -421,8 +421,11 @@ describe('text interpolation and inline code', () => {
 
 	it('reports no translation warning for the interpolating fields, and declares `value` for each in the Catalog', async () => {
 		const manifest = extractProductAdapterManifest(await import(pathToFileURL(ADAPTER).href) as Record<string, unknown>)
-		for (const [type, field] of [['Text', 'text'], ['Button', 'label'], ['Alert', 'title'], ['Alert', 'description'], ['Panel', 'title'], ['Panel', 'description'], ['Disclosure', 'label'], ['Badge', 'label']] as const)
+		for (const [type, field] of [['Alert', 'title'], ['Alert', 'description'], ['Panel', 'title'], ['Panel', 'description'], ['Disclosure', 'label']] as const)
 			expect(manifest.catalog.widgets[type]?.i18n?.fields[field]?.params, `${type}.${field}`).toMatchObject({ value: 'valueText' })
+		// Text, Button and Badge take `value` from the text Property of their own i18n field `value` (a literal, or a Locale key).
+		for (const [type, field] of [['Text', 'text'], ['Button', 'label'], ['Badge', 'label']] as const)
+			expect(manifest.catalog.widgets[type]?.i18n?.fields[field]?.params, `${type}.${field}`).toMatchObject({ value: 'value' })
 		const { bridge } = await mount([
 			{ type: 'Button', id: 'next', config: { labelKey: 'k.next', value: 'x' } },
 			{ type: 'Alert', id: 'alert', config: { titleKey: 'k.alertTitle', value: 3 } },
@@ -1738,5 +1741,317 @@ describe('the second #399 batch: states that follow from the dogfood conversions
 			expect(widget(desktop.container, 'bar').classList.contains('is-scroll')).toBe(false)
 			desktop.bridge.dispose()
 		})
+	})
+})
+
+describe('the third #399 batch: translated arguments, count states and row content', () => {
+	describe('Text and Badge take an argument that is a Locale key (Discussion #448, Rule 01a194f4-83bd)', () => {
+		const locales = {
+			'en-US': { 't.sentence': 'Compare {value} with {value2}', 'k.autosave': 'Autosave', 'k.start': 'History start', 't.badge': 'Mode: {value}', 'k.fast': 'Fast', 't.count': '{value} {value2}', 't.code': 'Open {value} in {value2}' },
+			'zh-TW': { 't.sentence': '比較{value}與{value2}', 'k.autosave': '自動儲存', 'k.start': '歷史起點', 't.badge': '模式：{value}', 'k.fast': '快速', 't.count': '{value} {value2}', 't.code': '在{value2}開啟 {value}' },
+		}
+
+		it('fills {value} from a Locale key (`valueKey`) and {value2} from a literal, in the render context Locale', async () => {
+			const widgets: Widget[] = [{ type: 'Text', id: 'sentence', config: { textKey: 't.sentence', valueKey: 'k.autosave', value2: 'literal' } }]
+			const en = await mount(widgets, { locales })
+			expect(widget(en.container, 'sentence').textContent).toBe('Compare Autosave with literal')
+			en.bridge.dispose()
+			const zh = await mount(widgets, { locales, context: { locale: 'zh-TW' } })
+			expect(widget(zh.container, 'sentence').textContent).toBe('比較自動儲存與literal')
+			zh.bridge.dispose()
+		})
+
+		it('keeps a literal count beside a translated argument, and shows {value} as code with `valueCode`', async () => {
+			const { container, bridge } = await mount([
+				{ type: 'Text', id: 'count', config: { textKey: 't.count', value: 3, value2Key: 'k.fast' } },
+				{ type: 'Text', id: 'code', config: { textKey: 't.code', value: 'a.json', value2Key: 'k.start', valueCode: true } },
+			], { locales })
+			expect(widget(container, 'count').textContent).toBe('3 Fast')
+			expect(widget(container, 'code').textContent).toBe('Open a.json in History start')
+			expect(widget(container, 'code').querySelector('code')!.textContent).toBe('a.json')
+			bridge.dispose()
+		})
+
+		it('maps {value}, {value2} and {value3} in the Catalog to the text Property of an i18n field of the same Widget', async () => {
+			const manifest = extractProductAdapterManifest(await import(pathToFileURL(ADAPTER).href) as Record<string, unknown>)
+			const params = { value: 'value', value2: 'value2', value3: 'value3' }
+			expect(manifest.catalog.widgets.Text?.i18n?.fields.text?.params).toEqual(params)
+			expect(manifest.catalog.widgets.Badge?.i18n?.fields.label?.params).toMatchObject(params)
+			for (const type of ['Text', 'Button', 'Badge']) {
+				const fields = manifest.catalog.widgets[type]?.i18n?.fields ?? {}
+				expect(Object.keys(fields), type).toEqual(expect.arrayContaining(['value', 'value2', 'value3']))
+				expect(fields.value, type).toEqual({ configField: 'valueKey' })
+			}
+		})
+
+		it('fills a Button label from a translated argument, which is also the accessible name of an icon-only button', async () => {
+			const withLocales = { 'en-US': { ...locales['en-US'], 'r.compare': 'Compare {value} with the version before it', 'h.autosave': 'Autosave' } }
+			const { container, bridge } = await mount([{ type: 'Button', id: 'compare', config: { labelKey: 'r.compare', valueKey: 'h.autosave', icon: 'arrow-left-right', iconOnly: true } }], { locales: withLocales })
+			expect(widget(container, 'compare').getAttribute('aria-label')).toBe('Compare Autosave with the version before it')
+			bridge.dispose()
+		})
+
+		it('fills a Badge label from a translated argument', async () => {
+			const { container, bridge } = await mount([{ type: 'Badge', id: 'mode', config: { labelKey: 't.badge', valueKey: 'k.fast' } }], { locales, context: { locale: 'zh-TW' } })
+			expect(widget(container, 'mode').textContent!.trim()).toBe('模式：快速')
+			bridge.dispose()
+		})
+
+		it('shows a missing key of an argument with its marker, like any other missing key', async () => {
+			const { container, bridge } = await mount([{ type: 'Text', id: 'sentence', config: { textKey: 't.sentence', valueKey: 'no.such.key', value2: 'x' } }], { locales })
+			expect(widget(container, 'sentence').textContent).toContain('⟦missing:no.such.key⟧')
+			bridge.dispose()
+		})
+
+		it('lets a Variant set the count states of a Text', async () => {
+			const { container, bridge } = await mount([{ type: 'Text', id: 'count', config: { textKey: 't.count', value: 3, value2: 'items' } }], { locales, variants: { six: { state: { count: { value: '6' } } } } })
+			expect(widget(container, 'count').textContent).toBe('3 items')
+			await applyVariant(bridge, 'six')
+			expect(widget(container, 'count').textContent).toBe('6 items')
+			bridge.dispose()
+		})
+	})
+
+	describe('Segment icon and count states', () => {
+		const group = (config: Record<string, unknown> = {}): Widget => ({
+			type: 'SegmentedControl',
+			id: 'group',
+			config: { label: 'Status' },
+			slots: { content: [{ type: 'Segment', id: 'inbox', config: { label: 'Inbox', icon: 'inbox', count: 6, ...config } }] },
+		})
+		const variants = { loading: { state: { inbox: { icon: 'loader-circle', count: '3' } } }, none: { state: { inbox: { count: '' } } } }
+
+		it('swaps the icon and the count a Variant sets, and removes the count pill with an empty count', async () => {
+			const first = await mount([group()], { variants })
+			const seg = () => widget(first.container, 'inbox')
+			expect(seg().querySelector('.kit-badge')!.textContent!.trim()).toBe('6')
+			const before = seg().querySelector('svg')!.outerHTML
+			await applyVariant(first.bridge, 'loading')
+			expect(seg().querySelector('.kit-badge')!.textContent!.trim()).toBe('3')
+			expect(seg().querySelector('svg')!.outerHTML).not.toBe(before)
+			first.bridge.dispose()
+			const second = await mount([group()], { variants })
+			await applyVariant(second.bridge, 'none')
+			expect(widget(second.container, 'inbox').querySelector('.kit-badge')).toBeNull()
+			second.bridge.dispose()
+		})
+
+		it('draws an icon-only segment from the icon a Variant gives it', async () => {
+			const { container, bridge } = await mount([{
+				type: 'SegmentedControl',
+				id: 'group',
+				config: { label: 'Tools' },
+				slots: { content: [{ type: 'Segment', id: 'tool', config: { label: 'Tool', iconOnly: true } }] },
+			}], { variants: { icon: { state: { tool: { icon: 'mouse-pointer-2' } } } } })
+			await applyVariant(bridge, 'icon')
+			expect(widget(container, 'tool').querySelector('svg')).not.toBeNull()
+			expect(widget(container, 'tool').textContent).not.toContain('Tool')
+			bridge.dispose()
+		})
+	})
+
+	describe('Checkbox row content', () => {
+		const locales = { 'en-US': { 'c.missing': 'Also needs {value}', 'c.agent': 'An Agent can’t hold this key.', 'c.people': 'People only' } }
+		const row = (config: Record<string, unknown> = {}): Widget => ({ type: 'Checkbox', id: 'key', config: { label: 'history.restore', mono: true, description: 'Restore a resource.', ...config } })
+
+		it('draws an outline badge with its icon after the label, inside the accessible name', async () => {
+			const { container, bridge } = await mount([row({ badgeKey: 'c.people', badgeIcon: 'user-round' })], { locales })
+			const root = widget(container, 'key')
+			const badge = root.querySelector('.kit-checkbox__title .kit-badge')!
+			expect(badge.textContent!.trim()).toBe('People only')
+			expect(badge.classList.contains('kit-badge--outline')).toBe(true)
+			expect(badge.querySelector('svg')).not.toBeNull()
+			const labelled = root.querySelector('input')!.getAttribute('aria-labelledby')!
+			expect(root.querySelector(`[id="${labelled}"]`)!.textContent).toContain('history.restore')
+			expect(root.querySelector(`[id="${labelled}"]`)!.textContent).toContain('People only')
+			bridge.dispose()
+		})
+
+		it('shows no notes by default, and a Variant gates each one by its Locale key, with the value as code', async () => {
+			const { container, bridge } = await mount(
+				[row({ valueCode: true, noteTone: 'warning' })],
+				{ locales, variants: { needs: { state: { key: { noteKey: 'c.missing', value: 'workspace.read', note2Key: 'c.agent' } } } } },
+			)
+			const root = widget(container, 'key')
+			expect(root.querySelector('.uiux-ref-checkbox-note')).toBeNull()
+			await applyVariant(bridge, 'needs')
+			const notes = Array.from(root.querySelectorAll('.uiux-ref-checkbox-note'))
+			expect(notes.map(note => note.textContent!.trim())).toEqual(['Also needs workspace.read', 'An Agent can’t hold this key.'])
+			expect(notes[0]!.classList.contains('is-warning')).toBe(true)
+			expect(notes[0]!.querySelector('svg')).not.toBeNull()
+			expect(notes[0]!.querySelector('code')!.textContent).toBe('workspace.read')
+			expect(notes[1]!.classList.contains('is-muted')).toBe(true)
+			expect(notes[1]!.querySelector('svg')).toBeNull()
+			expect(root.querySelector('input')!.getAttribute('aria-describedby')).toContain('-notes')
+			bridge.dispose()
+		})
+
+		it('keeps the description interpolating {value} from the state a Variant sets', async () => {
+			const { container, bridge } = await mount([row({ descriptionKey: 'c.missing', description: '', value: 'a' })], { locales, variants: { other: { state: { key: { value: 'b' } } } } })
+			expect(widget(container, 'key').textContent).toContain('Also needs a')
+			await applyVariant(bridge, 'other')
+			expect(widget(container, 'key').textContent).toContain('Also needs b')
+			bridge.dispose()
+		})
+	})
+})
+
+describe('Menu as a popover', () => {
+	const fire = (element: Element, type: string) => element.dispatchEvent(new window.Event(type, { bubbles: true }) as never)
+	const popover = (config: Record<string, unknown> = {}): Widget => ({
+		type: 'Menu',
+		id: 'pop',
+		config: { label: 'Saved filters', popover: true, open: true, width: 320, ...config },
+		slots: {
+			trigger: [{ type: 'Button', id: 'pop-trigger', config: { label: 'Saved filters' } }],
+			items: [
+				{ type: 'Stack', id: 'pop-list', slots: { content: [{ type: 'Button', id: 'pop-apply', config: { label: 'Needs a look' } }] } },
+				{ type: 'TextInput', id: 'pop-name', config: { label: 'Name' } },
+			],
+		},
+	})
+
+	it('draws a named dialog that holds any Widgets, and names its trigger as opening a dialog', async () => {
+		const { container, bridge } = await mount([popover()])
+		const panel = widget(container, 'pop').querySelector<HTMLElement>('.uiux-ref-menu-panel')!
+		expect(panel.getAttribute('role')).toBe('dialog')
+		expect(panel.getAttribute('aria-label')).toBe('Saved filters')
+		expect(panel.classList.contains('is-popover')).toBe(true)
+		expect(panel.querySelector('input')).not.toBeNull()
+		expect(widget(container, 'pop-trigger').getAttribute('aria-haspopup')).toBe('dialog')
+		bridge.dispose()
+	})
+
+	it('stays open for a press inside and for Tab, and closes on Escape and on a press outside', async () => {
+		const { container, bridge } = await mount([popover()])
+		const root = widget(container, 'pop')
+		const open = () => root.querySelector('.uiux-ref-menu-panel') !== null
+		click(widget(container, 'pop-apply'))
+		await tick()
+		expect(open()).toBe(true)
+		widget(container, 'pop-name').dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }) as never)
+		await tick()
+		expect(open()).toBe(true)
+		widget(container, 'pop-name').dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }) as never)
+		await tick()
+		expect(open()).toBe(false)
+		click(widget(container, 'pop-trigger'))
+		await tick()
+		expect(open()).toBe(true)
+		fire(document.body, 'pointerdown')
+		await tick()
+		expect(open()).toBe(false)
+		bridge.dispose()
+	})
+
+	it('keeps the role `menu` without `popover`', async () => {
+		const { container, bridge } = await mount([popover({ popover: false })])
+		expect(widget(container, 'pop').querySelector('.uiux-ref-menu-panel')!.getAttribute('role')).toBe('menu')
+		expect(widget(container, 'pop-trigger').getAttribute('aria-haspopup')).toBe('menu')
+		bridge.dispose()
+	})
+})
+
+describe('Badge interpolation arguments', () => {
+	it('fills {value}, {value2} and {value3} of a translated label from the literal Config values', async () => {
+		const locales = { 'en-US': { 'lock.badge': 'Locked by {value} · until {value2}', 'lock.three': '{value}/{value2}/{value3}' } }
+		const { container, bridge } = await mount([
+			{ type: 'Badge', id: 'lock', config: { labelKey: 'lock.badge', value: 'claude', value2: '23:48' } },
+			{ type: 'Badge', id: 'three', config: { labelKey: 'lock.three', value: 'a', value2: 'b', value3: 3 } },
+		], { locales })
+		expect(widget(container, 'lock').textContent!.trim()).toBe('Locked by claude · until 23:48')
+		expect(widget(container, 'three').textContent!.trim()).toBe('a/b/3')
+		bridge.dispose()
+	})
+})
+
+describe('Button label with the render context, and Menu hidden by viewport tier', () => {
+	it('interpolates {value}, {locale}, {viewportId} and {theme} of a Button label (one summary button)', async () => {
+		const locales = { 'zh-TW': { 'ctx.summary': '{value} · {locale} · {viewportId} · {theme}' } }
+		const { container, bridge } = await mount(
+			[{ type: 'Button', id: 'summary', config: { labelKey: 'ctx.summary', value: 'Base state', icon: 'layers' } }],
+			{ locales, context: { locale: 'zh-TW', viewportId: 'tablet', viewport: { width: 1024, height: 768 }, themeId: 'dark' } },
+		)
+		expect(widget(container, 'summary').textContent).toContain('Base state · zh-TW · tablet · dark')
+		bridge.dispose()
+	})
+
+	it('hides the whole Menu, trigger included, on the tier `responsive` names', async () => {
+		const menu: Widget = {
+			type: 'Menu',
+			id: 'session',
+			config: { label: 'Session', popover: true, responsive: { compact: { hidden: true } } },
+			slots: { trigger: [{ type: 'Badge', id: 'live', config: { label: 'Live' } }], items: [{ type: 'Text', id: 'hint', config: { text: 'Running' } }] },
+		}
+		const phone = await mount([menu], { context: { viewportId: 'phone', viewport: { width: 390, height: 844 } } })
+		expect(hidden(phone.container, 'session')).toBe(true)
+		phone.bridge.dispose()
+		const desktop = await mount([menu])
+		expect(hidden(desktop.container, 'session')).toBe(false)
+		desktop.bridge.dispose()
+	})
+})
+
+describe('Segment label as a state', () => {
+	it('swaps the label, and the icon with it, for the Locale key a Variant sets (a toggle that names its other action)', async () => {
+		const locales = { 'en-US': { 'pins.hide': 'Hide pins', 'pins.show': 'Show pins' } }
+		const { container, bridge } = await mount([{
+			type: 'SegmentedControl',
+			id: 'group',
+			config: { label: 'Tools' },
+			slots: { content: [{ type: 'Segment', id: 'pins', config: { labelKey: 'pins.hide', icon: 'eye', iconOnly: true } }] },
+		}], { locales, variants: { hidden: { state: { pins: { icon: 'eye-off', labelKey: 'pins.show' } } } } })
+		const pins = () => widget(container, 'pins')
+		expect(pins().getAttribute('aria-label') ?? pins().textContent).toContain('Hide pins')
+		const before = pins().querySelector('svg')!.outerHTML
+		await applyVariant(bridge, 'hidden')
+		expect(pins().getAttribute('aria-label') ?? pins().textContent).toContain('Show pins')
+		expect(pins().querySelector('svg')!.outerHTML).not.toBe(before)
+		bridge.dispose()
+	})
+})
+
+describe('ContextBar scroll state', () => {
+	it('lets a Variant turn the phone scroll off, so a popover opened from the bar is not clipped', async () => {
+		const bar: Widget = { type: 'ContextBar', id: 'bar', config: { label: 'Render context' }, slots: { start: [{ type: 'Text', id: 'text', config: { text: 'Base state' } }] } }
+		const { container, bridge } = await mount([bar], { context: { viewportId: 'phone', viewport: { width: 390, height: 844 } }, variants: { open: { state: { bar: { scroll: false } } } } })
+		expect(widget(container, 'bar').classList.contains('is-scroll')).toBe(true)
+		await applyVariant(bridge, 'open')
+		expect(widget(container, 'bar').classList.contains('is-scroll')).toBe(false)
+		bridge.dispose()
+	})
+})
+
+describe('MenuItem and Tooltip hidden by viewport tier', () => {
+	it('hides a MenuItem the app does not offer on a phone, and shows it on wider tiers', async () => {
+		const menu: Widget = {
+			type: 'Menu',
+			id: 'thread',
+			config: { label: 'Thread', open: true },
+			slots: {
+				trigger: [{ type: 'Button', id: 'more', config: { label: 'More' } }],
+				items: [
+					{ type: 'MenuItem', id: 'copy', config: { label: 'Copy link' } },
+					{ type: 'MenuItem', id: 'reanchor', config: { label: 'Re-anchor', responsive: { compact: { hidden: true } } } },
+				],
+			},
+		}
+		const phone = await mount([menu], { context: { viewportId: 'phone', viewport: { width: 390, height: 844 } } })
+		expect(hidden(phone.container, 'reanchor')).toBe(true)
+		expect(hidden(phone.container, 'copy')).toBe(false)
+		phone.bridge.dispose()
+		const desktop = await mount([menu])
+		expect(hidden(desktop.container, 'reanchor')).toBe(false)
+		desktop.bridge.dispose()
+	})
+
+	it('hides a Tooltip and its content on the tier `responsive` names', async () => {
+		const tip: Widget = { type: 'Tooltip', id: 'tip', config: { text: 'Comment on View', responsive: { compact: { hidden: true } } }, slots: { content: [{ type: 'Button', id: 'target', config: { label: 'Comment', iconOnly: true, icon: 'message-square-plus' } }] } }
+		const phone = await mount([tip], { context: { viewportId: 'phone', viewport: { width: 390, height: 844 } } })
+		expect(hidden(phone.container, 'tip')).toBe(true)
+		phone.bridge.dispose()
+		const desktop = await mount([tip])
+		expect(hidden(desktop.container, 'tip')).toBe(false)
+		desktop.bridge.dispose()
 	})
 })
