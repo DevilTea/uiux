@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { HISTORY_RESOURCE_KINDS } from '../src/domain/history/constants'
+import { HISTORY_RESOURCE_KINDS, SINGLETON_HISTORY_RESOURCE_KINDS } from '../src/domain/history/constants'
 import type { VersionListItem } from '../src/application/services/history-service'
 import type { ResourceDiff } from '../src/domain/history/diff'
 import {
@@ -15,10 +15,14 @@ import {
 	parseResourceRef,
 	resolveHistorySelection,
 	revisionIn,
+	singletonResourceName,
 	systemCheckpointTitle,
 	TIMELINE_KIND_FILTERS,
+	VERSIONED_EVENT_KINDS,
 	versionListQuery,
 } from '../app/utils/version-history'
+import { touchesKinds } from '../app/composables/useLiveEvents'
+import { CHANGE_EVENT_RESOURCE_KINDS } from '../src/application/services/change-events'
 import { describeResourceDiff, formatDiffValue } from '../app/utils/version-diff'
 import { parseViewPanel, viewLocation, viewQuery } from '../app/utils/workbench-routes'
 
@@ -143,6 +147,26 @@ describe('timeline grouping and filters', () => {
 		for (const [index, kind] of HISTORY_RESOURCE_KINDS.entries()) {
 			expect(filterVersions(versions, { kind }).map(item => item.id), kind).toEqual([String(index)])
 		}
+	})
+
+	it('names every singleton resource by its kind label and no other kind', () => {
+		const label = (kind: string) => `label:${kind}`
+		const singletons: readonly string[] = SINGLETON_HISTORY_RESOURCE_KINDS
+		for (const kind of singletons) expect(singletonResourceName({ kind, key: kind }, label), kind).toBe(label(kind))
+		for (const kind of HISTORY_RESOURCE_KINDS.filter(kind => !singletons.includes(kind)))
+			expect(singletonResourceName({ kind, key: 'k1' }, label), kind).toBeUndefined()
+	})
+
+	it('re-reads the timeline on a change event of every versioned kind and not on a Review', () => {
+		// Rule 01a11a5e-08c7-73c1-bc66-3af814a454d6: history adds no event kind; the versioned kinds are the history resource kinds.
+		expect([...VERSIONED_EVENT_KINDS].sort()).toEqual([...HISTORY_RESOURCE_KINDS].sort())
+		expect(VERSIONED_EVENT_KINDS).not.toContain('review')
+		for (const kind of HISTORY_RESOURCE_KINDS) {
+			expect(CHANGE_EVENT_RESOURCE_KINDS as readonly string[], kind).toContain(kind)
+			expect(touchesKinds({ resync: false, changes: [{ kind, key: kind, removed: false }] }, VERSIONED_EVENT_KINDS), kind).toBe(true)
+		}
+		expect(touchesKinds({ resync: false, changes: [{ kind: 'review', key: 't1', removed: false }] }, VERSIONED_EVENT_KINDS)).toBe(false)
+		expect(touchesKinds({ resync: true, changes: [] }, VERSIONED_EVENT_KINDS)).toBe(true)
 	})
 
 	it('localizes system Checkpoint names by the creating actor and keeps member names as written', () => {
