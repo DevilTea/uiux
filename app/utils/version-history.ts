@@ -1,5 +1,5 @@
 import type { LocationQuery, LocationQueryRaw } from 'vue-router'
-import type { HistoryVersionType } from '../../src/domain/history/constants'
+import { HISTORY_RESOURCE_KINDS, type HistoryVersionType } from '../../src/domain/history/constants'
 import type { HistoryActor, VersionRecord } from '../../src/domain/history/schema'
 import type { VersionListItem } from '../../src/application/services/history-service'
 
@@ -137,6 +137,12 @@ export type TimelineFilters = Readonly<{
 	kind?: string
 	checkpointsOnly?: boolean
 }>
+
+/**
+ * The resource kinds the kind filter offers, in the order of Clause 01a11a5e-1fc4-7bf0-a402-61c345f454c2:
+ * every kind this build knows, so a changed Product Kit or Access presets can be filtered too.
+ */
+export const TIMELINE_KIND_FILTERS: readonly string[] = HISTORY_RESOURCE_KINDS
 
 /** The value `GET /api/history/versions?actor=` takes for this actor: its ID, or `external`. */
 export function actorFilterValue(actor: HistoryActor): string {

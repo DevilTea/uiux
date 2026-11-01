@@ -25,6 +25,7 @@ import {
 	parseHistoryAddress,
 	resolveHistorySelection,
 	revisionIn,
+	TIMELINE_KIND_FILTERS,
 	type HistoryAddress,
 	type TimelineFilters,
 } from '../../utils/version-history'
@@ -98,10 +99,9 @@ const actorItems = computed(() => [
 	{ label: t('history.filter.allActors'), value: ALL },
 	...knownActors.value.map(actor => ({ label: labels.actorName(actor), value: actorFilterValue(actor) })),
 ])
-const KINDS = ['view', 'flow', 'locale', 'asset', 'workspace'] as const
 const kindItems = computed(() => [
 	{ label: t('history.filter.allKinds'), value: ALL },
-	...KINDS.map(kind => ({ label: labels.kindLabel(kind), value: kind })),
+	...TIMELINE_KIND_FILTERS.map(kind => ({ label: labels.kindLabel(kind), value: kind })),
 ])
 
 
