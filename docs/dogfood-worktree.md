@@ -32,7 +32,9 @@ Never run `uiux dev`, `uiux artifacts gc` or any authoring against the owner's c
    - every changed canonical resource under `.uiux/` (a deleted one is staged as a deletion), and
    - the new Evidence blobs under `.uiux/artifacts/sha256/` that survive `uiux artifacts gc --dry-run` with an empty `UIUX_HOME`, run against the `.uiux/` as it would be committed (HEAD's plus the selected changes, `history/` from HEAD only).
 
-   It never selects `.uiux/history/**` or an unreferenced blob (those are listed as skipped), and it warns about a tracked blob that changed or vanished (`git restore -- <path>`; blobs are content-addressed). It runs no deletion: unreferenced blobs and the Baseline Checkpoint stay as untracked files in the disposable worktree. Never `git add -A` or `git add .`.
+   It never selects `.uiux/history/**` or an unreferenced blob (those are listed as skipped), and it warns about a tracked blob that changed or vanished (`git restore -- <path>`; blobs are content-addressed). Unreferenced new blobs and the Baseline Checkpoint stay as untracked files in the disposable worktree. Never `git add -A` or `git add .`.
+
+   After a recapture, the same gc dry-run on the as-committed tree also finds the *tracked* blobs it would now collect (the Evidence the recapture superseded). `select` prints them as a `git rm -q -- ...` list, and `--stage` runs it, so the PR deletes them with the recapture and `.uiux/artifacts` does not grow without bound. A tracked blob you already deleted in the working tree is not flagged as damage when gc would collect it, and a deletion already staged is not listed again. `pnpm dogfood:check` prints a report-only `collectable tracked blobs: <n>` header line (the same dry-run on HEAD's committed `.uiux/`); it never fails the check. To collect in bulk without a recapture, run `uiux artifacts gc` with an empty temporary `UIUX_HOME` against the worktree's `.uiux/` (server stopped), then `git add -u .uiux/artifacts`; `.uiux/history/` stays untouched.
 
 6. Commit, run the guards, push and open the PR:
 

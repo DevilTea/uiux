@@ -14,7 +14,7 @@ import { CURRENT_WORKSPACE_SCHEMA_VERSION } from '../src/product/workspace-schem
 import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { HEAVY_SERVER_SUITE_TIMEOUT_MS } from './support/timeouts'
 import { createCurrentWorkspace } from './support/workspace-layout'
-import { GuardError, addedBlobs, blobPath, checkBlobs, checkHistory, resolveBase, runGuard } from '../scripts/dogfood-guard.mjs'
+import { GuardError, addedBlobs, blobPath, checkBlobs, checkHistory, collectableTrackedBlobs, resolveBase, runGuard } from '../scripts/dogfood-guard.mjs'
 import { dogfoodStatus, formatSelection, isLinkedWorktree, prepare, select } from '../scripts/dogfood-worktree.mjs'
 
 /**
@@ -307,6 +307,54 @@ describe('dogfood worktree', () => {
 		expect(cli.stdout).toContain(`git restore -- '${trackedBlob}'`)
 		expect(git(worktree, 'diff', '--cached', '--name-only').trim().split('\n')).toEqual([blobPath(kept)])
 		expect(dogfoodStatus(worktree).filter(entry => entry.status === '??').length).toBe(1)
+	}, HEAVY_SERVER_SUITE_TIMEOUT_MS)
+})
+
+describe('dogfood worktree: superseded tracked Evidence', () => {
+	async function supersededRepository() {
+		let superseded = ''
+		let kept = ''
+		const context = await repositoryWithBase(async ({ persistence }) => {
+			// A committed blob no root reaches (what a recapture leaves behind), and one a root reaches.
+			superseded = blobPath(await garbageBlob(persistence, 'superseded by a recapture'))
+			kept = blobPath(await keptBlob(persistence, 1))
+		})
+		git(context.repo, 'switch', '-q', 'main')
+		const worktree = join(scratch(), 'author')
+		git(context.repo, 'worktree', 'add', '-q', '-b', 'author', worktree, 'main')
+		return { ...context, worktree, superseded, kept }
+	}
+
+	it('lists the tracked blobs gc would collect as git rm lines, and not the reached ones', async () => {
+		const { worktree, superseded, kept } = await supersededRepository()
+		const result = select(worktree)
+		expect(result.remove).toEqual([superseded])
+		expect(result.add).toEqual([])
+		expect(result.damaged).toEqual([])
+		const text = formatSelection(result).join('\n')
+		expect(text).toContain('git rm -q -- \\')
+		expect(text).toContain(`'${superseded}'`)
+		expect(text).not.toContain(kept)
+	}, HEAVY_SERVER_SUITE_TIMEOUT_MS)
+
+	it('stages the deletions with --stage next to the selected additions, and treats a deleted collectable blob as no damage', async () => {
+		const { worktree, superseded, kept } = await supersededRepository()
+		const added = blobPath(await keptBlob(new FileNativePersistence({ root: join(worktree, '.uiux'), schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY }), 2))
+		rmSync(join(worktree, superseded))
+		const cli = spawnSync(process.execPath, [WORKTREE_SCRIPT, 'select', '--stage'], { cwd: worktree, env: GIT_ENV, encoding: 'utf8' })
+		expect(cli.status, cli.stderr).toBe(0)
+		expect(cli.stdout).not.toContain('WARNING')
+		expect(cli.stdout).toContain('1 deletion(s)')
+		const staged = git(worktree, 'diff', '--cached', '--name-status').trim().split('\n').sort()
+		expect(staged).toEqual([`A\t${added}`, `D\t${superseded}`].sort())
+		expect(existsSync(join(worktree, kept))).toBe(true)
+		// Nothing is left to delete once the deletion is staged.
+		expect(select(worktree).remove).toEqual([])
+	}, HEAVY_SERVER_SUITE_TIMEOUT_MS)
+
+	it('reports the count of collectable tracked blobs of a ref (dogfood:check line)', async () => {
+		const { repo, superseded } = await supersededRepository()
+		expect(collectableTrackedBlobs(repo, 'main')).toEqual([superseded])
 	}, HEAVY_SERVER_SUITE_TIMEOUT_MS)
 })
 
