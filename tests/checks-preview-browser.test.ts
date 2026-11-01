@@ -126,10 +126,12 @@ describe('Checks gathers the live Preview (issue #347)', () => {
 			expect(await problem.first().getAttribute('data-check-severity')).toBe('warning')
 			const finding = page.locator(`[data-finding-source="preview-translation"]`, { hasText: WIDGET_ID })
 			expect(await finding.count()).toBe(1)
+			// Rule 01a115cd-b91d-7230-9041-b56ff70b814b: the row names the Catalog field (the authoring field) the result Property derives from.
+			// Checks reads that mapping (`GET /api/preview/catalog`) once it mounts with a report that carries a warning, so
+			// the row is first listed without it and gains it when the read resolves: wait for that, as a person would.
+			await expect.poll(async () => await finding.textContent(), { timeout: 30_000 }).toContain('Authoring field label')
 			const text = await finding.textContent()
 			expect(text).toContain('Property labelResult')
-			// Rule 01a115cd-b91d-7230-9041-b56ff70b814b: the row names the Catalog field (the authoring field) the result Property derives from.
-			expect(text).toContain('Authoring field label')
 			expect(text).toContain('Warning')
 			expect(text).toContain('Preview translation warnings')
 			expect(await finding.getAttribute('data-finding-state')).toBe('incomplete')
