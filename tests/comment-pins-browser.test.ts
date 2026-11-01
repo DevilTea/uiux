@@ -252,8 +252,15 @@ describe('Pins in comment mode', () => {
 			// A gesture: the pointer rests on a Widget (hover candidate) and is pressed, not yet released.
 			const target = frame.locator('[data-widget-id="page-title"]')
 			const box = (await target.boundingBox())!
-			await page.mouse.move(box.x + 6, box.y + 6)
-			await page.waitForSelector('[data-overlay-hover][data-hover-purpose="comment-range"]', { timeout: 10_000 })
+			// The hover candidate comes from a pointer move the Preview sees after it is armed for the new
+			// targeting interaction; one move made just after `c` can land before that and is not repeated by
+			// anything. Keep moving within the Widget until the candidate shows (issue #263).
+			const hover = page.locator('[data-overlay-hover][data-hover-purpose="comment-range"]')
+			let nudge = 0
+			await expect.poll(async () => {
+				await page.mouse.move(box.x + 6 + (nudge++ % 2), box.y + 6)
+				return await hover.count()
+			}, { timeout: 15_000, interval: 150 }).toBeGreaterThan(0)
 			await page.mouse.down()
 			expect((await canvasPins(page)).drawn).toEqual(before.drawn)
 			// Pins are still tracked: scrolling the View moves them with their Widgets from fresh reports.
