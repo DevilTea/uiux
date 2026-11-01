@@ -12,11 +12,11 @@
       "target": "app/components/kit"
     },
     "button": {
-      "componentDigest": "sha256:37e201428139b6e869810e519f44028757191d9602975b38eebde860a0500b3b",
-      "exportedAt": "2026-10-31T13:10:05.627Z",
+      "componentDigest": "sha256:23a4e47ed574a113b363231b9184f0116d3d59f8a4e5421f0bbc2a3d4301c1c2",
+      "exportedAt": "2026-11-01T07:09:29.422Z",
       "files": {
         "app/components/kit/ui/Button.vue": {
-          "digest": "sha256:805e7bd7307e8879af4db92f87fd5dd2be887c1fcfeb8edb5bb7fa83f3628acf",
+          "digest": "sha256:aed4ad1d8aa375f950938ef7cb187b5c3a081eca2b1c123c1f9640977112e6e0",
           "source": "src/ui/Button.vue"
         }
       },
