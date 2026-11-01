@@ -63,12 +63,16 @@ describe('the catalog of the phase-5 Widgets', () => {
 	it('registers every new Widget with a plugin, a renderer and a Catalog entry, Image with an image Asset field', async () => {
 		const manifest = extractProductAdapterManifest(await import(pathToFileURL(ADAPTER).href) as Record<string, unknown>)
 		const ownership = await productAdapterRegistryInspector.inspect(manifest)
-		const types = ['Icon', 'Skeleton', 'ListItem', 'Checkbox', 'Select', 'SelectOption', 'Disclosure', 'CodeBlock', 'Table', 'TableRow', 'DiffItem', 'Breadcrumb', 'BreadcrumbItem', 'GraphCanvas', 'Image']
+		const types = ['Icon', 'Skeleton', 'ListItem', 'Checkbox', 'Select', 'SelectOption', 'Disclosure', 'CodeBlock', 'Table', 'TableRow', 'DiffItem', 'Breadcrumb', 'BreadcrumbItem', 'GraphCanvas', 'Image', 'Menu', 'MenuItem', 'Tooltip']
 		expect(ownership.widgetTypes).toEqual(expect.arrayContaining(types))
 		expect(ownership.rendererKeys).toEqual(expect.arrayContaining(types))
 		for (const type of types) expect(manifest.catalog.widgets, type).toHaveProperty(type)
 		expect(manifest.catalog.widgets.Image?.assetFields).toEqual({ source: { acceptedCategories: ['image'] } })
-		expect(Object.keys(manifest.catalog.widgets.Select?.i18n?.fields ?? {})).toEqual(['label', 'help', 'placeholder', 'value'])
+		expect(Object.keys(manifest.catalog.widgets.Select?.i18n?.fields ?? {})).toEqual(['label', 'help', 'placeholder', 'value', 'searchPlaceholder'])
+		// The Widgets whose text interpolates {value}, {value2} and {value3} map each parameter to its Property (Select and TextInput, whose own `value` is content, take them from `argument`).
+		for (const [type, field] of [['TextInput', 'label'], ['Checkbox', 'description'], ['Select', 'help'], ['SelectOption', 'label'], ['CodeBlock', 'label'], ['Menu', 'label'], ['MenuItem', 'label'], ['Tooltip', 'text']] as const) {
+			expect(manifest.catalog.widgets[type]?.i18n?.fields[field]?.params, `${type}.${field}`).toEqual({ value: 'valueText', value2: 'value2Text', value3: 'value3Text' })
+		}
 		expect(Object.keys(manifest.catalog.widgets.GraphCanvas?.i18n?.fields ?? {})).toEqual(['label', 'entryLabel', 'endLabel', 'unreachableLabel', 'baseLabel', 'problemsLabel'])
 		expect(Object.keys(manifest.catalog.widgets.Alert?.i18n?.fields ?? {})).toContain('dismissLabel')
 	})

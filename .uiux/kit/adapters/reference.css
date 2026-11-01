@@ -314,6 +314,55 @@
 .uiux-ref-stack.is-outline-modified { outline: 2px solid var(--kit-warning); outline-offset: 2px; }
 .uiux-ref-stack.is-outline-moved { outline: 2px dotted var(--kit-info); outline-offset: 2px; }
 
+/* Alert: a list of literal lines under the description. */
+.uiux-ref-alert-list { margin: 2px 0 0; padding-inline-start: 18px; font-size: 13px; line-height: 20px; color: var(--kit-text); }
+.uiux-ref-alert-list.is-mono { font-family: var(--kit-font-mono); font-feature-settings: var(--kit-font-mono-features); font-size: 12px; line-height: 18px; }
+
+/* Text read by assistive technology only (an empty table column's heading). */
+.uiux-ref-sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+
+/* Menu: a trigger and its popup (an overlay, so the popup is absolutely placed against the trigger's box). */
+.uiux-ref-menu { position: relative; display: inline-flex; max-width: 100%; }
+.uiux-ref-menu-trigger { display: inline-flex; min-width: 0; }
+.uiux-ref-menu-panel {
+  position: absolute; z-index: 30; display: flex; flex-direction: column; gap: 1px; width: max-content; min-width: 200px; max-width: 320px; padding: 4px; box-sizing: border-box;
+  background-color: var(--kit-bg-surface); border: 1px solid var(--kit-border-subtle); border-radius: 8px; box-shadow: var(--kit-shadow-overlay);
+}
+.uiux-ref-menu-panel.placement-bottom-start { top: 100%; inset-inline-start: 0; margin-top: 4px; }
+.uiux-ref-menu-panel.placement-bottom-end { top: 100%; inset-inline-end: 0; margin-top: 4px; }
+.uiux-ref-menu-panel.placement-top-start { bottom: 100%; inset-inline-start: 0; margin-bottom: 4px; }
+.uiux-ref-menu-panel.placement-top-end { bottom: 100%; inset-inline-end: 0; margin-bottom: 4px; }
+.uiux-ref-menu-panel.placement-right-start { top: 0; inset-inline-start: 100%; margin-inline-start: 4px; }
+.uiux-ref-menu-panel.placement-left-start { top: 0; inset-inline-end: 100%; margin-inline-end: 4px; }
+.uiux-ref-menu-item {
+  display: flex; align-items: center; gap: 8px; min-height: 32px; padding: 4px 8px; box-sizing: border-box; border-radius: 6px; cursor: pointer; user-select: none;
+  font-size: 13px; line-height: 20px; color: var(--kit-text); outline: none;
+}
+.uiux-ref-menu-item.is-touch { min-height: 44px; }
+.uiux-ref-menu-item:hover, .uiux-ref-menu-item:focus-visible { background-color: var(--kit-hover-bg); }
+.uiux-ref-menu-item:focus-visible { outline: 2px solid var(--kit-primary); outline-offset: -2px; }
+.uiux-ref-menu-item-icon { display: inline-flex; flex-shrink: 0; color: var(--kit-text-muted); }
+.uiux-ref-menu-item-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.uiux-ref-menu-item-kbd { display: inline-flex; flex-shrink: 0; margin-inline-start: 12px; }
+.uiux-ref-menu-item-check { display: inline-flex; flex-shrink: 0; color: var(--kit-primary); }
+.uiux-ref-menu-item.is-danger { color: var(--kit-danger); }
+.uiux-ref-menu-item.is-danger .uiux-ref-menu-item-icon { color: var(--kit-danger); }
+.uiux-ref-menu-item.is-danger:hover, .uiux-ref-menu-item.is-danger:focus-visible { background-color: var(--kit-danger-subtle); }
+.uiux-ref-menu-item.is-disabled { cursor: not-allowed; color: var(--kit-text-subtle); opacity: 0.6; }
+.uiux-ref-menu-item.is-disabled:hover { background-color: transparent; }
+
+/* Tooltip: a short hint beside the Widget it describes. */
+.uiux-ref-tooltip { position: relative; display: inline-flex; max-width: 100%; }
+.uiux-ref-tooltip-target { display: inline-flex; min-width: 0; }
+.uiux-ref-tooltip-bubble {
+  position: absolute; z-index: 40; width: max-content; max-width: 240px; padding: 4px 8px; box-sizing: border-box; pointer-events: none; white-space: normal;
+  font-size: 12px; line-height: 16px; color: var(--kit-text); background-color: var(--kit-bg-surface); border: 1px solid var(--kit-border-subtle); border-radius: 6px; box-shadow: var(--kit-shadow-overlay);
+}
+.uiux-ref-tooltip-bubble.placement-top { bottom: 100%; inset-inline-start: 50%; transform: translateX(-50%); margin-bottom: 6px; }
+.uiux-ref-tooltip-bubble.placement-bottom { top: 100%; inset-inline-start: 50%; transform: translateX(-50%); margin-top: 6px; }
+.uiux-ref-tooltip-bubble.placement-left { inset-inline-end: 100%; top: 50%; transform: translateY(-50%); margin-inline-end: 6px; }
+.uiux-ref-tooltip-bubble.placement-right { inset-inline-start: 100%; top: 50%; transform: translateY(-50%); margin-inline-start: 6px; }
+
 /* Alert: the dismiss button sits at the end of the row. */
 .uiux-ref-alert-dismiss { margin-left: auto; flex-shrink: 0; }
 

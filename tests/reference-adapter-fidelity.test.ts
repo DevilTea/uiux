@@ -58,7 +58,7 @@ async function mount(
 		onStatusChange: (next) => { status = next },
 		...(options.locales ? { locales: options.locales as never } : {}),
 	})
-	expect(status).toMatchObject({ status: 'ready' })
+	expect(status, JSON.stringify(status)).toMatchObject({ status: 'ready' })
 	return { container, bridge }
 }
 
@@ -818,5 +818,386 @@ describe('the TextInput: a localizable value and a hidden label', () => {
 		expect(widget(container, 'hidden').querySelector('input')!.id).toBe(label.getAttribute('for'))
 		expect(widget(container, 'shown').querySelector('label')!.classList.contains('is-visually-hidden')).toBe(false)
 		bridge.dispose()
+	})
+})
+
+describe('the Kit and Adapter fidelity items left of issue #399 (no spec change)', () => {
+	const press = (element: Element, key: string) => element.dispatchEvent(new window.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }) as never)
+	const fire = (element: Element, type: string) => element.dispatchEvent(new window.Event(type, { bubbles: true }) as never)
+	const text = (container: HTMLElement, id: string) => widget(container, id).textContent?.replace(/\s+/g, ' ').trim()
+	/** Vue drops an event that is dispatched in the millisecond its handler was attached (a node the last update drew), so wait a few milliseconds before pressing a node that just appeared. */
+	const settle = () => new Promise(resolve => setTimeout(resolve, 5))
+
+	describe('interpolation in field text', () => {
+		const locales = {
+			'en-US': {
+				'f.label': 'Name of {value}',
+				'f.help': 'Shown to {value} and {value2}',
+				'f.error': '{value} is taken ({value3})',
+				'f.placeholder': 'e.g. {value2}',
+				'c.label': 'I understand {value} will not follow',
+				'c.description': 'Affects {value2} keys',
+				'o.label': '{value} ({value2} keys)',
+				'o.description': 'Used by {value3}',
+				'b.label': 'Config of {value}',
+			},
+		}
+
+		it('fills {value}, {value2} and {value3} of a TextInput label, help, placeholder and error from `argument`, `argument2` and `argument3`', async () => {
+			const { container, bridge } = await mount([
+				{ type: 'TextInput', id: 'plain', config: { labelKey: 'f.label', helpKey: 'f.help', placeholderKey: 'f.placeholder', argument: 'Alice', argument2: 'Bob' } },
+				{ type: 'TextInput', id: 'bad', config: { labelKey: 'f.label', errorKey: 'f.error', invalid: true, value: 'typed', argument: 'Alice', argument3: 7 } },
+			], { locales })
+			const plain = widget(container, 'plain')
+			expect(plain.querySelector('label')!.textContent).toBe('Name of Alice')
+			expect(plain.querySelector('.kit-field__help')!.textContent!.trim()).toBe('Shown to Alice and Bob')
+			expect(plain.querySelector('input')!.getAttribute('placeholder')).toBe('e.g. Bob')
+			expect(plain.querySelector('input')!.value).toBe('')
+			expect(widget(container, 'bad').querySelector('.kit-field__error')!.textContent!.trim()).toBe('Alice is taken (7)')
+			expect(widget(container, 'bad').querySelector('input')!.value, 'the field text is still `value`').toBe('typed')
+			bridge.dispose()
+		})
+
+		it('fills the parameters of a Checkbox label and description, a SelectOption, and a CodeBlock label from `value`, `value2` and `value3`', async () => {
+			const { container, bridge } = await mount([
+				{ type: 'Checkbox', id: 'ack', config: { labelKey: 'c.label', descriptionKey: 'c.description', value: '{key}', value2: 3 } },
+				{
+					type: 'Select',
+					id: 'pick',
+					config: { label: 'Locale', open: true },
+					slots: { options: [{ type: 'SelectOption', id: 'opt', config: { labelKey: 'o.label', descriptionKey: 'o.description', value: 'zh-TW', value2: 12, value3: 'Overview' } }] },
+				},
+				{ type: 'CodeBlock', id: 'code', config: { code: '{}', labelKey: 'b.label', value: 'workspace.json' } },
+			], { locales })
+			expect(widget(container, 'ack').querySelector('.kit-checkbox__label')!.textContent).toBe('I understand {key} will not follow')
+			expect(widget(container, 'ack').querySelector('.kit-checkbox__description')!.textContent!.trim()).toBe('Affects 3 keys')
+			expect(text(container, 'opt')).toBe('zh-TW (12 keys)Used by Overview')
+			expect(widget(container, 'code').getAttribute('aria-label')).toBe('Config of workspace.json')
+			bridge.dispose()
+		})
+
+		it('fills the label, help and placeholder of a Select from `argument`', async () => {
+			const { container, bridge } = await mount([
+				{ type: 'Select', id: 'pick', config: { labelKey: 'f.label', helpKey: 'f.help', placeholderKey: 'f.placeholder', argument: 'Alice', argument2: 'Bob' } },
+			], { locales })
+			expect(widget(container, 'pick').querySelector('label')!.textContent).toBe('Name of Alice')
+			expect(widget(container, 'pick').querySelector('.kit-select__help')!.textContent!.trim()).toBe('Shown to Alice and Bob')
+			expect(widget(container, 'pick').querySelector('.kit-select__value')!.textContent).toBe('e.g. Bob')
+			bridge.dispose()
+		})
+	})
+
+	describe('TextInput autofocus, character counter and one-row height', () => {
+		it('focuses a field with `autofocus` when it is shown, and no other', async () => {
+			const { container, bridge } = await mount([
+				{ type: 'TextInput', id: 'first', config: { label: 'First' } },
+				{ type: 'TextInput', id: 'focused', config: { label: 'Focused', autofocus: true } },
+			])
+			expect(document.activeElement).toBe(widget(container, 'focused').querySelector('input'))
+			expect(document.activeElement).not.toBe(widget(container, 'first').querySelector('input'))
+			bridge.dispose()
+		})
+
+		it('shows a "count / max" counter, limits the text with maxlength, and follows the typed text', async () => {
+			const { container, bridge } = await mount([
+				{ type: 'TextInput', id: 'name', config: { label: 'Name', value: 'abc', maxLength: 5, help: 'Shown in the list' } },
+				{ type: 'TextInput', id: 'bare', config: { label: 'Bare', value: 'abc' } },
+			])
+			const field = widget(container, 'name')
+			const counter = field.querySelector('.kit-field__counter')!
+			expect(counter.textContent!.trim()).toBe('3 / 5')
+			expect(counter.classList.contains('is-full')).toBe(false)
+			const input = field.querySelector('input')!
+			expect(input.getAttribute('maxlength')).toBe('5')
+			expect(input.getAttribute('aria-describedby')).toContain(counter.id)
+			input.value = 'abcde'
+			fire(input, 'input')
+			await tick()
+			expect(widget(container, 'name').querySelector('.kit-field__counter')!.textContent!.trim()).toBe('5 / 5')
+			expect(widget(container, 'name').querySelector('.kit-field__counter')!.classList.contains('is-full')).toBe(true)
+			expect(widget(container, 'bare').querySelector('.kit-field__counter')).toBeNull()
+			expect(widget(container, 'bare').querySelector('input')!.getAttribute('maxlength')).toBeNull()
+			bridge.dispose()
+		})
+
+		it('draws `rows: 1` as a one-line textarea, not the 64px multi-line one', async () => {
+			const { container, bridge } = await mount([
+				{ type: 'TextInput', id: 'one', config: { label: 'Reply', rows: 1 } },
+				{ type: 'TextInput', id: 'many', config: { label: 'Note', rows: 3 } },
+			])
+			expect(widget(container, 'one').querySelector('textarea')!.classList.contains('is-single-row')).toBe(true)
+			expect(widget(container, 'many').querySelector('textarea')!.classList.contains('is-single-row')).toBe(false)
+			bridge.dispose()
+		})
+	})
+
+	describe('Badge label, tone and icon as states', () => {
+		const locales = { 'en-US': { 'b.pass': 'Pass', 'b.fail': 'Fail' } }
+
+		it('turns one Badge into its Pass and Fail forms while a Variant sets `labelKey`, `tone` and `icon`', async () => {
+			const { container, bridge } = await mount(
+				[{ type: 'Badge', id: 'status', config: { labelKey: 'b.pass', tone: 'success', icon: 'circle-check' } }],
+				{ locales, variants: { fail: { state: { status: { labelKey: 'b.fail', tone: 'danger', icon: 'circle-x' } } } } },
+			)
+			const badge = widget(container, 'status')
+			expect(badge.textContent!.trim()).toBe('Pass')
+			expect(badge.classList.contains('kit-badge--tone-success')).toBe(true)
+			const before = badge.querySelector('svg')!.innerHTML
+			await applyVariant(bridge, 'fail')
+			expect(widget(container, 'status').textContent!.trim()).toBe('Fail')
+			expect(widget(container, 'status').classList.contains('kit-badge--tone-danger')).toBe(true)
+			expect(widget(container, 'status').classList.contains('kit-badge--tone-success')).toBe(false)
+			expect(widget(container, 'status').querySelector('svg')!.innerHTML).not.toBe(before)
+			bridge.dispose()
+		})
+
+		it('takes a Variant tone of the seven and refuses one that is not', async () => {
+			const { bridge } = await mount(
+				[{ type: 'Badge', id: 'status', config: { label: 'x' } }],
+				{ variants: { good: { state: { status: { tone: 'danger' } } }, bad: { state: { status: { tone: 'purple' } } } } },
+			)
+			expect(bridge.applyVariantStateLive!('good')).toEqual([])
+			expect(bridge.applyVariantStateLive!('bad')).not.toEqual([])
+			bridge.dispose()
+		})
+	})
+
+	describe('ListItem tree semantics', () => {
+		it('exposes `aria-expanded` only for a branch, and a Variant flips it', async () => {
+			const row = (id: string, config: Record<string, unknown> = {}): Widget => ({ type: 'ListItem', id, config: { interactive: true, ...config } })
+			const { container, bridge } = await mount(
+				[row('branch', { expanded: false }), row('leaf', { level: 1 })],
+				{ variants: { open: { state: { branch: { expanded: true } } } } },
+			)
+			expect(widget(container, 'branch').getAttribute('aria-expanded')).toBe('false')
+			expect(widget(container, 'leaf').hasAttribute('aria-expanded')).toBe(false)
+			await applyVariant(bridge, 'open')
+			expect(widget(container, 'branch').getAttribute('aria-expanded')).toBe('true')
+			bridge.dispose()
+		})
+
+		it('indents a level by `indent` px, 16 by default', async () => {
+			const { container, bridge } = await mount([
+				{ type: 'ListItem', id: 'wide', config: { level: 2 } },
+				{ type: 'ListItem', id: 'tight', config: { level: 2, indent: 10 } },
+			])
+			expect(widget(container, 'wide').style.getPropertyValue('--kit-list-item-indent')).toBe('')
+			expect(widget(container, 'wide').style.getPropertyValue('--kit-list-item-level')).toBe('2')
+			expect(widget(container, 'tight').style.getPropertyValue('--kit-list-item-indent')).toBe('10px')
+			bridge.dispose()
+		})
+	})
+
+	describe('Select search field', () => {
+		it('draws a Find field in the open list, shows its text from the `search` state, and keeps it out of a closed or plain select', async () => {
+			const options = (id: string): readonly Widget[] => [{ type: 'SelectOption', id, config: { label: 'One' } }]
+			const { container, bridge } = await mount([
+				{ type: 'Select', id: 'searchable', config: { label: 'Root', open: true, searchable: true, searchPlaceholder: 'Find a View', search: 'che' }, slots: { options: options('o1') } },
+				{ type: 'Select', id: 'plain', config: { label: 'Plain', open: true }, slots: { options: options('o2') } },
+				{ type: 'Select', id: 'closed', config: { label: 'Closed', searchable: true }, slots: { options: options('o3') } },
+			])
+			const find = widget(container, 'searchable').querySelector<HTMLInputElement>('.kit-select__search-input')!
+			expect(find.value).toBe('che')
+			expect(find.getAttribute('placeholder')).toBe('Find a View')
+			expect(find.getAttribute('aria-label')).toBe('Find a View')
+			expect(widget(container, 'plain').querySelector('.kit-select__search')).toBeNull()
+			expect(widget(container, 'closed').querySelector('.kit-select__search')).toBeNull()
+			find.value = 'chec'
+			fire(find, 'input')
+			await tick()
+			expect(bridge.interactionProbe!().readState('searchable', 'search')).toEqual({ found: true, value: 'chec' })
+			bridge.dispose()
+		})
+	})
+
+	describe('Alert list and Text srOnly', () => {
+		it('lists the `items` of an Alert under its description, in mono with `itemsMono`', async () => {
+			const { container, bridge } = await mount([
+				{ type: 'Alert', id: 'keys', config: { tone: 'warning', title: 'Unheld keys', description: 'No one holds', items: ['members.manage', 'views.edit'], itemsMono: true } },
+				{ type: 'Alert', id: 'none', config: { title: 'Plain' } },
+			])
+			const items = Array.from(widget(container, 'keys').querySelectorAll('ul.uiux-ref-alert-list > li')).map(li => li.textContent)
+			expect(items).toEqual(['members.manage', 'views.edit'])
+			expect(widget(container, 'keys').querySelector('ul')!.classList.contains('is-mono')).toBe(true)
+			expect(widget(container, 'none').querySelector('ul')).toBeNull()
+			bridge.dispose()
+		})
+
+		it('keeps an `srOnly` Text in the document for assistive technology and marks it visually hidden', async () => {
+			const { container, bridge } = await mount([
+				{ type: 'Text', id: 'heading', config: { text: 'Actions', srOnly: true } },
+				{ type: 'Text', id: 'seen', config: { text: 'Name' } },
+			])
+			expect(widget(container, 'heading').textContent).toBe('Actions')
+			expect(widget(container, 'heading').classList.contains('uiux-ref-sr-only')).toBe(true)
+			expect(widget(container, 'seen').classList.contains('uiux-ref-sr-only')).toBe(false)
+			bridge.dispose()
+		})
+	})
+
+	describe('Menu and MenuItem', () => {
+		const menu = (config: Record<string, unknown> = {}): Widget => ({
+			type: 'Menu',
+			id: 'row',
+			config: { label: 'Row actions', ...config },
+			slots: {
+				trigger: [{ type: 'Button', id: 'trigger', config: { label: 'Actions', trailingIcon: 'chevron-down' } }],
+				items: [
+					{ type: 'MenuItem', id: 'edit', config: { label: 'Edit', icon: 'pencil', kbd: 'E' } },
+					{ type: 'MenuItem', id: 'move', config: { label: 'Move up', disabled: true } },
+					{ type: 'MenuItem', id: 'wrap', config: { label: 'Wrap lines', checked: true } },
+					{ type: 'Divider', id: 'sep', config: { spacing: 4 } },
+					{ type: 'MenuItem', id: 'delete', config: { label: 'Delete', danger: true } },
+				],
+			},
+		})
+
+		it('draws only the trigger while closed, and the named menu with its items while the `open` state is true', async () => {
+			const { container, bridge } = await mount([menu()], { variants: { open: { state: { row: { open: true } } } } })
+			expect(container.querySelector('[role="menu"]')).toBeNull()
+			expect(widget(container, 'trigger')).not.toBeNull()
+			expect(widget(container, 'trigger').getAttribute('aria-haspopup')).toBe('menu')
+			expect(widget(container, 'trigger').getAttribute('aria-expanded')).toBe('false')
+			await applyVariant(bridge, 'open')
+			const panel = container.querySelector('[role="menu"]')!
+			expect(panel.getAttribute('aria-label')).toBe('Row actions')
+			expect(Array.from(panel.querySelectorAll('[role^="menuitem"]')).map(item => item.getAttribute('role'))).toEqual(['menuitem', 'menuitem', 'menuitemcheckbox', 'menuitem'])
+			expect(panel.querySelector('[role="separator"]')).not.toBeNull()
+			expect(widget(container, 'trigger').getAttribute('aria-expanded')).toBe('true')
+			bridge.dispose()
+		})
+
+		it('draws a danger item, a disabled item (aria-disabled), a check item (aria-checked and a check) and a shortcut hint', async () => {
+			const { container, bridge } = await mount([menu({ open: true })])
+			expect(widget(container, 'delete').classList.contains('is-danger')).toBe(true)
+			expect(widget(container, 'edit').classList.contains('is-danger')).toBe(false)
+			expect(widget(container, 'move').getAttribute('aria-disabled')).toBe('true')
+			expect(widget(container, 'wrap').getAttribute('aria-checked')).toBe('true')
+			expect(widget(container, 'wrap').querySelector('.uiux-ref-menu-item-check svg')).not.toBeNull()
+			expect(widget(container, 'edit').getAttribute('aria-checked')).toBeNull()
+			expect(widget(container, 'edit').querySelector('.uiux-ref-menu-item-kbd')).not.toBeNull()
+			expect(widget(container, 'edit').querySelector('.uiux-ref-menu-item-icon svg')).not.toBeNull()
+			bridge.dispose()
+		})
+
+		it('opens on the trigger press, reports the item press, and closes on an item, Escape and a press outside', async () => {
+			const { container, bridge } = await mount([menu()])
+			await settle()
+			const probe = bridge.interactionProbe!()
+			expect(probe.watch('edit', 'click')).toBe(true)
+			expect(probe.watch('move', 'click')).toBe(true)
+			click(widget(container, 'trigger'))
+			await settle()
+			expect(container.querySelector('[role="menu"]')).not.toBeNull()
+			click(widget(container, 'move'))
+			await settle()
+			expect(container.querySelector('[role="menu"]'), 'a disabled item keeps the menu open').not.toBeNull()
+			click(widget(container, 'edit'))
+			await settle()
+			expect(events(bridge)).toEqual(['edit:click'])
+			expect(container.querySelector('[role="menu"]')).toBeNull()
+			click(widget(container, 'trigger'))
+			await settle()
+			press(widget(container, 'edit'), 'Escape')
+			await settle()
+			expect(container.querySelector('[role="menu"]')).toBeNull()
+			click(widget(container, 'trigger'))
+			await settle()
+			document.body.dispatchEvent(new window.Event('pointerdown', { bubbles: true }) as never)
+			await settle()
+			expect(container.querySelector('[role="menu"]')).toBeNull()
+			bridge.dispose()
+		})
+
+		it('moves the focus between enabled items with the arrow keys and opens from the trigger with ArrowDown', async () => {
+			const { container, bridge } = await mount([menu()])
+			await settle()
+			press(widget(container, 'trigger'), 'ArrowDown')
+			await settle()
+			expect(document.activeElement).toBe(widget(container, 'edit'))
+			press(widget(container, 'edit'), 'ArrowDown')
+			expect(document.activeElement, 'the disabled item is skipped').toBe(widget(container, 'wrap'))
+			press(widget(container, 'wrap'), 'End')
+			expect(document.activeElement).toBe(widget(container, 'delete'))
+			press(widget(container, 'delete'), 'ArrowDown')
+			expect(document.activeElement, 'the focus wraps').toBe(widget(container, 'edit'))
+			bridge.dispose()
+		})
+
+		it('interpolates the menu label and an item label', async () => {
+			const locales = { 'en-US': { 'm.label': 'Actions for {value}', 'm.remove': 'Remove {value}' } }
+			const { container, bridge } = await mount([{
+				type: 'Menu',
+				id: 'row',
+				config: { labelKey: 'm.label', value: 'Alice', open: true },
+				slots: { trigger: [{ type: 'Button', id: 'trigger', config: { label: 'Actions' } }], items: [{ type: 'MenuItem', id: 'remove', config: { labelKey: 'm.remove', value: 'Alice' } }] },
+			}], { locales })
+			expect(container.querySelector('[role="menu"]')!.getAttribute('aria-label')).toBe('Actions for Alice')
+			expect(text(container, 'remove')).toBe('Remove Alice')
+			bridge.dispose()
+		})
+	})
+
+	describe('Tooltip', () => {
+		const tip = (id: string, config: Record<string, unknown> = {}): Widget => ({
+			type: 'Tooltip',
+			id,
+			config: { text: 'Copy the Workspace revision', ...config },
+			slots: { content: [{ type: 'Button', id: `${id}-button`, config: { label: 'Copy', icon: 'link' } }] },
+		})
+		const bubble = (container: HTMLElement, id: string) => widget(container, id).querySelector<HTMLElement>('[role="tooltip"]')!
+		const shown = (container: HTMLElement, id: string) => !bubble(container, id).classList.contains('uiux-ref-hidden')
+
+		it('keeps the hint hidden until the `open` state is true, and describes the control by it either way', async () => {
+			const { container, bridge } = await mount([tip('closed'), tip('open', { open: true })])
+			expect(shown(container, 'closed')).toBe(false)
+			expect(shown(container, 'open')).toBe(true)
+			expect(bubble(container, 'open').textContent).toBe('Copy the Workspace revision')
+			expect(widget(container, 'closed-button').getAttribute('aria-describedby')).toBe(bubble(container, 'closed').id)
+			expect(widget(container, 'open-button').getAttribute('aria-describedby')).toBe(bubble(container, 'open').id)
+			bridge.dispose()
+		})
+
+		it('makes a plain Text reachable and described with `focusable`, and leaves it out of the tab order without it', async () => {
+			const plain = (id: string, config: Record<string, unknown>): Widget => ({ type: 'Tooltip', id, config: { text: 'Needs members.manage', ...config }, slots: { content: [{ type: 'Text', id: `${id}-text`, config: { text: '—' } }] } })
+			const { container, bridge } = await mount([plain('reachable', { focusable: true }), plain('inert', {})])
+			const target = (id: string) => widget(container, id).querySelector<HTMLElement>('.uiux-ref-tooltip-target')!
+			expect(target('reachable').getAttribute('tabindex')).toBe('0')
+			expect(target('reachable').getAttribute('aria-describedby')).toBe(bubble(container, 'reachable').id)
+			expect(target('inert').hasAttribute('tabindex')).toBe(false)
+			expect(target('inert').hasAttribute('aria-describedby')).toBe(false)
+			bridge.dispose()
+		})
+
+		it('shows on hover and on focus, and hides again on leave and Escape', async () => {
+			const { container, bridge } = await mount([tip('tip')])
+			await settle()
+			fire(widget(container, 'tip'), 'mouseenter')
+			await tick()
+			expect(shown(container, 'tip')).toBe(true)
+			fire(widget(container, 'tip'), 'mouseleave')
+			await tick()
+			expect(shown(container, 'tip')).toBe(false)
+			fire(widget(container, 'tip-button'), 'focusin')
+			await tick()
+			expect(shown(container, 'tip')).toBe(true)
+			press(widget(container, 'tip-button'), 'Escape')
+			await tick()
+			expect(shown(container, 'tip')).toBe(false)
+			bridge.dispose()
+		})
+
+		it('shows the hint while a Variant sets `open`, with its interpolated text', async () => {
+			const locales = { 'en-US': { 't.text': '{value} cannot be counted' } }
+			const { container, bridge } = await mount(
+				[{ ...tip('tip'), config: { textKey: 't.text', value: 'Editors' } }],
+				{ locales, variants: { shown: { state: { tip: { open: true } } } } },
+			)
+			expect(shown(container, 'tip')).toBe(false)
+			await applyVariant(bridge, 'shown')
+			expect(shown(container, 'tip')).toBe(true)
+			expect(bubble(container, 'tip').textContent).toBe('Editors cannot be counted')
+			bridge.dispose()
+		})
 	})
 })

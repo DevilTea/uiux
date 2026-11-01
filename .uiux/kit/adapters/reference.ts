@@ -4,7 +4,7 @@ import {
 	type UnknownTargetDependencyOperations,
 	type WidgetConfigJsonSchema,
 } from '@deviltea/widget-core'
-import { defineComponent, h, type VNode } from 'vue'
+import { defineComponent, h, nextTick, onBeforeUnmount, onMounted, onUpdated, ref, type VNode } from 'vue'
 import { useWidget } from '@deviltea/widget-vue'
 import {
 	STRING_VALUE_CONTRACT_ID,
@@ -293,24 +293,34 @@ function runNodes(runs: readonly TextRun[] | null | undefined, fallback: string)
  * `value3Text` Property).
  */
 function translatedResultWithValue<C extends InterpolationArgs>(pick: (config: C) => FieldSource) {
+	return translatedResultWithArgs<C>(pick, config => config)
+}
+
+/** {@link translatedResultWithValue} for a Widget whose own `value` Config is its content: the arguments come from `args`. */
+function translatedResultWithArgs<C>(pick: (config: C) => FieldSource, args: (config: C) => InterpolationArgs) {
 	return {
 		valueContract: TRANSLATION_RESULT,
 		registerDeps: translateDeps,
 		compute: ({ config, deps }: { config: C; deps: TranslateOnlyDeps }): TranslationResult => {
 			const source = pick(config)
-			return translateField(source.key, source.literal, (key, params) => deps.t(key, params), interpolationParams(config))
+			return translateField(source.key, source.literal, (key, params) => deps.t(key, params), interpolationParams(args(config)))
 		},
 	}
 }
 
 /** `<field>` text paired with {@link translatedResultWithValue}. */
 function translatedTextWithValue<C extends InterpolationArgs>(pick: (config: C) => FieldSource) {
+	return translatedTextWithArgs<C>(pick, config => config)
+}
+
+/** {@link translatedTextWithValue} paired with {@link translatedResultWithArgs}. */
+function translatedTextWithArgs<C>(pick: (config: C) => FieldSource, args: (config: C) => InterpolationArgs) {
 	return {
 		valueContract: STRING,
 		registerDeps: translateDeps,
 		compute: ({ config, deps }: { config: C; deps: TranslateOnlyDeps }): string => {
 			const source = pick(config)
-			return translateField(source.key, source.literal, (key, params) => deps.t(key, params), interpolationParams(config)).text
+			return translateField(source.key, source.literal, (key, params) => deps.t(key, params), interpolationParams(args(config))).text
 		},
 	}
 }
@@ -777,6 +787,8 @@ export interface TextPresentation {
 	lines?: number
 	align?: 'start' | 'center' | 'end'
 	hidden?: boolean
+	/** Visible only to assistive technology (an empty column's heading, a name for an icon): it takes no room. */
+	srOnly?: boolean
 }
 
 export interface TextInterfaces {
@@ -824,7 +836,7 @@ export interface TextInterfaces {
 		tone: string
 		mono: boolean
 		level: number
-		presentation: { variant: TextVariant; truncate: boolean; lines: number; align: string; hidden: boolean }
+		presentation: { variant: TextVariant; truncate: boolean; lines: number; align: string; hidden: boolean; srOnly: boolean }
 		theme: string
 	}
 }
@@ -833,7 +845,7 @@ export const textPlugin = createWidgetPlugin('Text')
 	.description('Typography element on the Quiet Canvas scale (display, headline, title, body, ui, label, mono) with tonal accents and translatable text.')
 	.interfaces<TextInterfaces>()
 	.config({
-		description: 'Text configuration. `text` accepts an `$i18n` binding (lowered to `textKey`); `{value}`, `{value2}` and `{value3}` interpolate `value`, `value2` and `value3` (literal), and with `valueCode` `{value}` shows as inline code (a file name, an Event). `visible` is the initial value of the `visible` state. Legacy variants h1–h4, caption and code map onto the same scale; nothing renders below 12px.',
+		description: 'Text configuration. `text` accepts an `$i18n` binding (lowered to `textKey`); `{value}`, `{value2}` and `{value3}` interpolate `value`, `value2` and `value3` (literal), and with `valueCode` `{value}` shows as inline code (a file name, an Event). `visible` is the initial value of the `visible` state. `srOnly` shows the text to assistive technology only (a heading for an empty table column). Legacy variants h1–h4, caption and code map onto the same scale; nothing renders below 12px.',
 		schema: configSchema({
 			text: { type: 'string' },
 			textKey: { type: 'string' },
@@ -851,6 +863,7 @@ export const textPlugin = createWidgetPlugin('Text')
 			lines: { type: 'number' },
 			align: { enum: ['start', 'center', 'end'] },
 			hidden: { type: 'boolean' },
+			srOnly: { type: 'boolean' },
 		}),
 		validate: (c): c is TextInterfaces['config']['raw'] => isConfigOrOmitted(c),
 		resolve: (raw) => {
@@ -895,6 +908,7 @@ export const textPlugin = createWidgetPlugin('Text')
 					lines: typeof presentation.lines === 'number' ? presentation.lines : 0,
 					align: presentation.align ?? 'start',
 					hidden: Boolean(presentation.hidden),
+					srOnly: Boolean(presentation.srOnly),
 				}
 			},
 		})
@@ -934,6 +948,7 @@ export const TextRenderer = defineComponent({
 					props.mono.value ? 'is-mono' : '',
 					presentation?.truncate ? 'is-truncate' : '',
 					presentation?.lines ? 'is-clamped' : '',
+					presentation?.srOnly ? 'uiux-ref-sr-only' : '',
 					presentation?.hidden || !state.visible.value ? 'uiux-ref-hidden' : '',
 				],
 				style,
@@ -1219,6 +1234,7 @@ export interface BadgePresentation {
 
 type BadgeTone = 'neutral' | 'primary' | 'annotation' | 'success' | 'warning' | 'danger' | 'info'
 type BadgeVariant = 'subtle' | 'soft' | 'solid' | 'outline' | 'mono' | 'count'
+const BADGE_TONES: readonly BadgeTone[] = ['neutral', 'primary', 'annotation', 'success', 'warning', 'danger', 'info']
 
 export interface BadgeInterfaces {
 	config: {
@@ -1252,7 +1268,13 @@ export interface BadgeInterfaces {
 			responsive?: Responsive<BadgePresentation>
 		}
 	}
-	state: { visible: boolean }
+	state: {
+		visible: boolean
+		/** A Locale key: while set, the badge shows its translation instead of `label`. */
+		labelKey: string
+		tone: BadgeTone
+		icon: string
+	}
 	properties: {
 		valueText: string
 		contextViewportId: string
@@ -1272,10 +1294,10 @@ export interface BadgeInterfaces {
 }
 
 export const badgePlugin = createWidgetPlugin('Badge')
-	.description('Status badge, mono identity chip, or count; carries a leading Lucide icon so color is never the only signal. Translated labels may interpolate {value} and the live render context ({viewportId}, {viewport}, {locale}, {theme}).')
+	.description('Status badge, mono identity chip, or count; carries a leading Lucide icon so color is never the only signal. Translated labels may interpolate {value} and the live render context ({viewportId}, {viewport}, {locale}, {theme}). Author-writable `labelKey`, `tone`, `icon` and `visible` states let one Variant turn a badge into its Pass, Warning or Fail form.')
 	.interfaces<BadgeInterfaces>()
 	.config({
-		description: 'Badge configuration. `label` accepts an `$i18n` binding (lowered to `labelKey`). `variant: "mono"` is the blueprint identity chip; `variant: "count"` is a count pill. `truncate` ends a long label in an ellipsis.',
+		description: 'Badge configuration. `label` accepts an `$i18n` binding (lowered to `labelKey`). `variant: "mono"` is the blueprint identity chip; `variant: "count"` is a count pill. `truncate` ends a long label in an ellipsis. `labelKey`, `tone` and `icon` are the initial values of the states of the same name, so a Variant can set a Locale key (`labelKey`), a tone and an icon on one badge.',
 		schema: configSchema({
 			label: { type: 'string' },
 			labelKey: { type: 'string' },
@@ -1305,7 +1327,11 @@ export const badgePlugin = createWidgetPlugin('Badge')
 			}
 		},
 	})
-	.state(state => state.visible({ ...visibleState, default: ({ config }) => config.visible }))
+	.state(state => state
+		.visible({ ...visibleState, default: ({ config }) => config.visible })
+		.labelKey({ authorWritable: true, validate: (v): v is string => typeof v === 'string', default: ({ config }) => config.labelKey ?? '' })
+		.tone({ authorWritable: true, validate: (v): v is BadgeTone => (BADGE_TONES as readonly unknown[]).includes(v), default: ({ config }) => config.tone as BadgeTone })
+		.icon({ authorWritable: true, validate: (v): v is string => typeof v === 'string', default: ({ config }) => config.icon }))
 	.properties(p => p
 		.valueText({ valueContract: STRING, compute: ({ config }) => config.value })
 		.contextViewportId({
@@ -1335,13 +1361,14 @@ export const badgePlugin = createWidgetPlugin('Badge')
 			valueContract: TRANSLATION_RESULT,
 			registerDeps: ({ dep }) => ({
 				...translateDeps({ dep }),
+				stateKey: dep.self.state.get('labelKey'),
 				value: dep.self.properties.get('valueText'),
 				viewportId: dep.self.properties.get('contextViewportId'),
 				viewport: dep.self.properties.get('contextViewport'),
 				locale: dep.self.properties.get('contextLocale'),
 				theme: dep.self.properties.get('contextTheme'),
 			}),
-			compute: ({ config, deps }) => translateField(config.labelKey, config.label, (key, params) => deps.t(key, params), {
+			compute: ({ config, deps }) => translateField(stringFromResult(deps.stateKey()) || config.labelKey, config.label, (key, params) => deps.t(key, params), {
 				value: stringFromResult(deps.value()),
 				viewportId: stringFromResult(deps.viewportId()),
 				viewport: stringFromResult(deps.viewport()),
@@ -1354,9 +1381,21 @@ export const badgePlugin = createWidgetPlugin('Badge')
 			registerDeps: ({ dep }) => ({ result: dep.self.properties.get('labelResult') }),
 			compute: ({ deps }) => textOfResult(deps.result()),
 		})
-		.tone({ compute: ({ config }) => config.tone })
+		.tone({
+			registerDeps: ({ dep }) => ({ tone: dep.self.state.get('tone') }),
+			compute: ({ config, deps }) => {
+				const tone = deps.tone()
+				return tone.ok && typeof tone.value === 'string' ? tone.value : config.tone
+			},
+		})
 		.variant({ compute: ({ config }) => config.variant })
-		.icon({ compute: ({ config }) => config.icon })
+		.icon({
+			registerDeps: ({ dep }) => ({ icon: dep.self.state.get('icon') }),
+			compute: ({ config, deps }) => {
+				const icon = deps.icon()
+				return icon.ok && typeof icon.value === 'string' ? icon.value : config.icon
+			},
+		})
 		.spin({ compute: ({ config }) => config.spin })
 		.truncate({ compute: ({ config }) => config.truncate })
 		.hidden({
@@ -1416,14 +1455,22 @@ export interface TextInputInterfaces {
 			helpKey?: string
 			error?: string
 			errorKey?: string
+			/** Interpolated into a translated label, placeholder, help or error as `{value}`, `{value2}` and `{value3}` (`value` is the field's own text, so these are named `argument`). */
+			argument?: string | number
+			argument2?: string | number
+			argument3?: string | number
 			invalid?: boolean
 			/** Marks the label with `*` and the control as required. */
 			required?: boolean
 			icon?: string
 			kbd?: string
 			mono?: boolean
-			/** Renders a textarea with this many rows. */
+			/** Renders a textarea with this many rows (`1` is one line at the height of an input). */
 			rows?: number
+			/** The field takes the focus when it is shown, so its focus ring is visible (a dialog's first field). */
+			autofocus?: boolean
+			/** The most characters the field takes, shown as a "count / max" counter. */
+			maxLength?: number
 			responsive?: Responsive<TextInputPresentation>
 		}) | null
 		resolved: {
@@ -1439,12 +1486,15 @@ export interface TextInputInterfaces {
 			helpKey: string | null
 			error: string
 			errorKey: string | null
+			args: InterpolationArgs
 			invalid: boolean
 			required: boolean
 			icon: string
 			kbd: string
 			mono: boolean
 			rows: number
+			autofocus: boolean
+			maxLength: number
 			base: TextInputPresentation
 			responsive?: Responsive<TextInputPresentation>
 		}
@@ -1456,6 +1506,9 @@ export interface TextInputInterfaces {
 		invalid: boolean
 	}
 	properties: {
+		valueText: string
+		value2Text: string
+		value3Text: string
 		valueResult: TranslationResult
 		value: string
 		placeholderResult: TranslationResult
@@ -1467,16 +1520,16 @@ export interface TextInputInterfaces {
 		errorResult: TranslationResult
 		error: string
 		readOnly: boolean
-		presentation: { hidden: boolean; touch: boolean; kbd: string; icon: string; mono: boolean; rows: number; required: boolean; hideLabel: boolean }
+		presentation: { hidden: boolean; touch: boolean; kbd: string; icon: string; mono: boolean; rows: number; required: boolean; hideLabel: boolean; autofocus: boolean; maxLength: number }
 		theme: string
 	}
 }
 
 export const textInputPlugin = createWidgetPlugin('TextInput')
-	.description('Text field or textarea with translatable label, placeholder, help and error text, leading Lucide icon, shortcut hint, and an author-writable `invalid` state.')
+	.description('Text field or textarea with translatable label, placeholder, help and error text (each may interpolate {value}, {value2} and {value3} from `argument`, `argument2` and `argument3`), leading Lucide icon, shortcut hint, autofocus, a "count / max" character counter, and an author-writable `invalid` state.')
 	.interfaces<TextInputInterfaces>()
 	.config({
-		description: 'TextInput configuration. `value`, `placeholder`, `label`, `help` and `error` accept `$i18n` bindings (lowered to `valueKey`, `placeholderKey`, `labelKey`, `helpKey`, `errorKey`). The error text shows only while `invalid` is true. `hideLabel` keeps the label for assistive technology only.',
+		description: 'TextInput configuration. `value`, `placeholder`, `label`, `help` and `error` accept `$i18n` bindings (lowered to `valueKey`, `placeholderKey`, `labelKey`, `helpKey`, `errorKey`). The error text shows only while `invalid` is true, and then replaces the help text. `{value}`, `{value2}` and `{value3}` in the label, placeholder, help or error interpolate `argument`, `argument2` and `argument3`. `hideLabel` keeps the label for assistive technology only. `autofocus` focuses the field when it is shown. `maxLength` limits the text and shows a counter of the characters typed. `rows: 1` is one line at the height of an input.',
 		schema: configSchema({
 			value: { type: 'string' },
 			valueKey: { type: 'string' },
@@ -1490,18 +1543,23 @@ export const textInputPlugin = createWidgetPlugin('TextInput')
 			helpKey: { type: 'string' },
 			error: { type: 'string' },
 			errorKey: { type: 'string' },
+			argument: { type: ['string', 'number'] },
+			argument2: { type: ['string', 'number'] },
+			argument3: { type: ['string', 'number'] },
 			invalid: { type: 'boolean' },
 			required: { type: 'boolean' },
 			icon: { type: 'string' },
 			kbd: { type: 'string' },
 			mono: { type: 'boolean' },
 			rows: { type: 'number' },
+			autofocus: { type: 'boolean' },
+			maxLength: { type: 'number' },
 			hidden: { type: 'boolean' },
 			hideKbd: { type: 'boolean' },
 		}),
 		validate: (c): c is TextInputInterfaces['config']['raw'] => isConfigOrOmitted(c),
 		resolve: (raw) => {
-			const { value, valueKey, hideLabel, placeholder, placeholderKey, readOnly, label, labelKey, help, helpKey, error, errorKey, invalid, required, icon, kbd, mono, rows, ...presentation } = raw ?? {}
+			const { value, valueKey, hideLabel, placeholder, placeholderKey, readOnly, label, labelKey, help, helpKey, error, errorKey, argument, argument2, argument3, invalid, required, icon, kbd, mono, rows, autofocus, maxLength, ...presentation } = raw ?? {}
 			return {
 				value: typeof value === 'string' ? value : '',
 				valueKey: typeof valueKey === 'string' ? valueKey : '',
@@ -1515,12 +1573,15 @@ export const textInputPlugin = createWidgetPlugin('TextInput')
 				helpKey: optionalString(helpKey),
 				error: typeof error === 'string' ? error : '',
 				errorKey: optionalString(errorKey),
+				args: interpolationArgs({ value: argument, value2: argument2, value3: argument3 }),
 				invalid: Boolean(invalid),
 				required: Boolean(required),
 				icon: typeof icon === 'string' ? icon : '',
 				kbd: typeof kbd === 'string' ? kbd : '',
 				mono: Boolean(mono),
 				rows: typeof rows === 'number' ? rows : 0,
+				autofocus: Boolean(autofocus),
+				maxLength: typeof maxLength === 'number' && maxLength > 0 ? Math.floor(maxLength) : 0,
 				...splitResponsive<TextInputPresentation>(presentation),
 			}
 		},
@@ -1552,14 +1613,17 @@ export const textInputPlugin = createWidgetPlugin('TextInput')
 			registerDeps: ({ dep }) => ({ result: dep.self.properties.get('valueResult') }),
 			compute: ({ deps }) => textOfResult(deps.result()),
 		})
-		.placeholderResult(translatedResult<TextInputInterfaces['config']['resolved']>(c => ({ key: c.placeholderKey, literal: c.placeholder })))
-		.placeholder(translatedText<TextInputInterfaces['config']['resolved']>(c => ({ key: c.placeholderKey, literal: c.placeholder })))
-		.labelResult(translatedResult<TextInputInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
-		.label(translatedText<TextInputInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
-		.helpResult(translatedResult<TextInputInterfaces['config']['resolved']>(c => ({ key: c.helpKey, literal: c.help })))
-		.help(translatedText<TextInputInterfaces['config']['resolved']>(c => ({ key: c.helpKey, literal: c.help })))
-		.errorResult(translatedResult<TextInputInterfaces['config']['resolved']>(c => ({ key: c.errorKey, literal: c.error })))
-		.error(translatedText<TextInputInterfaces['config']['resolved']>(c => ({ key: c.errorKey, literal: c.error })))
+		.valueText({ valueContract: STRING, compute: ({ config }) => config.args.value })
+		.value2Text({ valueContract: STRING, compute: ({ config }) => config.args.value2 })
+		.value3Text({ valueContract: STRING, compute: ({ config }) => config.args.value3 })
+		.placeholderResult(translatedResultWithArgs<TextInputInterfaces['config']['resolved']>(c => ({ key: c.placeholderKey, literal: c.placeholder }), c => c.args))
+		.placeholder(translatedTextWithArgs<TextInputInterfaces['config']['resolved']>(c => ({ key: c.placeholderKey, literal: c.placeholder }), c => c.args))
+		.labelResult(translatedResultWithArgs<TextInputInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label }), c => c.args))
+		.label(translatedTextWithArgs<TextInputInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label }), c => c.args))
+		.helpResult(translatedResultWithArgs<TextInputInterfaces['config']['resolved']>(c => ({ key: c.helpKey, literal: c.help }), c => c.args))
+		.help(translatedTextWithArgs<TextInputInterfaces['config']['resolved']>(c => ({ key: c.helpKey, literal: c.help }), c => c.args))
+		.errorResult(translatedResultWithArgs<TextInputInterfaces['config']['resolved']>(c => ({ key: c.errorKey, literal: c.error }), c => c.args))
+		.error(translatedTextWithArgs<TextInputInterfaces['config']['resolved']>(c => ({ key: c.errorKey, literal: c.error }), c => c.args))
 		.readOnly({ compute: ({ config }) => config.readOnly })
 		.presentation({
 			registerDeps: viewportDeps,
@@ -1575,6 +1639,8 @@ export const textInputPlugin = createWidgetPlugin('TextInput')
 					rows: config.rows,
 					required: config.required,
 					hideLabel: config.hideLabel,
+					autofocus: config.autofocus,
+					maxLength: config.maxLength,
 				}
 			},
 		})
@@ -1607,6 +1673,8 @@ export const TextInputRenderer = defineComponent({
 				kbd: presentation?.kbd || undefined,
 				mono: Boolean(presentation?.mono),
 				rows: presentation?.rows || undefined,
+				autofocus: Boolean(presentation?.autofocus),
+				counter: presentation?.maxLength || undefined,
 				touch: Boolean(presentation?.touch),
 				'onUpdate:modelValue': (value: string) => {
 					if (props.readOnly.value) return
@@ -3406,8 +3474,8 @@ const ALERT_ICON: Record<AlertTone, string> = { info: 'info', success: 'circle-c
 
 export interface AlertInterfaces {
 	config: {
-		raw: ({ tone?: AlertTone; icon?: string; title?: string; titleKey?: string; description?: string; descriptionKey?: string; value?: string | number; value2?: string | number; value3?: string | number; valueCode?: boolean; toast?: boolean; visible?: boolean; dismissible?: boolean; dismissLabel?: string; dismissLabelKey?: string }) | null
-		resolved: InterpolationArgs & { tone: AlertTone; icon: string; title: string; titleKey: string | null; description: string; descriptionKey: string | null; valueCode: boolean; toast: boolean; visible: boolean; dismissible: boolean; dismissLabel: string; dismissLabelKey: string | null }
+		raw: ({ tone?: AlertTone; icon?: string; title?: string; titleKey?: string; description?: string; descriptionKey?: string; value?: string | number; value2?: string | number; value3?: string | number; valueCode?: boolean; items?: string[]; itemsMono?: boolean; toast?: boolean; visible?: boolean; dismissible?: boolean; dismissLabel?: string; dismissLabelKey?: string }) | null
+		resolved: InterpolationArgs & { tone: AlertTone; icon: string; title: string; titleKey: string | null; description: string; descriptionKey: string | null; valueCode: boolean; items: string[]; itemsMono: boolean; toast: boolean; visible: boolean; dismissible: boolean; dismissLabel: string; dismissLabelKey: string | null }
 	}
 	slots: 'actions'
 	state: { visible: boolean }
@@ -3424,16 +3492,16 @@ export interface AlertInterfaces {
 		descriptionRuns: readonly TextRun[]
 		dismissLabelResult: TranslationResult
 		dismissLabel: string
-		look: { tone: AlertTone; icon: string; toast: boolean; dismissible: boolean }
+		look: { tone: AlertTone; icon: string; toast: boolean; dismissible: boolean; items: string[]; itemsMono: boolean }
 		theme: string
 	}
 }
 
 export const alertPlugin = createWidgetPlugin('Alert')
-	.description('Subtle inline alert with a status icon, title, description and an actions slot; `toast: true` renders the floating toast surface, and `dismissible: true` adds a close button that hides the alert and fires `dismiss`. Author-writable `visible` state drives Variants.')
+	.description('Subtle inline alert with a status icon, title, description and an actions slot; `toast: true` renders the floating toast surface, `items` is a bulleted list of literal lines under the description (diagnostics, keys), and `dismissible: true` adds a close button that hides the alert and fires `dismiss`. Author-writable `visible` state drives Variants.')
 	.interfaces<AlertInterfaces>()
 	.config({
-		description: 'Alert configuration. `title`, `description` and `dismissLabel` accept `$i18n` bindings (lowered to `titleKey`, `descriptionKey`, `dismissLabelKey`); `{value}` in the title or description interpolates `value`, and with `valueCode` it shows as inline code.',
+		description: 'Alert configuration. `title`, `description` and `dismissLabel` accept `$i18n` bindings (lowered to `titleKey`, `descriptionKey`, `dismissLabelKey`); `{value}` in the title or description interpolates `value`, and with `valueCode` it shows as inline code. `items` is a list of literal lines (never translated: names, keys, diagnostic lines) shown as a bulleted list under the description, in mono text with `itemsMono`.',
 		schema: configSchema({
 			tone: { enum: ['info', 'success', 'warning', 'danger', 'annotation'] },
 			icon: { type: 'string' },
@@ -3443,6 +3511,8 @@ export const alertPlugin = createWidgetPlugin('Alert')
 			value2: { type: ['string', 'number'] },
 			value3: { type: ['string', 'number'] },
 			valueCode: { type: 'boolean' },
+			items: { type: 'array', items: { type: 'string' } },
+			itemsMono: { type: 'boolean' },
 			toast: { type: 'boolean' },
 			visible: { type: 'boolean' },
 			dismissible: { type: 'boolean' },
@@ -3458,6 +3528,8 @@ export const alertPlugin = createWidgetPlugin('Alert')
 			descriptionKey: optionalString(raw?.descriptionKey),
 			...interpolationArgs(raw),
 			valueCode: Boolean(raw?.valueCode),
+			items: Array.isArray(raw?.items) ? raw.items.filter((item): item is string => typeof item === 'string') : [],
+			itemsMono: Boolean(raw?.itemsMono),
 			toast: Boolean(raw?.toast),
 			visible: raw?.visible === undefined ? true : Boolean(raw.visible),
 			dismissible: Boolean(raw?.dismissible),
@@ -3479,7 +3551,7 @@ export const alertPlugin = createWidgetPlugin('Alert')
 		.descriptionRuns(textRunsOf<AlertInterfaces['config']['resolved']>(c => ({ key: c.descriptionKey, literal: c.description })))
 		.dismissLabelResult(translatedResult<AlertInterfaces['config']['resolved']>(c => ({ key: c.dismissLabelKey, literal: c.dismissLabel })))
 		.dismissLabel(translatedText<AlertInterfaces['config']['resolved']>(c => ({ key: c.dismissLabelKey, literal: c.dismissLabel })))
-		.look({ compute: ({ config }) => ({ tone: config.tone, icon: config.icon || ALERT_ICON[config.tone], toast: config.toast, dismissible: config.dismissible }) })
+		.look({ compute: ({ config }) => ({ tone: config.tone, icon: config.icon || ALERT_ICON[config.tone], toast: config.toast, dismissible: config.dismissible, items: config.items, itemsMono: config.itemsMono }) })
 		.theme(themeProperty()),
 	)
 	.events(events => events.dismiss({ description: 'Fired when the dismiss button is pressed; the alert hides itself' }))
@@ -3502,6 +3574,7 @@ export const AlertRenderer = defineComponent({
 				h('div', { class: 'uiux-ref-alert-main' }, [
 					props.title.value ? h('p', { class: 'uiux-ref-alert-title' }, runNodes(props.titleRuns.value, props.title.value)) : null,
 					props.description.value ? h('p', { class: 'uiux-ref-alert-desc' }, runNodes(props.descriptionRuns.value, props.description.value)) : null,
+					look?.items.length ? h('ul', { class: ['uiux-ref-alert-list', look.itemsMono ? 'is-mono' : ''] }, look.items.map(item => h('li', item))) : null,
 					h('div', { class: 'uiux-ref-alert-actions' }, [h(WidgetSlot, { name: 'actions' })]),
 				]),
 				look?.dismissible
@@ -3737,14 +3810,15 @@ export const SkeletonRenderer = defineComponent({
 // ---------------------------------------------------------------------------
 export interface ListItemInterfaces {
 	config: {
-		raw: ({ selected?: boolean; dimmed?: boolean; visible?: boolean; level?: number; divided?: boolean; interactive?: boolean; size?: ListItemSize; align?: 'center' | 'start'; selectedLook?: 'accent' | 'neutral' }) | null
-		resolved: { selected: boolean; dimmed: boolean; visible: boolean; level: number; divided: boolean; interactive: boolean; size: ListItemSize; align: 'center' | 'start'; selectedLook: 'accent' | 'neutral' }
+		raw: ({ selected?: boolean; dimmed?: boolean; visible?: boolean; level?: number; indent?: number; expanded?: boolean; divided?: boolean; interactive?: boolean; size?: ListItemSize; align?: 'center' | 'start'; selectedLook?: 'accent' | 'neutral' }) | null
+		resolved: { selected: boolean; dimmed: boolean; visible: boolean; level: number; indent: number; expanded: boolean | null; divided: boolean; interactive: boolean; size: ListItemSize; align: 'center' | 'start'; selectedLook: 'accent' | 'neutral' }
 	}
 	slots: 'leading' | 'content' | 'trailing'
-	state: { selected: boolean; dimmed: boolean; visible: boolean }
+	/** `expanded` is `null` for a row that is not a branch of a tree. */
+	state: { selected: boolean; dimmed: boolean; visible: boolean; expanded: boolean | null }
 	events: { click: readonly [] }
 	properties: {
-		look: { level: number; divided: boolean; interactive: boolean; size: ListItemSize; align: 'center' | 'start'; selectedLook: 'accent' | 'neutral' }
+		look: { level: number; indent: number; divided: boolean; interactive: boolean; size: ListItemSize; align: 'center' | 'start'; selectedLook: 'accent' | 'neutral' }
 		theme: string
 	}
 }
@@ -3754,15 +3828,17 @@ type ListItemSize = 'sm' | 'md' | 'lg'
 const LIST_ITEM_SIZES: readonly ListItemSize[] = ['sm', 'md', 'lg']
 
 export const listItemPlugin = createWidgetPlugin('ListItem')
-	.description('One generic row for lists, timelines, step lists and trees: `leading`, `content` and `trailing` slots, an indent `level`, a `divided` hairline, a row height (`size`), top alignment of the end slots (`align`), a neutral current-row look (`selectedLook`), and author-writable `selected`, `dimmed` and `visible` states. `interactive` makes the row one focusable, pressable target that fires `click`.')
+	.description('One generic row for lists, timelines, step lists and trees: `leading`, `content` and `trailing` slots, an indent `level`, a `divided` hairline, a row height (`size`), top alignment of the end slots (`align`), a neutral current-row look (`selectedLook`), and author-writable `selected`, `dimmed` and `visible` states. `interactive` makes the row one focusable, pressable target that fires `click`. A tree branch sets `expanded` (the author-writable `expanded` state, exposed as `aria-expanded`), and `indent` sets the px of one level.')
 	.interfaces<ListItemInterfaces>()
 	.config({
-		description: 'ListItem configuration. `level` is the indent depth (16px per level). `size` is the minimum height (`sm` 28px, `md` 36px, `lg` 48px). `align: "start"` pins `leading` and `trailing` to the top of a tall row. `selectedLook: "neutral"` marks the current row with an elevated neutral fill instead of the primary tint and bar.',
+		description: 'ListItem configuration. `level` is the indent depth (`indent` px per level, 16 by default). `expanded` marks the row as a tree branch and is the initial value of the `expanded` state (`aria-expanded`; leave it out for a leaf). `size` is the minimum height (`sm` 28px, `md` 36px, `lg` 48px). `align: "start"` pins `leading` and `trailing` to the top of a tall row. `selectedLook: "neutral"` marks the current row with an elevated neutral fill instead of the primary tint and bar.',
 		schema: configSchema({
 			selected: { type: 'boolean' },
 			dimmed: { type: 'boolean' },
 			visible: { type: 'boolean' },
 			level: { type: 'number' },
+			indent: { type: 'number' },
+			expanded: { type: 'boolean' },
 			divided: { type: 'boolean' },
 			interactive: { type: 'boolean' },
 			size: { enum: [...LIST_ITEM_SIZES] },
@@ -3775,6 +3851,8 @@ export const listItemPlugin = createWidgetPlugin('ListItem')
 			dimmed: Boolean(raw?.dimmed),
 			visible: raw?.visible === undefined ? true : Boolean(raw.visible),
 			level: typeof raw?.level === 'number' && raw.level > 0 ? Math.floor(raw.level) : 0,
+			indent: typeof raw?.indent === 'number' && raw.indent > 0 ? raw.indent : 0,
+			expanded: raw?.expanded === undefined ? null : Boolean(raw.expanded),
 			divided: Boolean(raw?.divided),
 			interactive: Boolean(raw?.interactive),
 			size: oneOf(raw?.size, LIST_ITEM_SIZES, 'sm'),
@@ -3790,9 +3868,10 @@ export const listItemPlugin = createWidgetPlugin('ListItem')
 	.state(state => state
 		.selected({ authorWritable: true, validate: isBoolean, default: ({ config }) => config.selected })
 		.dimmed({ authorWritable: true, validate: isBoolean, default: ({ config }) => config.dimmed })
-		.visible({ authorWritable: true, validate: isBoolean, default: ({ config }) => config.visible }))
+		.visible({ authorWritable: true, validate: isBoolean, default: ({ config }) => config.visible })
+		.expanded({ authorWritable: true, validate: isNullableBoolean, default: ({ config }) => config.expanded }))
 	.properties(p => p
-		.look({ compute: ({ config }) => ({ level: config.level, divided: config.divided, interactive: config.interactive, size: config.size, align: config.align, selectedLook: config.selectedLook }) })
+		.look({ compute: ({ config }) => ({ level: config.level, indent: config.indent, divided: config.divided, interactive: config.interactive, size: config.size, align: config.align, selectedLook: config.selectedLook }) })
 		.theme(themeProperty()),
 	)
 	.events(events => events.click({ description: 'Fired when an interactive row is pressed' }))
@@ -3811,6 +3890,8 @@ export const ListItemRenderer = defineComponent({
 				selected: Boolean(state.selected.value),
 				dimmed: Boolean(state.dimmed.value),
 				level: look?.level || undefined,
+				indent: look?.indent || undefined,
+				expanded: state.expanded.value ?? undefined,
 				divided: Boolean(look?.divided),
 				interactive: Boolean(look?.interactive),
 				size: look?.size,
@@ -3840,6 +3921,10 @@ export interface CheckboxInterfaces {
 			description?: string
 			descriptionKey?: string
 			descriptionTone?: 'muted' | 'warning'
+			/** Interpolated into a translated label or description as `{value}`, `{value2}` and `{value3}`. */
+			value?: string | number
+			value2?: string | number
+			value3?: string | number
 			checked?: boolean
 			indeterminate?: boolean
 			disabled?: boolean
@@ -3849,7 +3934,7 @@ export interface CheckboxInterfaces {
 			/** The whole row is a 44px target. */
 			touch?: boolean
 		}) | null
-		resolved: {
+		resolved: InterpolationArgs & {
 			label: string
 			labelKey: string | null
 			description: string
@@ -3866,6 +3951,9 @@ export interface CheckboxInterfaces {
 	state: { checked: boolean; indeterminate: boolean; disabled: boolean }
 	events: { toggle: readonly [] }
 	properties: {
+		valueText: string
+		value2Text: string
+		value3Text: string
 		labelResult: TranslationResult
 		label: string
 		descriptionResult: TranslationResult
@@ -3876,13 +3964,16 @@ export interface CheckboxInterfaces {
 }
 
 export const checkboxPlugin = createWidgetPlugin('Checkbox')
-	.description('Native checkbox with a translatable label and description, a literal mono `meta` at the end, a `warning` description tone, a mono label (`mono`), a 44px row target (`touch`), and author-writable `checked`, `indeterminate` and `disabled` states. A press writes `checked` and fires `toggle`.')
+	.description('Native checkbox with a translatable label and description (both may interpolate {value}, {value2} and {value3}), a literal mono `meta` at the end, a `warning` description tone, a mono label (`mono`), a 44px row target (`touch`), and author-writable `checked`, `indeterminate` and `disabled` states. A press writes `checked` and fires `toggle`.')
 	.interfaces<CheckboxInterfaces>()
 	.config({
-		description: 'Checkbox configuration. `label` and `description` accept `$i18n` bindings (lowered to `labelKey`, `descriptionKey`). `meta` is literal mono text such as an id or a count. `mono` sets the label in mono 12px; `touch` makes the whole row a 44px target.',
+		description: 'Checkbox configuration. `label` and `description` accept `$i18n` bindings (lowered to `labelKey`, `descriptionKey`); `{value}`, `{value2}` and `{value3}` interpolate `value`, `value2` and `value3`. `meta` is literal mono text such as an id or a count. `mono` sets the label in mono 12px; `touch` makes the whole row a 44px target.',
 		schema: configSchema({
 			label: { type: 'string' }, labelKey: { type: 'string' },
 			description: { type: 'string' }, descriptionKey: { type: 'string' },
+			value: { type: ['string', 'number'] },
+			value2: { type: ['string', 'number'] },
+			value3: { type: ['string', 'number'] },
 			descriptionTone: { enum: ['muted', 'warning'] },
 			checked: { type: 'boolean' },
 			indeterminate: { type: 'boolean' },
@@ -3897,6 +3988,7 @@ export const checkboxPlugin = createWidgetPlugin('Checkbox')
 			labelKey: optionalString(raw?.labelKey),
 			description: stringOr(raw?.description, ''),
 			descriptionKey: optionalString(raw?.descriptionKey),
+			...interpolationArgs(raw),
 			descriptionTone: oneOf(raw?.descriptionTone, ['muted', 'warning'] as const, 'muted'),
 			checked: Boolean(raw?.checked),
 			indeterminate: Boolean(raw?.indeterminate),
@@ -3911,10 +4003,13 @@ export const checkboxPlugin = createWidgetPlugin('Checkbox')
 		.indeterminate({ authorWritable: true, validate: isBoolean, default: ({ config }) => config.indeterminate })
 		.disabled({ authorWritable: true, validate: isBoolean, default: ({ config }) => config.disabled }))
 	.properties(p => p
-		.labelResult(translatedResult<CheckboxInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
-		.label(translatedText<CheckboxInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
-		.descriptionResult(translatedResult<CheckboxInterfaces['config']['resolved']>(c => ({ key: c.descriptionKey, literal: c.description })))
-		.description(translatedText<CheckboxInterfaces['config']['resolved']>(c => ({ key: c.descriptionKey, literal: c.description })))
+		.valueText({ valueContract: STRING, compute: ({ config }) => config.value })
+		.value2Text({ valueContract: STRING, compute: ({ config }) => config.value2 })
+		.value3Text({ valueContract: STRING, compute: ({ config }) => config.value3 })
+		.labelResult(translatedResultWithValue<CheckboxInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
+		.label(translatedTextWithValue<CheckboxInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
+		.descriptionResult(translatedResultWithValue<CheckboxInterfaces['config']['resolved']>(c => ({ key: c.descriptionKey, literal: c.description })))
+		.description(translatedTextWithValue<CheckboxInterfaces['config']['resolved']>(c => ({ key: c.descriptionKey, literal: c.description })))
 		.look({ compute: ({ config }) => ({ descriptionTone: config.descriptionTone, meta: config.meta, mono: config.mono, touch: config.touch }) })
 		.theme(themeProperty()),
 	)
@@ -3977,9 +4072,19 @@ export interface SelectInterfaces {
 			value?: string | number | ReadonlyArray<string | number>
 			/** Locale key of the text the trigger shows (the lowered `$i18n` binding of `value`). */
 			valueKey?: string
+			/** Interpolated into a translated label, help or placeholder as `{value}`, `{value2}` and `{value3}` (`value` is the chosen value, so these are named `argument`). */
+			argument?: string | number
+			argument2?: string | number
+			argument3?: string | number
 			invalid?: boolean
 			disabled?: boolean
 			open?: boolean
+			/** The open list starts with a Find field. */
+			searchable?: boolean
+			/** The Find field's text at the start (the initial value of the `search` state). */
+			search?: string
+			searchPlaceholder?: string
+			searchPlaceholderKey?: string
 		}) | null
 		resolved: {
 			label: string
@@ -3993,9 +4098,14 @@ export interface SelectInterfaces {
 			multiple: boolean
 			value: string
 			valueKey: string
+			args: InterpolationArgs
 			invalid: boolean
 			disabled: boolean
 			open: boolean
+			searchable: boolean
+			search: string
+			searchPlaceholder: string
+			searchPlaceholderKey: string | null
 		}
 	}
 	slots: 'options'
@@ -4005,9 +4115,16 @@ export interface SelectInterfaces {
 		/** A Locale key: while set, the trigger shows its translation instead of `value`. */
 		valueKey: string
 		invalid: boolean
+		/** The text of the Find field. */
+		search: string
 	}
 	events: { toggle: readonly [] }
 	properties: {
+		valueText: string
+		value2Text: string
+		value3Text: string
+		searchPlaceholderResult: TranslationResult
+		searchPlaceholder: string
 		valueResult: TranslationResult
 		value: string
 		labelResult: TranslationResult
@@ -4016,16 +4133,16 @@ export interface SelectInterfaces {
 		help: string
 		placeholderResult: TranslationResult
 		placeholder: string
-		look: { required: boolean; multiple: boolean; disabled: boolean; hideLabel: boolean }
+		look: { required: boolean; multiple: boolean; disabled: boolean; hideLabel: boolean; searchable: boolean }
 		theme: string
 	}
 }
 
 export const selectPlugin = createWidgetPlugin('Select')
-	.description('Select trigger with a translatable label, help and placeholder, the chosen value as literal text (a multiple select joins its values with a comma and a space), required, invalid and disabled flags, and an author-writable `open` state that shows its SelectOption children as a listbox panel. The trigger fires `toggle`.')
+	.description('Select trigger with a translatable label, help and placeholder (each may interpolate {value}, {value2} and {value3} from `argument`, `argument2` and `argument3`), an optional Find field (`searchable`, whose typed text is the `search` state), the chosen value as literal text (a multiple select joins its values with a comma and a space), required, invalid and disabled flags, and an author-writable `open` state that shows its SelectOption children as a listbox panel. The trigger fires `toggle`.')
 	.interfaces<SelectInterfaces>()
 	.config({
-		description: 'Select configuration. `label`, `help` and `placeholder` accept `$i18n` bindings (lowered to `labelKey`, `helpKey`, `placeholderKey`). `hideLabel` keeps the label for assistive technology only. `value` is the chosen value as shown: a literal string (or a list of strings for `multiple`), or an `$i18n` binding (lowered to `valueKey`) so the chosen label is translated. A Variant that sets the `valueKey` state to a Locale key localizes the chosen label too.',
+		description: 'Select configuration. `label`, `help` and `placeholder` accept `$i18n` bindings (lowered to `labelKey`, `helpKey`, `placeholderKey`). `hideLabel` keeps the label for assistive technology only. `value` is the chosen value as shown: a literal string (or a list of strings for `multiple`), or an `$i18n` binding (lowered to `valueKey`) so the chosen label is translated. A Variant that sets the `valueKey` state to a Locale key localizes the chosen label too. `{value}`, `{value2}` and `{value3}` in the label, help or placeholder interpolate `argument`, `argument2` and `argument3`. `searchable` puts a Find field (`searchPlaceholder` names it) above the options of the open list; `search` is its text at the start and the initial value of the `search` state.',
 		schema: configSchema({
 			label: { type: 'string' }, labelKey: { type: 'string' },
 			hideLabel: { type: 'boolean' },
@@ -4035,9 +4152,15 @@ export const selectPlugin = createWidgetPlugin('Select')
 			multiple: { type: 'boolean' },
 			value: { type: ['string', 'number', 'array'], items: { type: ['string', 'number'] } },
 			valueKey: { type: 'string' },
+			argument: { type: ['string', 'number'] },
+			argument2: { type: ['string', 'number'] },
+			argument3: { type: ['string', 'number'] },
 			invalid: { type: 'boolean' },
 			disabled: { type: 'boolean' },
 			open: { type: 'boolean' },
+			searchable: { type: 'boolean' },
+			search: { type: 'string' },
+			searchPlaceholder: { type: 'string' }, searchPlaceholderKey: { type: 'string' },
 		}),
 		validate: (c): c is SelectInterfaces['config']['raw'] => isConfigOrOmitted(c),
 		resolve: raw => ({
@@ -4052,9 +4175,14 @@ export const selectPlugin = createWidgetPlugin('Select')
 			multiple: Boolean(raw?.multiple),
 			value: selectedText(raw?.value),
 			valueKey: stringOr(raw?.valueKey, ''),
+			args: interpolationArgs({ value: raw?.argument, value2: raw?.argument2, value3: raw?.argument3 }),
 			invalid: Boolean(raw?.invalid),
 			disabled: Boolean(raw?.disabled),
 			open: Boolean(raw?.open),
+			searchable: Boolean(raw?.searchable),
+			search: stringOr(raw?.search, ''),
+			searchPlaceholder: stringOr(raw?.searchPlaceholder, ''),
+			searchPlaceholderKey: optionalString(raw?.searchPlaceholderKey),
 		}),
 	})
 	.slots({ options: { description: 'SelectOption widgets, shown as the listbox panel while `open`' } })
@@ -4062,7 +4190,8 @@ export const selectPlugin = createWidgetPlugin('Select')
 		.open({ authorWritable: true, validate: isBoolean, default: ({ config }) => config.open })
 		.value({ authorWritable: true, validate: (v): v is string => typeof v === 'string', default: ({ config }) => config.value })
 		.valueKey({ authorWritable: true, validate: (v): v is string => typeof v === 'string', default: ({ config }) => config.valueKey })
-		.invalid({ authorWritable: true, validate: isBoolean, default: ({ config }) => config.invalid }))
+		.invalid({ authorWritable: true, validate: isBoolean, default: ({ config }) => config.invalid })
+		.search({ authorWritable: true, validate: (v): v is string => typeof v === 'string', default: ({ config }) => config.search }))
 	.properties(p => p
 		.valueResult({
 			valueContract: TRANSLATION_RESULT,
@@ -4074,13 +4203,18 @@ export const selectPlugin = createWidgetPlugin('Select')
 			registerDeps: ({ dep }) => ({ result: dep.self.properties.get('valueResult') }),
 			compute: ({ deps }) => textOfResult(deps.result()),
 		})
-		.labelResult(translatedResult<SelectInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
-		.label(translatedText<SelectInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
-		.helpResult(translatedResult<SelectInterfaces['config']['resolved']>(c => ({ key: c.helpKey, literal: c.help })))
-		.help(translatedText<SelectInterfaces['config']['resolved']>(c => ({ key: c.helpKey, literal: c.help })))
-		.placeholderResult(translatedResult<SelectInterfaces['config']['resolved']>(c => ({ key: c.placeholderKey, literal: c.placeholder })))
-		.placeholder(translatedText<SelectInterfaces['config']['resolved']>(c => ({ key: c.placeholderKey, literal: c.placeholder })))
-		.look({ compute: ({ config }) => ({ required: config.required, multiple: config.multiple, disabled: config.disabled, hideLabel: config.hideLabel }) })
+		.valueText({ valueContract: STRING, compute: ({ config }) => config.args.value })
+		.value2Text({ valueContract: STRING, compute: ({ config }) => config.args.value2 })
+		.value3Text({ valueContract: STRING, compute: ({ config }) => config.args.value3 })
+		.labelResult(translatedResultWithArgs<SelectInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label }), c => c.args))
+		.label(translatedTextWithArgs<SelectInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label }), c => c.args))
+		.helpResult(translatedResultWithArgs<SelectInterfaces['config']['resolved']>(c => ({ key: c.helpKey, literal: c.help }), c => c.args))
+		.help(translatedTextWithArgs<SelectInterfaces['config']['resolved']>(c => ({ key: c.helpKey, literal: c.help }), c => c.args))
+		.placeholderResult(translatedResultWithArgs<SelectInterfaces['config']['resolved']>(c => ({ key: c.placeholderKey, literal: c.placeholder }), c => c.args))
+		.placeholder(translatedTextWithArgs<SelectInterfaces['config']['resolved']>(c => ({ key: c.placeholderKey, literal: c.placeholder }), c => c.args))
+		.searchPlaceholderResult(translatedResult<SelectInterfaces['config']['resolved']>(c => ({ key: c.searchPlaceholderKey, literal: c.searchPlaceholder })))
+		.searchPlaceholder(translatedText<SelectInterfaces['config']['resolved']>(c => ({ key: c.searchPlaceholderKey, literal: c.searchPlaceholder })))
+		.look({ compute: ({ config }) => ({ required: config.required, multiple: config.multiple, disabled: config.disabled, hideLabel: config.hideLabel, searchable: config.searchable }) })
 		.theme(themeProperty()),
 	)
 	.events(events => events.toggle({ description: 'Fired when the user presses the trigger to open or close the panel' }))
@@ -4107,6 +4241,12 @@ export const SelectRenderer = defineComponent({
 				invalid: Boolean(state.invalid.value),
 				disabled: Boolean(look?.disabled),
 				open: Boolean(state.open.value),
+				searchable: Boolean(look?.searchable),
+				search: state.search.value ?? '',
+				searchPlaceholder: props.searchPlaceholder.value || undefined,
+				'onUpdate:search': (value: string) => {
+					state.search.value = value
+				},
 				class: ['uiux-ref-scope', props.theme.value],
 				onToggle: () => {
 					if (look?.disabled) return
@@ -4120,12 +4260,15 @@ export const SelectRenderer = defineComponent({
 
 export interface SelectOptionInterfaces {
 	config: {
-		raw: ({ label?: string; labelKey?: string; description?: string; descriptionKey?: string; mono?: boolean; selected?: boolean; disabled?: boolean }) | null
-		resolved: { label: string; labelKey: string | null; description: string; descriptionKey: string | null; mono: boolean; selected: boolean; disabled: boolean }
+		raw: ({ label?: string; labelKey?: string; description?: string; descriptionKey?: string; value?: string | number; value2?: string | number; value3?: string | number; mono?: boolean; selected?: boolean; disabled?: boolean }) | null
+		resolved: InterpolationArgs & { label: string; labelKey: string | null; description: string; descriptionKey: string | null; mono: boolean; selected: boolean; disabled: boolean }
 	}
 	state: { selected: boolean }
 	events: { click: readonly [] }
 	properties: {
+		valueText: string
+		value2Text: string
+		value3Text: string
 		labelResult: TranslationResult
 		label: string
 		descriptionResult: TranslationResult
@@ -4137,13 +4280,16 @@ export interface SelectOptionInterfaces {
 }
 
 export const selectOptionPlugin = createWidgetPlugin('SelectOption')
-	.description('One option of a Select listbox: a translatable label (optionally mono, as an Event name is) with a translatable description line under it, a check while `selected`, and a `disabled` flag. A press fires `click`; the author-writable `selected` state drives Variants.')
+	.description('One option of a Select listbox: a translatable label (optionally mono, as an Event name is) with a translatable description line under it (both may interpolate {value}, {value2} and {value3}), a check while `selected`, and a `disabled` flag. A press fires `click`; the author-writable `selected` state drives Variants.')
 	.interfaces<SelectOptionInterfaces>()
 	.config({
-		description: 'SelectOption configuration. `label` and `description` accept `$i18n` bindings (lowered to `labelKey`, `descriptionKey`). `mono` sets the label in mono text.',
+		description: 'SelectOption configuration. `label` and `description` accept `$i18n` bindings (lowered to `labelKey`, `descriptionKey`); `{value}`, `{value2}` and `{value3}` interpolate `value`, `value2` and `value3`. `mono` sets the label in mono text.',
 		schema: configSchema({
 			label: { type: 'string' }, labelKey: { type: 'string' },
 			description: { type: 'string' }, descriptionKey: { type: 'string' },
+			value: { type: ['string', 'number'] },
+			value2: { type: ['string', 'number'] },
+			value3: { type: ['string', 'number'] },
 			mono: { type: 'boolean' },
 			selected: { type: 'boolean' },
 			disabled: { type: 'boolean' },
@@ -4154,6 +4300,7 @@ export const selectOptionPlugin = createWidgetPlugin('SelectOption')
 			labelKey: optionalString(raw?.labelKey),
 			description: stringOr(raw?.description, ''),
 			descriptionKey: optionalString(raw?.descriptionKey),
+			...interpolationArgs(raw),
 			mono: Boolean(raw?.mono),
 			selected: Boolean(raw?.selected),
 			disabled: Boolean(raw?.disabled),
@@ -4161,10 +4308,13 @@ export const selectOptionPlugin = createWidgetPlugin('SelectOption')
 	})
 	.state(state => state.selected({ authorWritable: true, validate: isBoolean, default: ({ config }) => config.selected }))
 	.properties(p => p
-		.labelResult(translatedResult<SelectOptionInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
-		.label(translatedText<SelectOptionInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
-		.descriptionResult(translatedResult<SelectOptionInterfaces['config']['resolved']>(c => ({ key: c.descriptionKey, literal: c.description })))
-		.description(translatedText<SelectOptionInterfaces['config']['resolved']>(c => ({ key: c.descriptionKey, literal: c.description })))
+		.valueText({ valueContract: STRING, compute: ({ config }) => config.value })
+		.value2Text({ valueContract: STRING, compute: ({ config }) => config.value2 })
+		.value3Text({ valueContract: STRING, compute: ({ config }) => config.value3 })
+		.labelResult(translatedResultWithValue<SelectOptionInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
+		.label(translatedTextWithValue<SelectOptionInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
+		.descriptionResult(translatedResultWithValue<SelectOptionInterfaces['config']['resolved']>(c => ({ key: c.descriptionKey, literal: c.description })))
+		.description(translatedTextWithValue<SelectOptionInterfaces['config']['resolved']>(c => ({ key: c.descriptionKey, literal: c.description })))
 		.mono({ compute: ({ config }) => config.mono })
 		.disabled({ compute: ({ config }) => config.disabled })
 		.theme(themeProperty()),
@@ -4294,10 +4444,13 @@ export const DisclosureRenderer = defineComponent({
 // ---------------------------------------------------------------------------
 export interface CodeBlockInterfaces {
 	config: {
-		raw: ({ code?: string; maxHeight?: number | string; wrap?: boolean; label?: string; labelKey?: string }) | null
-		resolved: { code: string; maxHeight: number | string | undefined; wrap: boolean; label: string; labelKey: string | null }
+		raw: ({ code?: string; maxHeight?: number | string; wrap?: boolean; label?: string; labelKey?: string; value?: string | number; value2?: string | number; value3?: string | number }) | null
+		resolved: InterpolationArgs & { code: string; maxHeight: number | string | undefined; wrap: boolean; label: string; labelKey: string | null }
 	}
 	properties: {
+		valueText: string
+		value2Text: string
+		value3Text: string
 		labelResult: TranslationResult
 		label: string
 		look: { code: string; maxHeight: number | string | undefined; wrap: boolean }
@@ -4306,15 +4459,18 @@ export interface CodeBlockInterfaces {
 }
 
 export const codeBlockPlugin = createWidgetPlugin('CodeBlock')
-	.description('Literal text in the mono face (JSON, a diff, a log), shown exactly as authored and never translated. A long line scrolls sideways or wraps; `maxHeight` bounds the block, which then scrolls and is focusable. With a `label` it is a named region.')
+	.description('Literal text in the mono face (JSON, a diff, a log), shown exactly as authored and never translated. A long line scrolls sideways or wraps; `maxHeight` bounds the block, which then scrolls and is focusable. With a `label` (which may interpolate {value}, {value2} and {value3}) it is a named region.')
 	.interfaces<CodeBlockInterfaces>()
 	.config({
-		description: 'CodeBlock configuration. `code` is literal. `maxHeight` is px as a number or any CSS length. `label` accepts an `$i18n` binding (lowered to `labelKey`).',
+		description: 'CodeBlock configuration. `code` is literal. `maxHeight` is px as a number or any CSS length. `label` accepts an `$i18n` binding (lowered to `labelKey`); `{value}`, `{value2}` and `{value3}` in it interpolate `value`, `value2` and `value3`.',
 		schema: configSchema({
 			code: { type: 'string' },
 			maxHeight: { type: ['number', 'string'] },
 			wrap: { type: 'boolean' },
 			label: { type: 'string' }, labelKey: { type: 'string' },
+			value: { type: ['string', 'number'] },
+			value2: { type: ['string', 'number'] },
+			value3: { type: ['string', 'number'] },
 		}),
 		validate: (c): c is CodeBlockInterfaces['config']['raw'] => isConfigOrOmitted(c),
 		resolve: raw => ({
@@ -4323,11 +4479,15 @@ export const codeBlockPlugin = createWidgetPlugin('CodeBlock')
 			wrap: Boolean(raw?.wrap),
 			label: stringOr(raw?.label, ''),
 			labelKey: optionalString(raw?.labelKey),
+			...interpolationArgs(raw),
 		}),
 	})
 	.properties(p => p
-		.labelResult(translatedResult<CodeBlockInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
-		.label(translatedText<CodeBlockInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
+		.valueText({ valueContract: STRING, compute: ({ config }) => config.value })
+		.value2Text({ valueContract: STRING, compute: ({ config }) => config.value2 })
+		.value3Text({ valueContract: STRING, compute: ({ config }) => config.value3 })
+		.labelResult(translatedResultWithValue<CodeBlockInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
+		.label(translatedTextWithValue<CodeBlockInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
 		.look({ compute: ({ config }) => ({ code: config.code, maxHeight: config.maxHeight, wrap: config.wrap }) })
 		.theme(themeProperty()),
 	)
@@ -5267,6 +5427,391 @@ export const ImageRenderer = defineComponent({
 })
 
 // ---------------------------------------------------------------------------
+// 41. Menu & MenuItem — a trigger and the popup menu it opens (Adapter only: an overlay, so no Kit component)
+// ---------------------------------------------------------------------------
+type MenuPlacement = 'bottom-start' | 'bottom-end' | 'top-start' | 'top-end' | 'right-start' | 'left-start'
+const MENU_PLACEMENTS: readonly MenuPlacement[] = ['bottom-start', 'bottom-end', 'top-start', 'top-end', 'right-start', 'left-start']
+
+/** The first control inside `root` that takes the keyboard: what a Menu or Tooltip trigger Widget renders. */
+function firstFocusable(root: Element | null | undefined): HTMLElement | null {
+	return root?.querySelector<HTMLElement>('button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])') ?? null
+}
+
+export interface MenuInterfaces {
+	config: {
+		raw: ({ label?: string; labelKey?: string; value?: string | number; value2?: string | number; value3?: string | number; placement?: MenuPlacement; width?: number | string; open?: boolean; visible?: boolean }) | null
+		resolved: InterpolationArgs & { label: string; labelKey: string | null; placement: MenuPlacement; width: string; open: boolean; visible: boolean }
+	}
+	slots: 'trigger' | 'items'
+	state: { open: boolean; visible: boolean }
+	events: { toggle: readonly [] }
+	properties: {
+		valueText: string
+		value2Text: string
+		value3Text: string
+		labelResult: TranslationResult
+		label: string
+		look: { placement: MenuPlacement; width: string }
+		theme: string
+	}
+}
+
+export const menuPlugin = createWidgetPlugin('Menu')
+	.description('A trigger and the popup menu it opens: the `trigger` slot holds the control (usually a Button), the `items` slot holds MenuItem Widgets and Dividers (a separator). The menu is a named `menu` (`label`, which may interpolate {value}, {value2} and {value3}); the trigger gets `aria-haspopup` and `aria-expanded`. The author-writable `open` state shows the menu, so a Variant can draw it open; pressing the trigger toggles it, Escape and a press on an item close it, and the arrow keys move between items.')
+	.interfaces<MenuInterfaces>()
+	.config({
+		description: 'Menu configuration. `label` names the menu for assistive technology and accepts an `$i18n` binding (lowered to `labelKey`); `{value}`, `{value2}` and `{value3}` interpolate `value`, `value2` and `value3`. `placement` is where the menu opens against the trigger (`bottom-start` by default). `width` is the menu width (a number of px or a CSS length; at least 200px by default). `open` is the initial value of the `open` state; `visible` of the `visible` state.',
+		schema: configSchema({
+			label: { type: 'string' }, labelKey: { type: 'string' },
+			value: { type: ['string', 'number'] },
+			value2: { type: ['string', 'number'] },
+			value3: { type: ['string', 'number'] },
+			placement: { enum: [...MENU_PLACEMENTS] },
+			width: { type: ['number', 'string'] },
+			open: { type: 'boolean' },
+			visible: { type: 'boolean' },
+		}),
+		validate: (c): c is MenuInterfaces['config']['raw'] => isConfigOrOmitted(c),
+		resolve: raw => ({
+			label: stringOr(raw?.label, ''),
+			labelKey: optionalString(raw?.labelKey),
+			...interpolationArgs(raw),
+			placement: oneOf(raw?.placement, MENU_PLACEMENTS, 'bottom-start'),
+			width: px(lengthOr(raw?.width), ''),
+			open: Boolean(raw?.open),
+			visible: raw?.visible === undefined ? true : Boolean(raw.visible),
+		}),
+	})
+	.slots({
+		trigger: { description: 'The control that opens the menu, usually a Button' },
+		items: { description: 'MenuItem Widgets, and Dividers as separators' },
+	})
+	.state(state => state
+		.open({ authorWritable: true, validate: isBoolean, default: ({ config }) => config.open })
+		.visible({ ...visibleState, default: ({ config }) => config.visible }))
+	.properties(p => p
+		.valueText({ valueContract: STRING, compute: ({ config }) => config.value })
+		.value2Text({ valueContract: STRING, compute: ({ config }) => config.value2 })
+		.value3Text({ valueContract: STRING, compute: ({ config }) => config.value3 })
+		.labelResult(translatedResultWithValue<MenuInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
+		.label(translatedTextWithValue<MenuInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
+		.look({ compute: ({ config }) => ({ placement: config.placement, width: config.width }) })
+		.theme(themeProperty()),
+	)
+	.events(events => events.toggle({ description: 'Fired when the menu opens or closes by the user (the trigger, Escape, an item or a press outside)' }))
+	.done()
+
+export const MenuRenderer = defineComponent({
+	name: 'MenuRenderer',
+	setup() {
+		const { widgetId, WidgetSlot, useState, useProperties, emit } = useWidget(menuPlugin)
+		const state = useState()
+		const props = useProperties()
+		const root = ref<HTMLElement | null>(null)
+
+		const trigger = (): HTMLElement | null => firstFocusable(root.value?.querySelector('.uiux-ref-menu-trigger'))
+		const items = (): HTMLElement[] => Array.from(root.value?.querySelectorAll<HTMLElement>('.uiux-ref-menu-panel [role^="menuitem"]:not([aria-disabled="true"])') ?? [])
+		/** The trigger Widget renders its own control; the menu tells assistive technology what it opens. */
+		const annotate = (): void => {
+			const control = trigger()
+			if (!control) return
+			control.setAttribute('aria-haspopup', 'menu')
+			control.setAttribute('aria-expanded', state.open.value ? 'true' : 'false')
+		}
+		const toggle = (): void => {
+			state.open.value = !state.open.value
+			emit.toggle()
+		}
+		const close = (returnFocus: boolean): void => {
+			if (!state.open.value) return
+			state.open.value = false
+			emit.toggle()
+			if (returnFocus) trigger()?.focus()
+		}
+		const focusItem = (target: 'first' | 'last' | 1 | -1): void => {
+			const list = items()
+			if (list.length === 0) return
+			const current = list.indexOf(document.activeElement as HTMLElement)
+			const next = target === 'first' ? 0 : target === 'last' ? list.length - 1 : (current + target + list.length) % list.length
+			list[next]?.focus()
+		}
+		const onDocumentPointerDown = (event: Event): void => {
+			if (state.open.value && root.value && !root.value.contains(event.target as Node)) close(false)
+		}
+		onMounted(() => {
+			annotate()
+			document.addEventListener('pointerdown', onDocumentPointerDown)
+		})
+		onUpdated(annotate)
+		onBeforeUnmount(() => document.removeEventListener('pointerdown', onDocumentPointerDown))
+
+		const onKeydown = (event: KeyboardEvent): void => {
+			const target = event.target as Element
+			if (event.key === 'Escape' && state.open.value) {
+				event.preventDefault()
+				close(true)
+				return
+			}
+			const inTrigger = Boolean(target.closest('.uiux-ref-menu-trigger'))
+			if (inTrigger && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
+				event.preventDefault()
+				if (!state.open.value) toggle()
+				void nextTick(() => focusItem(event.key === 'ArrowDown' ? 'first' : 'last'))
+				return
+			}
+			if (!target.closest('.uiux-ref-menu-panel')) return
+			if (event.key === 'ArrowDown') focusItem(1)
+			else if (event.key === 'ArrowUp') focusItem(-1)
+			else if (event.key === 'Home') focusItem('first')
+			else if (event.key === 'End') focusItem('last')
+			else if (event.key === 'Tab') close(false)
+			else return
+			if (event.key !== 'Tab') event.preventDefault()
+		}
+		const onPanelClick = (event: MouseEvent): void => {
+			const item = (event.target as Element).closest('[role^="menuitem"]')
+			if (item && item.getAttribute('aria-disabled') !== 'true') close(true)
+		}
+
+		return (): VNode => {
+			const look = props.look.value
+			return h('div', {
+				ref: root,
+				[WIDGET_ID_ATTRIBUTE]: widgetId,
+				class: ['uiux-ref-scope', 'uiux-ref-menu', props.theme.value, state.visible.value ? '' : 'uiux-ref-hidden'],
+				onKeydown,
+			}, [
+				h('div', { class: 'uiux-ref-menu-trigger', onClick: toggle }, [h(WidgetSlot, { name: 'trigger' })]),
+				state.open.value
+					? h('div', {
+							class: ['uiux-ref-menu-panel', `placement-${look?.placement ?? 'bottom-start'}`],
+							role: 'menu',
+							'aria-label': props.label.value || undefined,
+							style: look?.width ? { width: look.width } : undefined,
+							onClick: onPanelClick,
+						}, [h(WidgetSlot, { name: 'items' })])
+					: null,
+			])
+		}
+	},
+})
+
+export interface MenuItemInterfaces {
+	config: {
+		raw: ({ label?: string; labelKey?: string; value?: string | number; value2?: string | number; value3?: string | number; icon?: string; kbd?: string; danger?: boolean; disabled?: boolean; checked?: boolean; visible?: boolean }) | null
+		resolved: InterpolationArgs & { label: string; labelKey: string | null; icon: string; kbd: string; danger: boolean; disabled: boolean; checked: boolean | null; visible: boolean }
+	}
+	/** `checked` is `null` for an item that is not a check item. */
+	state: { disabled: boolean; visible: boolean; checked: boolean | null }
+	events: { click: readonly [] }
+	properties: {
+		valueText: string
+		value2Text: string
+		value3Text: string
+		labelResult: TranslationResult
+		label: string
+		look: { icon: string; kbd: string; danger: boolean; touch: boolean }
+		theme: string
+	}
+}
+
+export const menuItemPlugin = createWidgetPlugin('MenuItem')
+	.description('One item of a Menu: a translatable label (which may interpolate {value}, {value2} and {value3}), a leading Lucide icon, a shortcut hint, a `danger` look for a destructive action, and author-writable `disabled`, `visible` and `checked` states (a `checked` item is a check item with `aria-checked`, and shows a check). A press fires `click` and closes the menu; Enter and Space press it.')
+	.interfaces<MenuItemInterfaces>()
+	.config({
+		description: 'MenuItem configuration. `label` accepts an `$i18n` binding (lowered to `labelKey`); `{value}`, `{value2}` and `{value3}` interpolate `value`, `value2` and `value3`. `icon` takes a Lucide name and `kbd` a shortcut such as `⌘⌫`. `danger` marks a destructive item. `checked` makes the item a check item and is the initial value of the `checked` state (leave it out for a plain item).',
+		schema: configSchema({
+			label: { type: 'string' }, labelKey: { type: 'string' },
+			value: { type: ['string', 'number'] },
+			value2: { type: ['string', 'number'] },
+			value3: { type: ['string', 'number'] },
+			icon: { type: 'string' },
+			kbd: { type: 'string' },
+			danger: { type: 'boolean' },
+			disabled: { type: 'boolean' },
+			checked: { type: 'boolean' },
+			visible: { type: 'boolean' },
+		}),
+		validate: (c): c is MenuItemInterfaces['config']['raw'] => isConfigOrOmitted(c),
+		resolve: raw => ({
+			label: stringOr(raw?.label, ''),
+			labelKey: optionalString(raw?.labelKey),
+			...interpolationArgs(raw),
+			icon: stringOr(raw?.icon, ''),
+			kbd: stringOr(raw?.kbd, ''),
+			danger: Boolean(raw?.danger),
+			disabled: Boolean(raw?.disabled),
+			checked: raw?.checked === undefined ? null : Boolean(raw.checked),
+			visible: raw?.visible === undefined ? true : Boolean(raw.visible),
+		}),
+	})
+	.state(state => state
+		.disabled({ authorWritable: true, validate: isBoolean, default: ({ config }) => config.disabled })
+		.visible({ ...visibleState, default: ({ config }) => config.visible })
+		.checked({ authorWritable: true, validate: isNullableBoolean, default: ({ config }) => config.checked }))
+	.properties(p => p
+		.valueText({ valueContract: STRING, compute: ({ config }) => config.value })
+		.value2Text({ valueContract: STRING, compute: ({ config }) => config.value2 })
+		.value3Text({ valueContract: STRING, compute: ({ config }) => config.value3 })
+		.labelResult(translatedResultWithValue<MenuItemInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
+		.label(translatedTextWithValue<MenuItemInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
+		.look({
+			registerDeps: viewportDeps,
+			compute: ({ config, deps }) => ({ icon: config.icon, kbd: config.kbd, danger: config.danger, touch: isTouchTier(tierOf(readViewport(deps.viewport()))) }),
+		})
+		.theme(themeProperty()),
+	)
+	.events(events => events.click({ description: 'Fired when an enabled item is pressed' }))
+	.done()
+
+export const MenuItemRenderer = defineComponent({
+	name: 'MenuItemRenderer',
+	setup() {
+		const { widgetId, useState, useProperties, emit } = useWidget(menuItemPlugin)
+		const state = useState()
+		const props = useProperties()
+		return (): VNode => {
+			const look = props.look.value
+			const checked = state.checked.value
+			return h('div', {
+				[WIDGET_ID_ATTRIBUTE]: widgetId,
+				role: checked === null || checked === undefined ? 'menuitem' : 'menuitemcheckbox',
+				'aria-checked': checked === null || checked === undefined ? undefined : String(checked),
+				'aria-disabled': state.disabled.value ? 'true' : undefined,
+				tabindex: -1,
+				class: ['uiux-ref-scope', 'uiux-ref-menu-item', props.theme.value, look?.danger ? 'is-danger' : '', look?.touch ? 'is-touch' : '', state.disabled.value ? 'is-disabled' : '', state.visible.value ? '' : 'uiux-ref-hidden'],
+				onClick: () => {
+					if (!state.disabled.value) emit.click()
+				},
+				onKeydown: (event: KeyboardEvent) => {
+					if ((event.key === 'Enter' || event.key === ' ') && event.target === event.currentTarget) {
+						event.preventDefault()
+						;(event.currentTarget as HTMLElement).click()
+					}
+				},
+			}, [
+				look?.icon ? h('span', { class: 'uiux-ref-menu-item-icon' }, [iconNode(look.icon, 16)]) : null,
+				h('span', { class: 'uiux-ref-menu-item-label' }, props.label.value ?? ''),
+				look?.kbd ? h('span', { class: 'uiux-ref-menu-item-kbd' }, [kbdNode(look.kbd)]) : null,
+				checked ? h('span', { class: 'uiux-ref-menu-item-check' }, [iconNode('check', 16)]) : null,
+			])
+		}
+	},
+})
+
+// ---------------------------------------------------------------------------
+// 42. Tooltip — a short hint for the Widget in its `content` slot (Adapter only: an overlay)
+// ---------------------------------------------------------------------------
+type TooltipPlacement = 'top' | 'bottom' | 'left' | 'right'
+const TOOLTIP_PLACEMENTS: readonly TooltipPlacement[] = ['top', 'bottom', 'left', 'right']
+
+export interface TooltipInterfaces {
+	config: {
+		raw: ({ text?: string; textKey?: string; value?: string | number; value2?: string | number; value3?: string | number; placement?: TooltipPlacement; focusable?: boolean; open?: boolean; visible?: boolean }) | null
+		resolved: InterpolationArgs & { text: string; textKey: string | null; placement: TooltipPlacement; focusable: boolean; open: boolean; visible: boolean }
+	}
+	slots: 'content'
+	state: { open: boolean; visible: boolean }
+	properties: {
+		valueText: string
+		value2Text: string
+		value3Text: string
+		textResult: TranslationResult
+		text: string
+		look: { placement: TooltipPlacement; focusable: boolean }
+		theme: string
+	}
+}
+
+export const tooltipPlugin = createWidgetPlugin('Tooltip')
+	.description('A short text hint for the Widget in its `content` slot: it shows while the pointer is over the content or the keyboard focus is inside it (Escape hides it), and always while the author-writable `open` state is true, so a Variant can draw it shown. The text (`text`, which may interpolate {value}, {value2} and {value3}) is the `tooltip` that describes the first control of the content (`aria-describedby`).')
+	.interfaces<TooltipInterfaces>()
+	.config({
+		description: 'Tooltip configuration. `text` accepts an `$i18n` binding (lowered to `textKey`); `{value}`, `{value2}` and `{value3}` interpolate `value`, `value2` and `value3`. `placement` is the side of the content the hint sits on (`top` by default). `focusable` makes the content itself reachable by keyboard (a plain Text or Badge that has no control of its own), so the hint can describe it. `open` is the initial value of the `open` state (shown); `visible` of the `visible` state.',
+		schema: configSchema({
+			text: { type: 'string' }, textKey: { type: 'string' },
+			value: { type: ['string', 'number'] },
+			value2: { type: ['string', 'number'] },
+			value3: { type: ['string', 'number'] },
+			placement: { enum: [...TOOLTIP_PLACEMENTS] },
+			focusable: { type: 'boolean' },
+			open: { type: 'boolean' },
+			visible: { type: 'boolean' },
+		}),
+		validate: (c): c is TooltipInterfaces['config']['raw'] => isConfigOrOmitted(c),
+		resolve: raw => ({
+			text: stringOr(raw?.text, ''),
+			textKey: optionalString(raw?.textKey),
+			...interpolationArgs(raw),
+			placement: oneOf(raw?.placement, TOOLTIP_PLACEMENTS, 'top'),
+			focusable: Boolean(raw?.focusable),
+			open: Boolean(raw?.open),
+			visible: raw?.visible === undefined ? true : Boolean(raw.visible),
+		}),
+	})
+	.slots({ content: { description: 'The Widget the hint is about (a Button, an icon, a badge)' } })
+	.state(state => state
+		.open({ authorWritable: true, validate: isBoolean, default: ({ config }) => config.open })
+		.visible({ ...visibleState, default: ({ config }) => config.visible }))
+	.properties(p => p
+		.valueText({ valueContract: STRING, compute: ({ config }) => config.value })
+		.value2Text({ valueContract: STRING, compute: ({ config }) => config.value2 })
+		.value3Text({ valueContract: STRING, compute: ({ config }) => config.value3 })
+		.textResult(translatedResultWithValue<TooltipInterfaces['config']['resolved']>(c => ({ key: c.textKey, literal: c.text })))
+		.text(translatedTextWithValue<TooltipInterfaces['config']['resolved']>(c => ({ key: c.textKey, literal: c.text })))
+		.look({ compute: ({ config }) => ({ placement: config.placement, focusable: config.focusable }) })
+		.theme(themeProperty()),
+	)
+	.done()
+
+export const TooltipRenderer = defineComponent({
+	name: 'TooltipRenderer',
+	setup() {
+		const { widgetId, WidgetSlot, useState, useProperties } = useWidget(tooltipPlugin)
+		const state = useState()
+		const props = useProperties()
+		const root = ref<HTMLElement | null>(null)
+		const hover = ref(false)
+		const focus = ref(false)
+		const tipId = `${widgetId}-tip`
+		const describe = (): void => {
+			const target = root.value?.querySelector<HTMLElement>('.uiux-ref-tooltip-target')
+			// A `focusable` target is the control itself; otherwise the hint describes the first control inside it.
+			const control = target?.matches('[tabindex]:not([tabindex="-1"])') ? target : firstFocusable(target)
+			control?.setAttribute('aria-describedby', tipId)
+		}
+		onMounted(describe)
+		onUpdated(describe)
+
+		return (): VNode => {
+			const shown = Boolean(state.open.value) || hover.value || focus.value
+			return h('span', {
+				ref: root,
+				[WIDGET_ID_ATTRIBUTE]: widgetId,
+				class: ['uiux-ref-scope', 'uiux-ref-tooltip', props.theme.value, state.visible.value ? '' : 'uiux-ref-hidden'],
+				onMouseenter: () => { hover.value = true },
+				onMouseleave: () => { hover.value = false },
+				onFocusin: () => { focus.value = true },
+				onFocusout: () => { focus.value = false },
+				onKeydown: (event: KeyboardEvent) => {
+					if (event.key !== 'Escape' || !shown) return
+					hover.value = false
+					focus.value = false
+					state.open.value = false
+				},
+			}, [
+				h('span', { class: ['uiux-ref-tooltip-target', props.look.value?.focusable ? 'uiux-ref-focusable' : ''], tabindex: props.look.value?.focusable ? 0 : undefined }, [h(WidgetSlot, { name: 'content' })]),
+				h('span', {
+					id: tipId,
+					role: 'tooltip',
+					class: ['uiux-ref-tooltip-bubble', `placement-${props.look.value?.placement ?? 'top'}`, shown ? '' : 'uiux-ref-hidden'],
+				}, props.text.value ?? ''),
+			])
+		}
+	},
+})
+
+// ---------------------------------------------------------------------------
 // Canonical Adapter Manifest
 // ---------------------------------------------------------------------------
 // Each translatable field `<field>` keeps its literal key in the Config member `<field>Key`. Its Properties
@@ -5286,6 +5831,11 @@ function i18nFields(...fields: readonly string[]): AdapterWidgetCatalogEntry {
 	return { i18n: { fields: Object.fromEntries(fields.map(field => [field, i18nField(field)])) } }
 }
 
+/** {@link i18nFields} for a Widget whose translated fields interpolate `{value}`, `{value2}` and `{value3}` ({@link VALUE_PARAMS}); `plain` names fields that take no parameter. */
+function i18nFieldsWithValue(fields: readonly string[], plain: readonly string[] = []): AdapterWidgetCatalogEntry {
+	return { i18n: { fields: Object.fromEntries([...fields.map(field => [field, i18nField(field, VALUE_PARAMS)]), ...plain.map(field => [field, i18nField(field)])]) } }
+}
+
 const RENDER_CONTEXT_PARAMS = {
 	viewportId: 'contextViewportId',
 	viewport: 'contextViewport',
@@ -5300,7 +5850,7 @@ const catalogWidgets: Readonly<Record<string, AdapterWidgetCatalogEntry>> = {
 	Button: { i18n: { fields: { label: i18nField('label', VALUE_PARAMS) } } },
 	ButtonGroup: i18nFields('label'),
 	Badge: { i18n: { fields: { label: i18nField('label', { value: 'valueText', ...RENDER_CONTEXT_PARAMS }) } } },
-	TextInput: i18nFields('value', 'placeholder', 'label', 'help', 'error'),
+	TextInput: i18nFieldsWithValue(['placeholder', 'label', 'help', 'error'], ['value']),
 	NavItem: i18nFields('label', 'meta', 'badge'),
 	Divider: {},
 	Avatar: i18nFields('label'),
@@ -5322,11 +5872,11 @@ const catalogWidgets: Readonly<Record<string, AdapterWidgetCatalogEntry>> = {
 	Icon: i18nFields('label'),
 	Skeleton: i18nFields('label'),
 	ListItem: {},
-	Checkbox: i18nFields('label', 'description'),
-	Select: i18nFields('label', 'help', 'placeholder', 'value'),
-	SelectOption: i18nFields('label', 'description'),
+	Checkbox: i18nFieldsWithValue(['label', 'description']),
+	Select: i18nFieldsWithValue(['label', 'help', 'placeholder'], ['value', 'searchPlaceholder']),
+	SelectOption: i18nFieldsWithValue(['label', 'description']),
 	Disclosure: { i18n: { fields: { label: i18nField('label', VALUE_PARAMS) } } },
-	CodeBlock: i18nFields('label'),
+	CodeBlock: i18nFieldsWithValue(['label']),
 	Table: i18nFields('label'),
 	TableRow: {},
 	DiffItem: i18nFields('opLabel', 'field'),
@@ -5334,6 +5884,9 @@ const catalogWidgets: Readonly<Record<string, AdapterWidgetCatalogEntry>> = {
 	BreadcrumbItem: i18nFields('label', 'variant', 'trailing'),
 	GraphCanvas: i18nFields('label', 'entryLabel', 'endLabel', 'unreachableLabel', 'baseLabel', 'problemsLabel'),
 	Image: { ...i18nFields('alt'), assetFields: { source: { acceptedCategories: ['image'] } } },
+	Menu: i18nFieldsWithValue(['label']),
+	MenuItem: i18nFieldsWithValue(['label']),
+	Tooltip: i18nFieldsWithValue(['text']),
 }
 
 export const manifest: AdapterManifest = {
@@ -5380,6 +5933,9 @@ export const manifest: AdapterManifest = {
 		breadcrumbItemPlugin,
 		graphCanvasPlugin,
 		imagePlugin,
+		menuPlugin,
+		menuItemPlugin,
+		tooltipPlugin,
 	],
 	catalog: {
 		widgets: catalogWidgets,
@@ -5425,6 +5981,9 @@ export const manifest: AdapterManifest = {
 		{ type: 'BreadcrumbItem', component: BreadcrumbItemRenderer },
 		{ type: 'GraphCanvas', component: GraphCanvasRenderer },
 		{ type: 'Image', component: ImageRenderer },
+		{ type: 'Menu', component: MenuRenderer },
+		{ type: 'MenuItem', component: MenuItemRenderer },
+		{ type: 'Tooltip', component: TooltipRenderer },
 	],
 	providers: [],
 	// The reference CSS styles exactly the Workspace themes `light` and `dark`; UIUX diagnoses any other
