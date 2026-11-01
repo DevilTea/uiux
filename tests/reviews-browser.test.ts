@@ -127,7 +127,8 @@ describe('Reviews inbox (R8)', () => {
 			// verified or answered; a thread closed as won't do is Dismissed (retract addendum decision 11).
 			await page.locator('[data-review-tabs] [role="tab"]', { hasText: 'Resolved' }).click()
 			await poll(() => groups(page)).toEqual(['resolved'])
-			expect(new URL(page.url()).searchParams.get('status')).toBe('resolved')
+			// The tab applies to the list at once, but the query is committed by the async router.replace; wait for it.
+			await poll(() => new URL(page.url()).searchParams.get('status')).toBe('resolved')
 			expect(await rowIds(page)).toEqual([seeded.answered, DOGFOOD_THREAD])
 			await page.locator('[data-review-tabs] [role="tab"]', { hasText: 'Dismissed' }).click()
 			await poll(() => groups(page)).toEqual(['dismissed'])
