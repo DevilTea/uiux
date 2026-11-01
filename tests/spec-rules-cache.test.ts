@@ -208,6 +208,20 @@ describe('the Git work tree root cache', () => {
 })
 
 describe('the file system change signal of a Spec Tool workspace', () => {
+	/**
+	 * The file system workspace, remembering every read it starts. A read the cache gave up on keeps
+	 * running (it waits for the writer lock the test holds) and, once the lock is gone, writes reader
+	 * tokens beside `.spec/`: a test settles those reads before its directory is removed, or the
+	 * removal races them (ENOTEMPTY, issue #263).
+	 */
+	function trackedWorkspace(): { source: SpecWorkspaceSource; settle: () => Promise<void> } {
+		const reads: Promise<unknown>[] = []
+		return {
+			source: { ...fileSystemSpecWorkspace, readRules: (root) => { const read = fileSystemSpecWorkspace.readRules(root); reads.push(read); return read } },
+			settle: async () => { await Promise.allSettled(reads) },
+		}
+	}
+
 	async function workspace(): Promise<{ root: string; client: ReturnType<typeof createSpecClient>; revision: string; feature: string }> {
 		const root = await mkdtemp(join(tmpdir(), 'uiux-spec-signal-'))
 		temporary.push(root)
@@ -268,7 +282,8 @@ describe('the file system change signal of a Spec Tool workspace', () => {
 	it('sees the writer lock beside `.spec/` and serves a real workspace from the cache', async () => {
 		const { root, client, revision, feature } = await workspace()
 		expect(await fileSystemSpecWorkspace.writerActive(root)).toBe(false)
-		const cache = createSpecRulesCache(fileSystemSpecWorkspace, { writerWaitMs: 50 })
+		const tracked = trackedWorkspace()
+		const cache = createSpecRulesCache(tracked.source, { writerWaitMs: 50 })
 		const first = await cache.read(root)
 		expect(first.ok && [...first.rules.values()]).toEqual(['Rule 1 states a behavior.'])
 
@@ -289,5 +304,6 @@ describe('the file system change signal of a Spec Tool workspace', () => {
 		await client.rule.create({ expectedRevision: revision, ownerId: feature, statement: 'Rule 2 states a behavior.' })
 		const changed = await cache.read(root)
 		expect(changed.ok && [...changed.rules.values()].sort()).toEqual(['Rule 1 states a behavior.', 'Rule 2 states a behavior.'])
+		await tracked.settle()
 	})
 })

@@ -161,7 +161,10 @@ describe('Preview rounded contour approximation', () => {
 		expectProtocolValid(rectangle, result!.contour, result!.maxError)
 	})
 
-	it('keeps deterministic nonzero-origin asymmetric rounded rectangles protocol-valid', () => {
+	// 200 cases, each checked against an exact BigInt rational oracle: 0.46 s alone, 1.0 to 1.3 s with 24 busy
+	// processes on 8 cores. A CI runner with fewer cores and the whole suite running exceeded Vitest's 5 s
+	// default (issue #263); 20 s is over ten times the loaded worst case, so an endless loop still fails.
+	it('keeps deterministic nonzero-origin asymmetric rounded rectangles protocol-valid', { timeout: 20_000 }, () => {
 		let state = 0x6d2b79f5
 		const next = () => {
 			state = (Math.imul(state, 1_664_525) + 1_013_904_223) >>> 0

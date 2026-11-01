@@ -105,8 +105,13 @@ describe('Submit for review cites any Evidence kind (issue #61)', () => {
 		const threadId = await seedThread('The Locale copy changed.')
 		const page = await openSubmit(threadId)
 		try {
-			await row(page, newestRun).waitFor({ timeout: 15_000 })
-			for (const digest of [olderRun, staleTrace, passingReplay, failingReplay, staleReplay]) expect(await row(page, digest).count()).toBe(1)
+			// The modal reads the Run Checks records and the citable Evidence (traces, replays) separately, and
+			// the View's freshness after them (issue #263): wait for every listed row and the last-arriving
+			// verdict, so the counts below are asserted on the complete list, never on a part of it.
+			for (const digest of [newestRun, olderRun, staleTrace, passingReplay, failingReplay, staleReplay]) await row(page, digest).waitFor({ timeout: 15_000 })
+			// The View's current render-input digest arrives with the freshness list, so this may follow the picker by a moment.
+			await expect.poll(() => row(page, staleReplay).innerText(), { timeout: 15_000 }).toContain('IR or Variants changed after capture')
+			for (const digest of [newestRun, olderRun, staleTrace, passingReplay, failingReplay, staleReplay]) expect(await row(page, digest).count()).toBe(1)
 			expect(await row(page, otherViewTrace).count()).toBe(0)
 			expect(await page.locator('[data-submit-evidence-kind]').evaluateAll(lists => lists.map(list => list.getAttribute('data-submit-evidence-kind')))).toEqual(['checks_run', 'flow_trace', 'interaction_replay'])
 			// Nothing is selected before a change domain is chosen.
@@ -115,8 +120,6 @@ describe('Submit for review cites any Evidence kind (issue #61)', () => {
 			expect(await row(page, staleTrace).innerText()).toContain('The Flow changed after this trace.')
 			// A replay is shown as current or stale the same way.
 			expect(await row(page, passingReplay).innerText()).toContain('Current')
-			// The View's current render-input digest arrives with the freshness list, so this may follow the picker by a moment.
-			await expect.poll(() => row(page, staleReplay).innerText(), { timeout: 15_000 }).toContain('IR or Variants changed after capture')
 
 			await pickDomains(page, ['i18n (Locale messages)'])
 			// The ruling: i18n preselects the latest Run Checks record, point-in-time, never judged stale.
@@ -134,7 +137,8 @@ describe('Submit for review cites any Evidence kind (issue #61)', () => {
 		const threadId = await seedThread('The Flow and the click handling changed.')
 		const page = await openSubmit(threadId)
 		try {
-			await row(page, staleTrace).waitFor({ timeout: 15_000 })
+			for (const digest of [staleTrace, passingReplay, failingReplay, staleReplay]) await row(page, digest).waitFor({ timeout: 15_000 })
+			await expect.poll(() => row(page, staleReplay).innerText(), { timeout: 15_000 }).toContain('IR or Variants changed after capture')
 			await pickDomains(page, ['UX Flow', 'Interaction (steps, Widget Events)'])
 			await expect.poll(() => checked(page, passingReplay), { timeout: 10_000 }).toBe('true')
 			// A trace that is not current is not preselected, and a replay with a failed assertion is not either.
