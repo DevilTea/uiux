@@ -271,14 +271,27 @@ function textRunsOf<C extends InterpolationArgs & { valueCode: boolean }>(pick: 
 			const source = pick(config)
 			const translate = (key: string, params: Readonly<Record<string, string>>) => deps.t(key, params)
 			if (!config.valueCode || config.value === '') return [{ text: translateField(source.key, source.literal, translate, interpolationParams(config)).text, code: false }]
-			const marked = translateField(source.key, source.literal, translate, { ...interpolationParams(config), value: `${CODE_OPEN}${config.value}${CODE_CLOSE}` }).text
-			return marked.split(CODE_OPEN).flatMap<TextRun>((part, index) => {
-				if (index === 0) return part ? [{ text: part, code: false }] : []
-				const [code = '', rest = ''] = part.split(CODE_CLOSE)
-				return [{ text: code, code: true }, ...(rest ? [{ text: rest, code: false }] : [])]
-			})
+			return runsOfMarked(translateField(source.key, source.literal, translate, { ...interpolationParams(config), value: `${CODE_OPEN}${config.value}${CODE_CLOSE}` }).text)
 		},
 	}
+}
+
+/** The runs of a sentence whose `{value}` argument was wrapped in {@link CODE_OPEN} and {@link CODE_CLOSE}. */
+function runsOfMarked(marked: string): readonly TextRun[] {
+	return marked.split(CODE_OPEN).flatMap<TextRun>((part, index) => {
+		if (index === 0) return part ? [{ text: part, code: false }] : []
+		const [code = '', rest = ''] = part.split(CODE_CLOSE)
+		return [{ text: code, code: true }, ...(rest ? [{ text: rest, code: false }] : [])]
+	})
+}
+
+/**
+ * {@link textRunsOf} for a field whose Locale key an author-writable State may replace ({@link translateFieldWithStateKey}),
+ * with the arguments read from States: the runs of the translated text, its `{value}` as the code run with `valueCode`.
+ */
+function stateKeyRuns(source: FieldSource, stateKey: string, valueCode: boolean, translate: Translate, params: Readonly<Record<string, string>>): readonly TextRun[] {
+	if (!valueCode || params.value === undefined || params.value === '') return [{ text: translateFieldWithStateKey(source, stateKey, translate, params).text, code: false }]
+	return runsOfMarked(translateFieldWithStateKey(source, stateKey, translate, { ...params, value: `${CODE_OPEN}${params.value}${CODE_CLOSE}` }).text)
 }
 
 /** The nodes of a field's runs: text, and `<code>` for the code run. */
@@ -338,9 +351,35 @@ function translateFieldWithStateKey(source: FieldSource, stateKey: string, trans
 	return stateKey === '' ? translateField(source.key, source.literal, translate, params) : translateField(stateKey, '', translate, params)
 }
 
+/** The render-context parameters `{viewportId}`, `{viewport}`, `{locale}` and `{theme}`, from the dependencies a property registered under those names. */
+function renderContextParams(deps: Readonly<{ viewportId: () => DepResult; viewport: () => DepResult; locale: () => DepResult; theme: () => DepResult }>): Record<string, string> {
+	return { viewportId: stringFromResult(deps.viewportId()), viewport: stringFromResult(deps.viewport()), locale: stringFromResult(deps.locale()), theme: stringFromResult(deps.theme()) }
+}
+
 /** The interpolation arguments a Widget keeps as `argument`, `argument2` and `argument3` States, read through the dependencies a property registered as `a1`, `a2` and `a3`. */
 function argumentParams(deps: Readonly<{ a1: () => DepResult; a2: () => DepResult; a3: () => DepResult }>): Record<string, string> {
 	return { value: stringFromResult(deps.a1()), value2: stringFromResult(deps.a2()), value3: stringFromResult(deps.a3()) }
+}
+
+/**
+ * The interpolation arguments of Text and Badge as i18n fields (Discussion #448, Rule 01a194f4-83bd): `value`, `value2` and
+ * `value3` each keep a Locale key in `valueKey`, `value2Key` and `value3Key` (an `$i18n` binding on the argument lowers to
+ * it), and the field's text Property (`value`, `value2`, `value3`) is the parameter `{value}`, `{value2}` or `{value3}` of
+ * the Widget's own translated text. An argument is the translation of its key in the render context's Locale, or its
+ * literal when it has no key.
+ */
+type ValueKeys = Readonly<{ valueKey: string | null; value2Key: string | null; value3Key: string | null }>
+
+function valueKeys(raw: Readonly<{ valueKey?: unknown; value2Key?: unknown; value3Key?: unknown }> | null | undefined): ValueKeys {
+	return { valueKey: optionalString(raw?.valueKey), value2Key: optionalString(raw?.value2Key), value3Key: optionalString(raw?.value3Key) }
+}
+
+/** The Config schema members of {@link ValueKeys}. */
+const VALUE_KEY_SCHEMA = { valueKey: { type: 'string' }, value2Key: { type: 'string' }, value3Key: { type: 'string' } } as const
+
+/** The parameters `{value}`, `{value2}` and `{value3}` of a translated field, from the dependencies a property registered as `v1`, `v2` and `v3` (the Widget's `value`, `value2` and `value3` text Properties). */
+function valueTextParams(deps: Readonly<{ v1: () => DepResult; v2: () => DepResult; v3: () => DepResult }>): Record<string, string> {
+	return { value: stringFromResult(deps.v1()), value2: stringFromResult(deps.v2()), value3: stringFromResult(deps.v3()) }
 }
 
 /** A string State an author sets from a Variant: a Locale key, a literal or an interpolation argument (empty when unset). */
@@ -838,10 +877,13 @@ export interface TextInterfaces {
 		raw: (TextPresentation & {
 			text?: string
 			textKey?: string
-			/** Interpolated into a translated template as `{value}`, `{value2}` and `{value3}`. */
+			/** Interpolated into a translated template as `{value}`, `{value2}` and `{value3}`; also the initial values of the states of the same name. Each may instead be a Locale key (`valueKey`, lowered from an `$i18n` binding), which is translated first. */
 			value?: string | number
+			valueKey?: string
 			value2?: string | number
+			value2Key?: string
 			value3?: string | number
+			value3Key?: string
 			weight?: 'normal' | 'medium' | 'semibold' | 'bold'
 			tone?: TextTone
 			mono?: boolean
@@ -853,7 +895,7 @@ export interface TextInterfaces {
 			visible?: boolean
 			responsive?: Responsive<TextPresentation>
 		}) | null
-		resolved: InterpolationArgs & {
+		resolved: InterpolationArgs & ValueKeys & {
 			text: string
 			textKey: string | null
 			weight: string
@@ -866,11 +908,20 @@ export interface TextInterfaces {
 			responsive?: Responsive<TextPresentation>
 		}
 	}
-	state: { visible: boolean }
+	state: {
+		visible: boolean
+		/** The interpolation arguments `{value}`, `{value2}` and `{value3}`, started from the Config's (a Variant sets a count). */
+		value: string
+		value2: string
+		value3: string
+	}
 	properties: {
-		valueText: string
-		value2Text: string
-		value3Text: string
+		valueResult: TranslationResult
+		value: string
+		value2Result: TranslationResult
+		value2: string
+		value3Result: TranslationResult
+		value3: string
 		textResult: TranslationResult
 		text: string
 		textRuns: readonly TextRun[]
@@ -884,16 +935,17 @@ export interface TextInterfaces {
 }
 
 export const textPlugin = createWidgetPlugin('Text')
-	.description('Typography element on the Quiet Canvas scale (display, headline, title, body, ui, label, mono) with tonal accents and translatable text.')
+	.description('Typography element on the Quiet Canvas scale (display, headline, title, body, ui, label, mono) with tonal accents and translatable text. Its text may interpolate {value}, {value2} and {value3}, each a literal or a Locale message (`valueKey`), and the author-writable `value`, `value2` and `value3` states let a Variant set a count.')
 	.interfaces<TextInterfaces>()
 	.config({
-		description: 'Text configuration. `text` accepts an `$i18n` binding (lowered to `textKey`); `{value}`, `{value2}` and `{value3}` interpolate `value`, `value2` and `value3` (literal), and with `valueCode` `{value}` shows as inline code (a file name, an Event). `visible` is the initial value of the `visible` state. `srOnly` shows the text to assistive technology only (a heading for an empty table column). Legacy variants h1–h4, caption and code map onto the same scale; nothing renders below 12px.',
+		description: 'Text configuration. `text` accepts an `$i18n` binding (lowered to `textKey`); `{value}`, `{value2}` and `{value3}` interpolate `value`, `value2` and `value3` (literal, and the initial values of the states of the same name, so a Variant sets a count), and with `valueCode` `{value}` shows as inline code (a file name, an Event). `value`, `value2` and `value3` also accept an `$i18n` binding (lowered to `valueKey`, `value2Key`, `value3Key`): the argument is then that Locale message in the render context\'s Locale. `visible` is the initial value of the `visible` state. `srOnly` shows the text to assistive technology only (a heading for an empty table column). Legacy variants h1–h4, caption and code map onto the same scale; nothing renders below 12px.',
 		schema: configSchema({
 			text: { type: 'string' },
 			textKey: { type: 'string' },
 			value: { type: ['string', 'number'] },
 			value2: { type: ['string', 'number'] },
 			value3: { type: ['string', 'number'] },
+			...VALUE_KEY_SCHEMA,
 			variant: { enum: ['display', 'headline', 'title', 'body', 'ui', 'label', 'mono', 'h1', 'h2', 'h3', 'h4', 'caption', 'code'] },
 			weight: { enum: ['normal', 'medium', 'semibold', 'bold'] },
 			tone: { enum: ['default', 'highlighted', 'muted', 'subtle', 'primary', 'annotation', 'success', 'warning', 'danger', 'info'] },
@@ -909,11 +961,12 @@ export const textPlugin = createWidgetPlugin('Text')
 		}),
 		validate: (c): c is TextInterfaces['config']['raw'] => isConfigOrOmitted(c),
 		resolve: (raw) => {
-			const { text, textKey, value, value2, value3, weight, tone, mono, level, valueCode, visible, ...presentation } = raw ?? {}
+			const { text, textKey, value, valueKey, value2, value2Key, value3, value3Key, weight, tone, mono, level, valueCode, visible, ...presentation } = raw ?? {}
 			return {
 				text: typeof text === 'string' ? text : '',
 				textKey: optionalString(textKey),
 				...interpolationArgs({ value, value2, value3 }),
+				...valueKeys({ valueKey, value2Key, value3Key }),
 				weight: weight ?? '',
 				tone: tone ?? 'default',
 				mono: Boolean(mono),
@@ -924,18 +977,61 @@ export const textPlugin = createWidgetPlugin('Text')
 			}
 		},
 	})
-	.state(state => state.visible({ ...visibleState, default: ({ config }) => config.visible }))
+	.state(state => state
+		.visible({ ...visibleState, default: ({ config }) => config.visible })
+		.value({ ...stringState, default: ({ config }) => config.value })
+		.value2({ ...stringState, default: ({ config }) => config.value2 })
+		.value3({ ...stringState, default: ({ config }) => config.value3 }))
 	.properties(p => p
-		.valueText({ valueContract: STRING, compute: ({ config }) => config.value })
-		.value2Text({ valueContract: STRING, compute: ({ config }) => config.value2 })
-		.value3Text({ valueContract: STRING, compute: ({ config }) => config.value3 })
-		.textResult(translatedResultWithValue<TextInterfaces['config']['resolved']>(c => ({ key: c.textKey, literal: c.text })))
+		.valueResult({
+			valueContract: TRANSLATION_RESULT,
+			registerDeps: ({ dep }) => ({ ...translateDeps({ dep }), literal: dep.self.state.get('value') }),
+			compute: ({ config, deps }) => translateField(config.valueKey, stringFromResult(deps.literal()), (key, params) => deps.t(key, params)),
+		})
+		.value({
+			valueContract: STRING,
+			registerDeps: ({ dep }) => ({ result: dep.self.properties.get('valueResult') }),
+			compute: ({ deps }) => textOfResult(deps.result()),
+		})
+		.value2Result({
+			valueContract: TRANSLATION_RESULT,
+			registerDeps: ({ dep }) => ({ ...translateDeps({ dep }), literal: dep.self.state.get('value2') }),
+			compute: ({ config, deps }) => translateField(config.value2Key, stringFromResult(deps.literal()), (key, params) => deps.t(key, params)),
+		})
+		.value2({
+			valueContract: STRING,
+			registerDeps: ({ dep }) => ({ result: dep.self.properties.get('value2Result') }),
+			compute: ({ deps }) => textOfResult(deps.result()),
+		})
+		.value3Result({
+			valueContract: TRANSLATION_RESULT,
+			registerDeps: ({ dep }) => ({ ...translateDeps({ dep }), literal: dep.self.state.get('value3') }),
+			compute: ({ config, deps }) => translateField(config.value3Key, stringFromResult(deps.literal()), (key, params) => deps.t(key, params)),
+		})
+		.value3({
+			valueContract: STRING,
+			registerDeps: ({ dep }) => ({ result: dep.self.properties.get('value3Result') }),
+			compute: ({ deps }) => textOfResult(deps.result()),
+		})
+		.textResult({
+			valueContract: TRANSLATION_RESULT,
+			registerDeps: ({ dep }) => ({ ...translateDeps({ dep }), v1: dep.self.properties.get('value'), v2: dep.self.properties.get('value2'), v3: dep.self.properties.get('value3') }),
+			compute: ({ config, deps }) => translateField(config.textKey, config.text, (key, params) => deps.t(key, params), valueTextParams(deps)),
+		})
 		.text({
 			valueContract: STRING,
 			registerDeps: ({ dep }) => ({ result: dep.self.properties.get('textResult') }),
 			compute: ({ deps }) => textOfResult(deps.result()),
 		})
-		.textRuns(textRunsOf<TextInterfaces['config']['resolved']>(c => ({ key: c.textKey, literal: c.text })))
+		.textRuns({
+			registerDeps: ({ dep }) => ({ ...translateDeps({ dep }), v1: dep.self.properties.get('value'), v2: dep.self.properties.get('value2'), v3: dep.self.properties.get('value3') }),
+			compute: ({ config, deps }): readonly TextRun[] => {
+				const translate = (key: string, params: Readonly<Record<string, string>>) => deps.t(key, params)
+				const params = valueTextParams(deps)
+				if (!config.valueCode || params.value === '') return [{ text: translateField(config.textKey, config.text, translate, params).text, code: false }]
+				return runsOfMarked(translateField(config.textKey, config.text, translate, { ...params, value: `${CODE_OPEN}${params.value}${CODE_CLOSE}` }).text)
+			},
+		})
 		.weight({ compute: ({ config }) => config.weight })
 		.tone({ compute: ({ config }) => config.tone })
 		.mono({ compute: ({ config }) => config.mono })
@@ -1024,10 +1120,13 @@ export interface ButtonInterfaces {
 		raw: (ButtonPresentation & {
 			label?: string
 			labelKey?: string
-			/** Interpolated into a translated label as `{value}`, `{value2}` and `{value3}`. */
+			/** Interpolated into a translated label as `{value}`, `{value2}` and `{value3}`. Each may instead be a Locale key (`valueKey`, lowered from an `$i18n` binding), which is translated first. */
 			value?: string | number
+			valueKey?: string
 			value2?: string | number
+			value2Key?: string
 			value3?: string | number
+			value3Key?: string
 			variant?: ButtonVariant
 			disabled?: boolean
 			/** Work is in progress: a spinning icon replaces the icon, and the button does not press. */
@@ -1048,7 +1147,7 @@ export interface ButtonInterfaces {
 			count?: string | number
 			responsive?: Responsive<ButtonPresentation>
 		}) | null
-		resolved: InterpolationArgs & {
+		resolved: InterpolationArgs & ValueKeys & {
 			label: string
 			labelKey: string | null
 			variant: ButtonVariant
@@ -1082,9 +1181,16 @@ export interface ButtonInterfaces {
 		click: readonly []
 	}
 	properties: {
-		valueText: string
-		value2Text: string
-		value3Text: string
+		valueResult: TranslationResult
+		value: string
+		value2Result: TranslationResult
+		value2: string
+		value3Result: TranslationResult
+		value3: string
+		contextViewportId: string
+		contextViewport: string
+		contextLocale: string
+		contextTheme: string
 		labelResult: TranslationResult
 		label: string
 		labelRuns: readonly TextRun[]
@@ -1099,13 +1205,14 @@ export const buttonPlugin = createWidgetPlugin('Button')
 	.description('Button with translatable label, Lucide icon, optional trailing icon and shortcut hint, neutral-outline default, one solid primary per region (or the solid neutral for a group\'s current choice), muted or primary link looks, a quiet `soft` fill, solid and soft `warning` looks, an `xs` (24px) size, a loading spinner, a long label that truncates, a shortcut hint of one or several key caps, and 44px targets on touch tiers. Author-writable `disabled`, `visible`, `loading`, `variant`, `pressed` (a toggle, soft while pressed), `expanded` (a disclosure toggle, whose trailing icon turns 180 degrees) and `count` (a count pill after the label) states drive Variants.')
 	.interfaces<ButtonInterfaces>()
 	.config({
-		description: 'Button configuration. `label` accepts an `$i18n` binding (lowered to `labelKey`); `{value}`, `{value2}` and `{value3}` interpolate `value`, `value2` and `value3`, and with `valueCode` `{value}` shows as inline code. `icon` and `trailingIcon` take Lucide names. `variant`, `disabled`, `loading`, `pressed` and `expanded` are the initial values of the states of the same name. `size` is `xs` (24px), `sm`, `md` or `lg`; `truncate` ends a long label in an ellipsis. `kbd` is the shortcut hint: a string is one key cap, a list one cap per entry. `count` is the initial text of the `count` state, a count pill after the label.',
+		description: 'Button configuration. `label` accepts an `$i18n` binding (lowered to `labelKey`); `{value}`, `{value2}` and `{value3}` interpolate `value`, `value2` and `value3` (each a literal or, bound with `$i18n` and lowered to `valueKey`, `value2Key`, `value3Key`, a Locale message translated in the render context\'s Locale), and with `valueCode` `{value}` shows as inline code; `{viewportId}`, `{viewport}`, `{locale}` and `{theme}` interpolate the live render context (a summary of it as one button). `icon` and `trailingIcon` take Lucide names. `variant`, `disabled`, `loading`, `pressed` and `expanded` are the initial values of the states of the same name. `size` is `xs` (24px), `sm`, `md` or `lg`; `truncate` ends a long label in an ellipsis. `kbd` is the shortcut hint: a string is one key cap, a list one cap per entry. `count` is the initial text of the `count` state, a count pill after the label.',
 		schema: configSchema({
 			label: { type: 'string' },
 			labelKey: { type: 'string' },
 			value: { type: ['string', 'number'] },
 			value2: { type: ['string', 'number'] },
 			value3: { type: ['string', 'number'] },
+			...VALUE_KEY_SCHEMA,
 			variant: { enum: [...BUTTON_VARIANTS] },
 			size: { enum: ['xs', 'sm', 'md', 'lg'] },
 			disabled: { type: 'boolean' },
@@ -1126,11 +1233,12 @@ export const buttonPlugin = createWidgetPlugin('Button')
 		}),
 		validate: (c): c is ButtonInterfaces['config']['raw'] => isConfigOrOmitted(c),
 		resolve: (raw) => {
-			const { label, labelKey, value, value2, value3, variant, disabled, loading, pressed, expanded, visible, valueCode, icon, trailingIcon, kbd, count, ...presentation } = raw ?? {}
+			const { label, labelKey, value, valueKey, value2, value2Key, value3, value3Key, variant, disabled, loading, pressed, expanded, visible, valueCode, icon, trailingIcon, kbd, count, ...presentation } = raw ?? {}
 			return {
 				label: typeof label === 'string' ? label : 'Button',
 				labelKey: optionalString(labelKey),
 				...interpolationArgs({ value, value2, value3 }),
+				...valueKeys({ valueKey, value2Key, value3Key }),
 				variant: oneOf(variant, BUTTON_VARIANTS, 'secondary'),
 				disabled: Boolean(disabled),
 				loading: Boolean(loading),
@@ -1159,12 +1267,72 @@ export const buttonPlugin = createWidgetPlugin('Button')
 		.expanded({ authorWritable: true, validate: isNullableBoolean, default: ({ config }) => config.expanded })
 		.variant({ authorWritable: true, validate: (v): v is ButtonVariant => (BUTTON_VARIANTS as readonly unknown[]).includes(v), default: ({ config }) => config.variant }))
 	.properties(p => p
-		.valueText({ valueContract: STRING, compute: ({ config }) => config.value })
-		.value2Text({ valueContract: STRING, compute: ({ config }) => config.value2 })
-		.value3Text({ valueContract: STRING, compute: ({ config }) => config.value3 })
-		.labelResult(translatedResultWithValue<ButtonInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
-		.label(translatedTextWithValue<ButtonInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
-		.labelRuns(textRunsOf<ButtonInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
+		.valueResult(translatedResult<ButtonInterfaces['config']['resolved']>(c => ({ key: c.valueKey, literal: c.value })))
+		.value(translatedText<ButtonInterfaces['config']['resolved']>(c => ({ key: c.valueKey, literal: c.value })))
+		.value2Result(translatedResult<ButtonInterfaces['config']['resolved']>(c => ({ key: c.value2Key, literal: c.value2 })))
+		.value2(translatedText<ButtonInterfaces['config']['resolved']>(c => ({ key: c.value2Key, literal: c.value2 })))
+		.value3Result(translatedResult<ButtonInterfaces['config']['resolved']>(c => ({ key: c.value3Key, literal: c.value3 })))
+		.value3(translatedText<ButtonInterfaces['config']['resolved']>(c => ({ key: c.value3Key, literal: c.value3 })))
+		.contextViewportId({
+			valueContract: STRING,
+			registerDeps: viewportDeps,
+			compute: ({ deps }) => readViewport(deps.viewport())?.id ?? '',
+		})
+		.contextViewport({
+			valueContract: STRING,
+			registerDeps: viewportDeps,
+			compute: ({ deps }) => {
+				const viewport = readViewport(deps.viewport())
+				return viewport ? `${viewport.width} × ${viewport.height}` : ''
+			},
+		})
+		.contextLocale({
+			valueContract: STRING,
+			registerDeps: ({ dep }) => ({ locale: dep.root.state.get('locale') }),
+			compute: ({ deps }) => stringFromResult(deps.locale()),
+		})
+		.contextTheme({
+			valueContract: STRING,
+			registerDeps: ({ dep }) => ({ themeId: dep.root.state.get('themeId') }),
+			compute: ({ deps }) => stringFromResult(deps.themeId()),
+		})
+		.labelResult({
+			valueContract: TRANSLATION_RESULT,
+			registerDeps: ({ dep }) => ({
+				...translateDeps({ dep }),
+				v1: dep.self.properties.get('value'),
+				v2: dep.self.properties.get('value2'),
+				v3: dep.self.properties.get('value3'),
+				viewportId: dep.self.properties.get('contextViewportId'),
+				viewport: dep.self.properties.get('contextViewport'),
+				locale: dep.self.properties.get('contextLocale'),
+				theme: dep.self.properties.get('contextTheme'),
+			}),
+			compute: ({ config, deps }) => translateField(config.labelKey, config.label, (key, params) => deps.t(key, params), { ...valueTextParams(deps), ...renderContextParams(deps) }),
+		})
+		.label({
+			valueContract: STRING,
+			registerDeps: ({ dep }) => ({ result: dep.self.properties.get('labelResult') }),
+			compute: ({ deps }) => textOfResult(deps.result()),
+		})
+		.labelRuns({
+			registerDeps: ({ dep }) => ({
+				...translateDeps({ dep }),
+				v1: dep.self.properties.get('value'),
+				v2: dep.self.properties.get('value2'),
+				v3: dep.self.properties.get('value3'),
+				viewportId: dep.self.properties.get('contextViewportId'),
+				viewport: dep.self.properties.get('contextViewport'),
+				locale: dep.self.properties.get('contextLocale'),
+				theme: dep.self.properties.get('contextTheme'),
+			}),
+			compute: ({ config, deps }): readonly TextRun[] => {
+				const translate = (key: string, params: Readonly<Record<string, string>>) => deps.t(key, params)
+				const params = { ...valueTextParams(deps), ...renderContextParams(deps) }
+				if (!config.valueCode || params.value === '') return [{ text: translateField(config.labelKey, config.label, translate, params).text, code: false }]
+				return runsOfMarked(translateField(config.labelKey, config.label, translate, { ...params, value: `${CODE_OPEN}${params.value}${CODE_CLOSE}` }).text)
+			},
+		})
 		.variant({ compute: ({ config }) => config.variant })
 		.icon({ compute: ({ config }) => config.icon })
 		.presentation({
@@ -1303,8 +1471,13 @@ export interface BadgeInterfaces {
 		raw: (BadgePresentation & {
 			label?: string
 			labelKey?: string
-			/** Interpolated into a translated template as `{value}`. */
+			/** Interpolated into a translated template as `{value}`, `{value2}` and `{value3}`. Each may instead be a Locale key (`valueKey`, lowered from an `$i18n` binding), which is translated first. */
 			value?: string | number
+			valueKey?: string
+			value2?: string | number
+			value2Key?: string
+			value3?: string | number
+			value3Key?: string
 			tone?: BadgeTone
 			variant?: 'subtle' | 'soft' | 'solid' | 'outline' | 'mono' | 'count'
 			icon?: string
@@ -1316,10 +1489,9 @@ export interface BadgeInterfaces {
 			visible?: boolean
 			responsive?: Responsive<BadgePresentation>
 		}) | null
-		resolved: {
+		resolved: InterpolationArgs & ValueKeys & {
 			label: string
 			labelKey: string | null
-			value: string
 			tone: string
 			variant: string
 			icon: string
@@ -1338,7 +1510,12 @@ export interface BadgeInterfaces {
 		icon: string
 	}
 	properties: {
-		valueText: string
+		valueResult: TranslationResult
+		value: string
+		value2Result: TranslationResult
+		value2: string
+		value3Result: TranslationResult
+		value3: string
 		contextViewportId: string
 		contextViewport: string
 		contextLocale: string
@@ -1356,7 +1533,7 @@ export interface BadgeInterfaces {
 }
 
 export const badgePlugin = createWidgetPlugin('Badge')
-	.description('Status badge, mono identity chip, or count; carries a leading Lucide icon so color is never the only signal. Translated labels may interpolate {value} and the live render context ({viewportId}, {viewport}, {locale}, {theme}). Author-writable `labelKey`, `tone`, `icon` and `visible` states let one Variant turn a badge into its Pass, Warning or Fail form.')
+	.description('Status badge, mono identity chip, or count; carries a leading Lucide icon so color is never the only signal. Translated labels may interpolate {value}, {value2} and {value3} (each a literal or, bound with `$i18n`, a Locale message translated in the render context\'s Locale) and the live render context ({viewportId}, {viewport}, {locale}, {theme}). Author-writable `labelKey`, `tone`, `icon` and `visible` states let one Variant turn a badge into its Pass, Warning or Fail form.')
 	.interfaces<BadgeInterfaces>()
 	.config({
 		description: 'Badge configuration. `label` accepts an `$i18n` binding (lowered to `labelKey`). `variant: "mono"` is the blueprint identity chip; `variant: "count"` is a count pill. `truncate` ends a long label in an ellipsis. `labelKey`, `tone` and `icon` are the initial values of the states of the same name, so a Variant can set a Locale key (`labelKey`), a tone and an icon on one badge.',
@@ -1364,6 +1541,9 @@ export const badgePlugin = createWidgetPlugin('Badge')
 			label: { type: 'string' },
 			labelKey: { type: 'string' },
 			value: { type: ['string', 'number'] },
+			value2: { type: ['string', 'number'] },
+			value3: { type: ['string', 'number'] },
+			...VALUE_KEY_SCHEMA,
 			tone: { enum: ['neutral', 'primary', 'annotation', 'success', 'warning', 'danger', 'info'] },
 			variant: { enum: ['subtle', 'soft', 'solid', 'outline', 'mono', 'count'] },
 			icon: { type: 'string' },
@@ -1374,11 +1554,12 @@ export const badgePlugin = createWidgetPlugin('Badge')
 		}),
 		validate: (c): c is BadgeInterfaces['config']['raw'] => isConfigOrOmitted(c),
 		resolve: (raw) => {
-			const { label, labelKey, value, tone, variant, icon, spin, truncate, visible, ...presentation } = raw ?? {}
+			const { label, labelKey, value, valueKey, value2, value2Key, value3, value3Key, tone, variant, icon, spin, truncate, visible, ...presentation } = raw ?? {}
 			return {
 				label: typeof label === 'string' ? label : '',
 				labelKey: optionalString(labelKey),
-				value: value === undefined ? '' : String(value),
+				...interpolationArgs({ value, value2, value3 }),
+				...valueKeys({ valueKey, value2Key, value3Key }),
 				tone: tone ?? 'neutral',
 				variant: variant ?? 'subtle',
 				icon: typeof icon === 'string' ? icon : '',
@@ -1395,7 +1576,12 @@ export const badgePlugin = createWidgetPlugin('Badge')
 		.tone({ authorWritable: true, validate: (v): v is BadgeTone => (BADGE_TONES as readonly unknown[]).includes(v), default: ({ config }) => config.tone as BadgeTone })
 		.icon({ authorWritable: true, validate: (v): v is string => typeof v === 'string', default: ({ config }) => config.icon }))
 	.properties(p => p
-		.valueText({ valueContract: STRING, compute: ({ config }) => config.value })
+		.valueResult(translatedResult<BadgeInterfaces['config']['resolved']>(c => ({ key: c.valueKey, literal: c.value })))
+		.value(translatedText<BadgeInterfaces['config']['resolved']>(c => ({ key: c.valueKey, literal: c.value })))
+		.value2Result(translatedResult<BadgeInterfaces['config']['resolved']>(c => ({ key: c.value2Key, literal: c.value2 })))
+		.value2(translatedText<BadgeInterfaces['config']['resolved']>(c => ({ key: c.value2Key, literal: c.value2 })))
+		.value3Result(translatedResult<BadgeInterfaces['config']['resolved']>(c => ({ key: c.value3Key, literal: c.value3 })))
+		.value3(translatedText<BadgeInterfaces['config']['resolved']>(c => ({ key: c.value3Key, literal: c.value3 })))
 		.contextViewportId({
 			valueContract: STRING,
 			registerDeps: viewportDeps,
@@ -1424,19 +1610,15 @@ export const badgePlugin = createWidgetPlugin('Badge')
 			registerDeps: ({ dep }) => ({
 				...translateDeps({ dep }),
 				stateKey: dep.self.state.get('labelKey'),
-				value: dep.self.properties.get('valueText'),
+				v1: dep.self.properties.get('value'),
+				v2: dep.self.properties.get('value2'),
+				v3: dep.self.properties.get('value3'),
 				viewportId: dep.self.properties.get('contextViewportId'),
 				viewport: dep.self.properties.get('contextViewport'),
 				locale: dep.self.properties.get('contextLocale'),
 				theme: dep.self.properties.get('contextTheme'),
 			}),
-			compute: ({ config, deps }) => translateField(stringFromResult(deps.stateKey()) || config.labelKey, config.label, (key, params) => deps.t(key, params), {
-				value: stringFromResult(deps.value()),
-				viewportId: stringFromResult(deps.viewportId()),
-				viewport: stringFromResult(deps.viewport()),
-				locale: stringFromResult(deps.locale()),
-				theme: stringFromResult(deps.theme()),
-			}),
+			compute: ({ config, deps }) => translateField(stringFromResult(deps.stateKey()) || config.labelKey, config.label, (key, params) => deps.t(key, params), { ...valueTextParams(deps), ...renderContextParams(deps) }),
 		})
 		.label({
 			valueContract: STRING,
@@ -2738,6 +2920,12 @@ export interface SegmentInterfaces {
 		visible: boolean
 		/** A Locale key: while set, the badge shows its translation instead of `badge` (a Variant shows a badge on a tab). */
 		badgeKey: string
+		/** A Locale key: while set, the label shows its translation instead of `label` (a toggle that names its other action). */
+		labelKey: string
+		/** The Lucide icon, started from the Config's (a Variant turns a tab's icon into a spinner or a check). */
+		icon: string
+		/** The count pill's text, started from the Config's (empty = none), so each count a Variant needs is one control. */
+		count: string
 	}
 	events: { click: readonly [] }
 	properties: {
@@ -2751,10 +2939,10 @@ export interface SegmentInterfaces {
 }
 
 export const segmentPlugin = createWidgetPlugin('Segment')
-	.description('One option inside a SegmentedControl: Lucide icon, translatable label, count, and shortcut hint. The palette appearance fills Iris when selected, or tints Marker for the Comment tool (`activeTone: "annotation"`). The author-writable `blocked` state dims a segment that cannot be used here without removing it (it stays focusable with `aria-disabled` and reports no `click`), and `visible` hides it.')
+	.description('One option inside a SegmentedControl: Lucide icon, translatable label, count, and shortcut hint. The palette appearance fills Iris when selected, or tints Marker for the Comment tool (`activeTone: "annotation"`). The author-writable `blocked` state dims a segment that cannot be used here without removing it (it stays focusable with `aria-disabled` and reports no `click`), and `visible` hides it. The author-writable `icon`, `count` and `labelKey` states swap the icon, the count pill (empty shows none) and the Locale key of the label, so each count, icon or name a Variant needs is the same control.')
 	.interfaces<SegmentInterfaces>()
 	.config({
-		description: 'Segment configuration. `label` and `badge` accept `$i18n` bindings (lowered to `labelKey`, `badgeKey`); `appearance` must match the parent SegmentedControl; `blocked` and `visible` are the initial values of the states of the same name.',
+		description: 'Segment configuration. `label` and `badge` accept `$i18n` bindings (lowered to `labelKey`, `badgeKey`); `appearance` must match the parent SegmentedControl; `blocked`, `visible`, `icon`, `count` and `labelKey` are the initial values of the states of the same name.',
 		schema: configSchema({
 			label: { type: 'string' },
 			labelKey: { type: 'string' },
@@ -2797,10 +2985,21 @@ export const segmentPlugin = createWidgetPlugin('Segment')
 		.selected({ authorWritable: true, validate: isBoolean, default: ({ config }) => config.selected })
 		.blocked({ authorWritable: true, validate: isBoolean, default: ({ config }) => config.blocked })
 		.visible({ ...visibleState, default: ({ config }) => config.visible })
-		.badgeKey({ authorWritable: true, validate: (v): v is string => typeof v === 'string', default: ({ config }) => config.badgeKey ?? '' }))
+		.badgeKey({ authorWritable: true, validate: (v): v is string => typeof v === 'string', default: ({ config }) => config.badgeKey ?? '' })
+		.labelKey({ ...stringState, default: ({ config }) => config.labelKey ?? '' })
+		.icon({ ...stringState, default: ({ config }) => config.icon })
+		.count({ authorWritable: true, validate: (v): v is string => typeof v === 'string' || typeof v === 'number', default: ({ config }) => config.count }))
 	.properties(p => p
-		.labelResult(translatedResult<SegmentInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
-		.label(translatedText<SegmentInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
+		.labelResult({
+			valueContract: TRANSLATION_RESULT,
+			registerDeps: ({ dep }) => ({ ...translateDeps({ dep }), key: dep.self.state.get('labelKey') }),
+			compute: ({ config, deps }) => translateField(optionalString(stringFromResult(deps.key())), config.label, (key, params) => deps.t(key, params)),
+		})
+		.label({
+			valueContract: STRING,
+			registerDeps: ({ dep }) => ({ result: dep.self.properties.get('labelResult') }),
+			compute: ({ deps }) => textOfResult(deps.result()),
+		})
 		.badgeResult({
 			valueContract: TRANSLATION_RESULT,
 			registerDeps: ({ dep }) => ({ ...translateDeps({ dep }), key: dep.self.state.get('badgeKey') }),
@@ -2812,18 +3011,20 @@ export const segmentPlugin = createWidgetPlugin('Segment')
 			compute: ({ deps }) => textOfResult(deps.result()),
 		})
 		.look({
-			registerDeps: viewportDeps,
+			registerDeps: ({ dep }) => ({ ...viewportDeps({ dep }), icon: dep.self.state.get('icon'), count: dep.self.state.get('count') }),
 			compute: ({ config, deps }) => {
 				const tier = tierOf(readViewport(deps.viewport()))
 				const presentation = cascade(config.base, config.responsive, tier)
+				const icon = stringFromResult(deps.icon())
+				const count = deps.count()
 				return {
-					icon: config.icon,
+					icon,
 					kbd: isTouchTier(tier) ? '' : config.kbd,
-					count: config.count,
+					count: count.ok && (typeof count.value === 'string' || typeof count.value === 'number') ? String(count.value) : config.count,
 					countTone: config.countTone,
 					appearance: config.appearance,
 					activeTone: config.activeTone,
-					iconOnly: Boolean(presentation.iconOnly && config.icon),
+					iconOnly: Boolean(presentation.iconOnly && icon),
 					hidden: Boolean(presentation.hidden),
 					touch: isTouchTier(tier) && config.appearance !== 'tabs',
 				}
@@ -3071,10 +3272,12 @@ export const RailRenderer = defineComponent({
 // ---------------------------------------------------------------------------
 export interface ContextBarInterfaces {
 	config: {
-		raw: ({ label?: string; labelKey?: string; hidden?: boolean; responsive?: Responsive<{ hidden?: boolean }> }) | null
-		resolved: { label: string; labelKey: string | null; base: { hidden?: boolean }; responsive?: Responsive<{ hidden?: boolean }> }
+		raw: ({ label?: string; labelKey?: string; scroll?: boolean; hidden?: boolean; responsive?: Responsive<{ hidden?: boolean }> }) | null
+		resolved: { label: string; labelKey: string | null; scroll: boolean | null; base: { hidden?: boolean }; responsive?: Responsive<{ hidden?: boolean }> }
 	}
 	slots: 'start' | 'end'
+	/** `scroll` is `null` for the default (scrolls on a phone only); a Variant sets `false` for a bar whose popover must not be clipped. */
+	state: { scroll: boolean | null }
 	properties: { labelResult: TranslationResult; label: string; hidden: boolean; scrolls: boolean; theme: string }
 }
 
@@ -3082,15 +3285,16 @@ export const contextBarPlugin = createWidgetPlugin('ContextBar')
 	.description('44px canvas toolbar with a start group (render-context chips) and an end group (session status, zoom, fit). Scrolls horizontally rather than wrapping on a phone; on wider tiers it does not clip, so a Menu opened from a chip or a zoom control drops out of the bar.')
 	.interfaces<ContextBarInterfaces>()
 	.config({
-		description: 'ContextBar configuration. `label` (toolbar accessible name) accepts an `$i18n` binding (lowered to `labelKey`).',
-		schema: configSchema({ label: { type: 'string' }, labelKey: { type: 'string' }, hidden: { type: 'boolean' } }),
+		description: 'ContextBar configuration. `label` (toolbar accessible name) accepts an `$i18n` binding (lowered to `labelKey`). `scroll` is the initial value of the author-writable `scroll` state: omit it for the default (the bar scrolls on a phone only), set `false` to never clip (a popover opened from the bar drops out of it).',
+		schema: configSchema({ label: { type: 'string' }, labelKey: { type: 'string' }, scroll: { type: 'boolean' }, hidden: { type: 'boolean' } }),
 		validate: (c): c is ContextBarInterfaces['config']['raw'] => isConfigOrOmitted(c),
 		resolve: (raw) => {
-			const { label, labelKey, ...presentation } = raw ?? {}
-			return { label: stringOr(label, ''), labelKey: optionalString(labelKey), ...splitResponsive<{ hidden?: boolean }>(presentation) }
+			const { label, labelKey, scroll, ...presentation } = raw ?? {}
+			return { label: stringOr(label, ''), labelKey: optionalString(labelKey), scroll: scroll === undefined ? null : Boolean(scroll), ...splitResponsive<{ hidden?: boolean }>(presentation) }
 		},
 	})
 	.slots({ start: { description: 'Render-context chips' }, end: { description: 'Status, zoom and panel controls' } })
+	.state(state => state.scroll({ authorWritable: true, validate: isNullableBoolean, default: ({ config }) => config.scroll }))
 	.properties(p => p
 		.labelResult(translatedResult<ContextBarInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
 		.label(translatedText<ContextBarInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
@@ -3099,8 +3303,11 @@ export const contextBarPlugin = createWidgetPlugin('ContextBar')
 			compute: ({ config, deps }) => Boolean(cascade(config.base, config.responsive, tierOf(readViewport(deps.viewport()))).hidden),
 		})
 		.scrolls({
-			registerDeps: viewportDeps,
-			compute: ({ deps }) => tierOf(readViewport(deps.viewport())) === 'compact',
+			registerDeps: ({ dep }) => ({ ...viewportDeps({ dep }), scroll: dep.self.state.get('scroll') }),
+			compute: ({ deps }) => {
+				const scroll = deps.scroll()
+				return scroll.ok && typeof scroll.value === 'boolean' ? scroll.value : tierOf(readViewport(deps.viewport())) === 'compact'
+			},
 		})
 		.theme(themeProperty()),
 	)
@@ -4023,10 +4230,23 @@ export interface CheckboxInterfaces {
 			description?: string
 			descriptionKey?: string
 			descriptionTone?: 'muted' | 'warning'
-			/** Interpolated into a translated label or description as `{value}`, `{value2}` and `{value3}`. */
+			/** Interpolated into a translated label, description, badge or note as `{value}`, `{value2}` and `{value3}`; also the initial values of the states of the same name. */
 			value?: string | number
 			value2?: string | number
 			value3?: string | number
+			/** A translatable outline badge after the label, with an optional leading icon. */
+			badge?: string
+			badgeKey?: string
+			badgeIcon?: string
+			/** Two further lines under the description; a `warning` note carries an icon. They are empty unless set (or a Variant sets `noteKey`, `note2Key`). */
+			note?: string
+			noteKey?: string
+			noteTone?: 'muted' | 'warning'
+			note2?: string
+			note2Key?: string
+			note2Tone?: 'muted' | 'warning'
+			/** Shows `{value}` of a note as inline code. */
+			valueCode?: boolean
 			checked?: boolean
 			indeterminate?: boolean
 			disabled?: boolean
@@ -4042,6 +4262,16 @@ export interface CheckboxInterfaces {
 			description: string
 			descriptionKey: string | null
 			descriptionTone: 'muted' | 'warning'
+			badge: string
+			badgeKey: string | null
+			badgeIcon: string
+			note: string
+			noteKey: string | null
+			noteTone: 'muted' | 'warning'
+			note2: string
+			note2Key: string | null
+			note2Tone: 'muted' | 'warning'
+			valueCode: boolean
 			checked: boolean
 			indeterminate: boolean
 			disabled: boolean
@@ -4050,7 +4280,18 @@ export interface CheckboxInterfaces {
 			touch: boolean
 		}
 	}
-	state: { checked: boolean; indeterminate: boolean; disabled: boolean }
+	state: {
+		checked: boolean
+		indeterminate: boolean
+		disabled: boolean
+		/** The interpolation arguments, started from the Config's (a Variant names the key a note asks for). */
+		value: string
+		value2: string
+		value3: string
+		/** A Locale key: while set, the note shows its translation instead of `note` (a Variant gates a line under a row). */
+		noteKey: string
+		note2Key: string
+	}
 	events: { toggle: readonly [] }
 	properties: {
 		valueText: string
@@ -4060,19 +4301,31 @@ export interface CheckboxInterfaces {
 		label: string
 		descriptionResult: TranslationResult
 		description: string
-		look: { descriptionTone: 'muted' | 'warning'; meta: string; mono: boolean; touch: boolean }
+		badgeResult: TranslationResult
+		badge: string
+		noteResult: TranslationResult
+		note: string
+		noteRuns: readonly TextRun[]
+		note2Result: TranslationResult
+		note2: string
+		note2Runs: readonly TextRun[]
+		look: { descriptionTone: 'muted' | 'warning'; badgeIcon: string; noteTone: 'muted' | 'warning'; note2Tone: 'muted' | 'warning'; meta: string; mono: boolean; touch: boolean }
 		theme: string
 	}
 }
 
 export const checkboxPlugin = createWidgetPlugin('Checkbox')
-	.description('Native checkbox with a translatable label and description (both may interpolate {value}, {value2} and {value3}), a literal mono `meta` at the end, a `warning` description tone, a mono label (`mono`), a 44px row target (`touch`), and author-writable `checked`, `indeterminate` and `disabled` states. A press writes `checked` and fires `toggle`.')
+	.description('Native checkbox with a translatable label and description (both may interpolate {value}, {value2} and {value3}), an outline `badge` after the label, two `note` lines under the description (a `warning` note carries an icon; the author-writable `noteKey` and `note2Key` states gate them, the `value` states fill them), a literal mono `meta` at the end, a `warning` description tone, a mono label (`mono`), a 44px row target (`touch`), and author-writable `checked`, `indeterminate` and `disabled` states. A press writes `checked` and fires `toggle`.')
 	.interfaces<CheckboxInterfaces>()
 	.config({
-		description: 'Checkbox configuration. `label` and `description` accept `$i18n` bindings (lowered to `labelKey`, `descriptionKey`); `{value}`, `{value2}` and `{value3}` interpolate `value`, `value2` and `value3`. `meta` is literal mono text such as an id or a count. `mono` sets the label in mono 12px; `touch` makes the whole row a 44px target.',
+		description: 'Checkbox configuration. `label`, `description`, `badge`, `note` and `note2` accept `$i18n` bindings (lowered to `labelKey`, `descriptionKey`, `badgeKey`, `noteKey`, `note2Key`); `{value}`, `{value2}` and `{value3}` interpolate `value`, `value2` and `value3` (the initial values of the states of the same name), and with `valueCode` `{value}` of a note shows as inline code. `badgeIcon` is the badge\'s leading icon; `noteTone` and `note2Tone` are `muted` or `warning`. `meta` is literal mono text such as an id or a count. `mono` sets the label in mono 12px; `touch` makes the whole row a 44px target.',
 		schema: configSchema({
 			label: { type: 'string' }, labelKey: { type: 'string' },
 			description: { type: 'string' }, descriptionKey: { type: 'string' },
+			badge: { type: 'string' }, badgeKey: { type: 'string' }, badgeIcon: { type: 'string' },
+			note: { type: 'string' }, noteKey: { type: 'string' }, noteTone: { enum: ['muted', 'warning'] },
+			note2: { type: 'string' }, note2Key: { type: 'string' }, note2Tone: { enum: ['muted', 'warning'] },
+			valueCode: { type: 'boolean' },
 			value: { type: ['string', 'number'] },
 			value2: { type: ['string', 'number'] },
 			value3: { type: ['string', 'number'] },
@@ -4092,6 +4345,16 @@ export const checkboxPlugin = createWidgetPlugin('Checkbox')
 			descriptionKey: optionalString(raw?.descriptionKey),
 			...interpolationArgs(raw),
 			descriptionTone: oneOf(raw?.descriptionTone, ['muted', 'warning'] as const, 'muted'),
+			badge: stringOr(raw?.badge, ''),
+			badgeKey: optionalString(raw?.badgeKey),
+			badgeIcon: stringOr(raw?.badgeIcon, ''),
+			note: stringOr(raw?.note, ''),
+			noteKey: optionalString(raw?.noteKey),
+			noteTone: oneOf(raw?.noteTone, ['muted', 'warning'] as const, 'muted'),
+			note2: stringOr(raw?.note2, ''),
+			note2Key: optionalString(raw?.note2Key),
+			note2Tone: oneOf(raw?.note2Tone, ['muted', 'warning'] as const, 'muted'),
+			valueCode: Boolean(raw?.valueCode),
 			checked: Boolean(raw?.checked),
 			indeterminate: Boolean(raw?.indeterminate),
 			disabled: Boolean(raw?.disabled),
@@ -4103,16 +4366,75 @@ export const checkboxPlugin = createWidgetPlugin('Checkbox')
 	.state(state => state
 		.checked({ authorWritable: true, validate: isBoolean, default: ({ config }) => config.checked })
 		.indeterminate({ authorWritable: true, validate: isBoolean, default: ({ config }) => config.indeterminate })
-		.disabled({ authorWritable: true, validate: isBoolean, default: ({ config }) => config.disabled }))
+		.disabled({ authorWritable: true, validate: isBoolean, default: ({ config }) => config.disabled })
+		.value({ ...stringState, default: ({ config }) => config.value })
+		.value2({ ...stringState, default: ({ config }) => config.value2 })
+		.value3({ ...stringState, default: ({ config }) => config.value3 })
+		.noteKey({ ...stringState, default: () => '' })
+		.note2Key({ ...stringState, default: () => '' }))
 	.properties(p => p
-		.valueText({ valueContract: STRING, compute: ({ config }) => config.value })
-		.value2Text({ valueContract: STRING, compute: ({ config }) => config.value2 })
-		.value3Text({ valueContract: STRING, compute: ({ config }) => config.value3 })
-		.labelResult(translatedResultWithValue<CheckboxInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
-		.label(translatedTextWithValue<CheckboxInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
-		.descriptionResult(translatedResultWithValue<CheckboxInterfaces['config']['resolved']>(c => ({ key: c.descriptionKey, literal: c.description })))
-		.description(translatedTextWithValue<CheckboxInterfaces['config']['resolved']>(c => ({ key: c.descriptionKey, literal: c.description })))
-		.look({ compute: ({ config }) => ({ descriptionTone: config.descriptionTone, meta: config.meta, mono: config.mono, touch: config.touch }) })
+		.valueText({ valueContract: STRING, registerDeps: ({ dep }) => ({ a: dep.self.state.get('value') }), compute: ({ deps }) => stringFromResult(deps.a()) })
+		.value2Text({ valueContract: STRING, registerDeps: ({ dep }) => ({ a: dep.self.state.get('value2') }), compute: ({ deps }) => stringFromResult(deps.a()) })
+		.value3Text({ valueContract: STRING, registerDeps: ({ dep }) => ({ a: dep.self.state.get('value3') }), compute: ({ deps }) => stringFromResult(deps.a()) })
+		.labelResult({
+			valueContract: TRANSLATION_RESULT,
+			registerDeps: ({ dep }) => ({ ...translateDeps({ dep }), a1: dep.self.state.get('value'), a2: dep.self.state.get('value2'), a3: dep.self.state.get('value3') }),
+			compute: ({ config, deps }) => translateField(config.labelKey, config.label, (key, params) => deps.t(key, params), argumentParams(deps)),
+		})
+		.label({
+			valueContract: STRING,
+			registerDeps: ({ dep }) => ({ result: dep.self.properties.get('labelResult') }),
+			compute: ({ deps }) => textOfResult(deps.result()),
+		})
+		.descriptionResult({
+			valueContract: TRANSLATION_RESULT,
+			registerDeps: ({ dep }) => ({ ...translateDeps({ dep }), a1: dep.self.state.get('value'), a2: dep.self.state.get('value2'), a3: dep.self.state.get('value3') }),
+			compute: ({ config, deps }) => translateField(config.descriptionKey, config.description, (key, params) => deps.t(key, params), argumentParams(deps)),
+		})
+		.description({
+			valueContract: STRING,
+			registerDeps: ({ dep }) => ({ result: dep.self.properties.get('descriptionResult') }),
+			compute: ({ deps }) => textOfResult(deps.result()),
+		})
+		.badgeResult({
+			valueContract: TRANSLATION_RESULT,
+			registerDeps: ({ dep }) => ({ ...translateDeps({ dep }), a1: dep.self.state.get('value'), a2: dep.self.state.get('value2'), a3: dep.self.state.get('value3') }),
+			compute: ({ config, deps }) => translateField(config.badgeKey, config.badge, (key, params) => deps.t(key, params), argumentParams(deps)),
+		})
+		.badge({
+			valueContract: STRING,
+			registerDeps: ({ dep }) => ({ result: dep.self.properties.get('badgeResult') }),
+			compute: ({ deps }) => textOfResult(deps.result()),
+		})
+		.noteResult({
+			valueContract: TRANSLATION_RESULT,
+			registerDeps: ({ dep }) => ({ ...translateDeps({ dep }), stateKey: dep.self.state.get('noteKey'), a1: dep.self.state.get('value'), a2: dep.self.state.get('value2'), a3: dep.self.state.get('value3') }),
+			compute: ({ config, deps }) => translateFieldWithStateKey({ key: config.noteKey, literal: config.note }, stringFromResult(deps.stateKey()), (key, params) => deps.t(key, params), argumentParams(deps)),
+		})
+		.note({
+			valueContract: STRING,
+			registerDeps: ({ dep }) => ({ result: dep.self.properties.get('noteResult') }),
+			compute: ({ deps }) => textOfResult(deps.result()),
+		})
+		.noteRuns({
+			registerDeps: ({ dep }) => ({ ...translateDeps({ dep }), stateKey: dep.self.state.get('noteKey'), a1: dep.self.state.get('value'), a2: dep.self.state.get('value2'), a3: dep.self.state.get('value3') }),
+			compute: ({ config, deps }) => stateKeyRuns({ key: config.noteKey, literal: config.note }, stringFromResult(deps.stateKey()), config.valueCode, (key, params) => deps.t(key, params), argumentParams(deps)),
+		})
+		.note2Result({
+			valueContract: TRANSLATION_RESULT,
+			registerDeps: ({ dep }) => ({ ...translateDeps({ dep }), stateKey: dep.self.state.get('note2Key'), a1: dep.self.state.get('value'), a2: dep.self.state.get('value2'), a3: dep.self.state.get('value3') }),
+			compute: ({ config, deps }) => translateFieldWithStateKey({ key: config.note2Key, literal: config.note2 }, stringFromResult(deps.stateKey()), (key, params) => deps.t(key, params), argumentParams(deps)),
+		})
+		.note2({
+			valueContract: STRING,
+			registerDeps: ({ dep }) => ({ result: dep.self.properties.get('note2Result') }),
+			compute: ({ deps }) => textOfResult(deps.result()),
+		})
+		.note2Runs({
+			registerDeps: ({ dep }) => ({ ...translateDeps({ dep }), stateKey: dep.self.state.get('note2Key'), a1: dep.self.state.get('value'), a2: dep.self.state.get('value2'), a3: dep.self.state.get('value3') }),
+			compute: ({ config, deps }) => stateKeyRuns({ key: config.note2Key, literal: config.note2 }, stringFromResult(deps.stateKey()), config.valueCode, (key, params) => deps.t(key, params), argumentParams(deps)),
+		})
+		.look({ compute: ({ config }) => ({ descriptionTone: config.descriptionTone, badgeIcon: config.badgeIcon, noteTone: config.noteTone, note2Tone: config.note2Tone, meta: config.meta, mono: config.mono, touch: config.touch }) })
 		.theme(themeProperty()),
 	)
 	.events(events => events.toggle({ description: 'Fired when the user toggles the checkbox' }))
@@ -4126,6 +4448,11 @@ export const CheckboxRenderer = defineComponent({
 		const props = useProperties()
 		return (): VNode => {
 			const look = props.look.value
+			const badge = props.badge.value ?? ''
+			const notes: { runs: readonly TextRun[] | null | undefined; text: string; tone: string }[] = [
+				{ runs: props.noteRuns.value, text: props.note.value ?? '', tone: look?.noteTone ?? 'muted' },
+				{ runs: props.note2Runs.value, text: props.note2.value ?? '', tone: look?.note2Tone ?? 'muted' },
+			].filter(note => note.text !== '')
 			return h(KitCheckbox, {
 				[WIDGET_ID_ATTRIBUTE]: widgetId,
 				id: `${widgetId}-checkbox`,
@@ -4145,6 +4472,16 @@ export const CheckboxRenderer = defineComponent({
 					state.indeterminate.value = false
 					emit.toggle()
 				},
+			}, {
+				...(badge ? { badge: () => h(KitBadge, { tone: 'neutral', variant: 'outline', label: badge, ...(look?.badgeIcon ? { icon: look.badgeIcon } : {}) }) } : {}),
+				...(notes.length > 0
+					? {
+							notes: () => notes.map(note => h('span', { class: ['uiux-ref-checkbox-note', `is-${note.tone}`] }, [
+								note.tone === 'warning' ? iconNode('triangle-alert', 14) : null,
+								h('span', runNodes(note.runs, note.text)),
+							])),
+						}
+					: {}),
 			})
 		}
 	},
@@ -5546,8 +5883,8 @@ function firstFocusable(root: Element | null | undefined): HTMLElement | null {
 
 export interface MenuInterfaces {
 	config: {
-		raw: ({ label?: string; labelKey?: string; value?: string | number; value2?: string | number; value3?: string | number; placement?: MenuPlacement; width?: number | string; open?: boolean; visible?: boolean }) | null
-		resolved: InterpolationArgs & { label: string; labelKey: string | null; placement: MenuPlacement; width: string; open: boolean; visible: boolean }
+		raw: ({ label?: string; labelKey?: string; value?: string | number; value2?: string | number; value3?: string | number; placement?: MenuPlacement; width?: number | string; popover?: boolean; open?: boolean; visible?: boolean; hidden?: boolean; responsive?: Responsive<{ hidden?: boolean }> }) | null
+		resolved: InterpolationArgs & { label: string; labelKey: string | null; placement: MenuPlacement; width: string; popover: boolean; open: boolean; visible: boolean; base: { hidden?: boolean }; responsive?: Responsive<{ hidden?: boolean }> }
 	}
 	slots: 'trigger' | 'items'
 	state: { open: boolean; visible: boolean }
@@ -5558,7 +5895,7 @@ export interface MenuInterfaces {
 		value3Text: string
 		labelResult: TranslationResult
 		label: string
-		look: { placement: MenuPlacement; width: string }
+		look: { placement: MenuPlacement; width: string; popover: boolean; hidden: boolean }
 		theme: string
 	}
 }
@@ -5567,7 +5904,7 @@ export const menuPlugin = createWidgetPlugin('Menu')
 	.description('A trigger and the popup menu it opens: the `trigger` slot holds the control (usually a Button), the `items` slot holds MenuItem Widgets and Dividers (a separator). The menu is a named `menu` (`label`, which may interpolate {value}, {value2} and {value3}); the trigger gets `aria-haspopup` and `aria-expanded`. The author-writable `open` state shows the menu, so a Variant can draw it open; pressing the trigger toggles it, Escape and a press on an item close it, and the arrow keys move between items.')
 	.interfaces<MenuInterfaces>()
 	.config({
-		description: 'Menu configuration. `label` names the menu for assistive technology and accepts an `$i18n` binding (lowered to `labelKey`); `{value}`, `{value2}` and `{value3}` interpolate `value`, `value2` and `value3`. `placement` is where the menu opens against the trigger (`bottom-start` by default). `width` is the menu width (a number of px or a CSS length; at least 200px by default). `open` is the initial value of the `open` state; `visible` of the `visible` state.',
+		description: 'Menu configuration. `label` names the menu for assistive technology and accepts an `$i18n` binding (lowered to `labelKey`); `{value}`, `{value2}` and `{value3}` interpolate `value`, `value2` and `value3`. `placement` is where the menu opens against the trigger (`bottom-start` by default). `width` is the menu width (a number of px or a CSS length; at least 200px by default). `popover: true` makes the panel a popover (a named `dialog` with 8px padding) whose `items` slot holds any Widgets (a list of rows, a form) instead of MenuItems: a press inside does not close it, only Escape, the trigger and a press outside do. `open` is the initial value of the `open` state; `visible` of the `visible` state. `hidden` (also in `responsive.medium` and `responsive.compact`) hides the whole Menu, trigger included, on a viewport tier.',
 		schema: configSchema({
 			label: { type: 'string' }, labelKey: { type: 'string' },
 			value: { type: ['string', 'number'] },
@@ -5575,23 +5912,30 @@ export const menuPlugin = createWidgetPlugin('Menu')
 			value3: { type: ['string', 'number'] },
 			placement: { enum: [...MENU_PLACEMENTS] },
 			width: { type: ['number', 'string'] },
+			popover: { type: 'boolean' },
 			open: { type: 'boolean' },
 			visible: { type: 'boolean' },
+			hidden: { type: 'boolean' },
 		}),
 		validate: (c): c is MenuInterfaces['config']['raw'] => isConfigOrOmitted(c),
-		resolve: raw => ({
-			label: stringOr(raw?.label, ''),
-			labelKey: optionalString(raw?.labelKey),
-			...interpolationArgs(raw),
-			placement: oneOf(raw?.placement, MENU_PLACEMENTS, 'bottom-start'),
-			width: px(lengthOr(raw?.width), ''),
-			open: Boolean(raw?.open),
-			visible: raw?.visible === undefined ? true : Boolean(raw.visible),
-		}),
+		resolve: (raw) => {
+			const { label, labelKey, value, value2, value3, placement, width, popover, open, visible, ...presentation } = raw ?? {}
+			return {
+				label: stringOr(label, ''),
+				labelKey: optionalString(labelKey),
+				...interpolationArgs({ value, value2, value3 }),
+				placement: oneOf(placement, MENU_PLACEMENTS, 'bottom-start'),
+				width: px(lengthOr(width), ''),
+				popover: Boolean(popover),
+				open: Boolean(open),
+				visible: visible === undefined ? true : Boolean(visible),
+				...splitResponsive<{ hidden?: boolean }>(presentation),
+			}
+		},
 	})
 	.slots({
 		trigger: { description: 'The control that opens the menu, usually a Button' },
-		items: { description: 'MenuItem Widgets, and Dividers as separators' },
+		items: { description: 'MenuItem Widgets, and Dividers as separators; any Widgets in a popover' },
 	})
 	.state(state => state
 		.open({ authorWritable: true, validate: isBoolean, default: ({ config }) => config.open })
@@ -5602,7 +5946,15 @@ export const menuPlugin = createWidgetPlugin('Menu')
 		.value3Text({ valueContract: STRING, compute: ({ config }) => config.value3 })
 		.labelResult(translatedResultWithValue<MenuInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
 		.label(translatedTextWithValue<MenuInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
-		.look({ compute: ({ config }) => ({ placement: config.placement, width: config.width }) })
+		.look({
+			registerDeps: viewportDeps,
+			compute: ({ config, deps }) => ({
+				placement: config.placement,
+				width: config.width,
+				popover: config.popover,
+				hidden: Boolean(cascade(config.base, config.responsive, tierOf(readViewport(deps.viewport()))).hidden),
+			}),
+		})
 		.theme(themeProperty()),
 	)
 	.events(events => events.toggle({ description: 'Fired when the menu opens or closes by the user (the trigger, Escape, an item or a press outside)' }))
@@ -5623,7 +5975,7 @@ export const MenuRenderer = defineComponent({
 			// Every control of the trigger Widget, also one a Variant swaps in later, so the shown one is always named.
 			const controls = root.value?.querySelectorAll<HTMLElement>('.uiux-ref-menu-trigger :is(button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"]))')
 			for (const control of Array.from(controls ?? [])) {
-				control.setAttribute('aria-haspopup', 'menu')
+				control.setAttribute('aria-haspopup', props.look.value?.popover ? 'dialog' : 'menu')
 				control.setAttribute('aria-expanded', state.open.value ? 'true' : 'false')
 			}
 		}
@@ -5661,6 +6013,8 @@ export const MenuRenderer = defineComponent({
 				close(true)
 				return
 			}
+			// A popover holds free-form content: the keys of a menu (arrows, Home, End, Tab closing it) do not apply.
+			if (props.look.value?.popover) return
 			const inTrigger = Boolean(target.closest('.uiux-ref-menu-trigger'))
 			if (inTrigger && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
 				event.preventDefault()
@@ -5687,14 +6041,14 @@ export const MenuRenderer = defineComponent({
 			return h('div', {
 				ref: root,
 				[WIDGET_ID_ATTRIBUTE]: widgetId,
-				class: ['uiux-ref-scope', 'uiux-ref-menu', props.theme.value, state.visible.value ? '' : 'uiux-ref-hidden'],
+				class: ['uiux-ref-scope', 'uiux-ref-menu', props.theme.value, state.visible.value && !look?.hidden ? '' : 'uiux-ref-hidden'],
 				onKeydown,
 			}, [
 				h('div', { class: 'uiux-ref-menu-trigger', onClick: toggle }, [h(WidgetSlot, { name: 'trigger' })]),
 				state.open.value
 					? h('div', {
-							class: ['uiux-ref-menu-panel', `placement-${look?.placement ?? 'bottom-start'}`],
-							role: 'menu',
+							class: ['uiux-ref-menu-panel', `placement-${look?.placement ?? 'bottom-start'}`, look?.popover ? 'is-popover' : ''],
+							role: look?.popover ? 'dialog' : 'menu',
 							'aria-label': props.label.value || undefined,
 							style: look?.width ? { width: look.width } : undefined,
 							onClick: onPanelClick,
@@ -5707,8 +6061,8 @@ export const MenuRenderer = defineComponent({
 
 export interface MenuItemInterfaces {
 	config: {
-		raw: ({ label?: string; labelKey?: string; description?: string; descriptionKey?: string; meta?: string; badge?: string; badgeKey?: string; value?: string | number; value2?: string | number; value3?: string | number; icon?: string; iconTone?: IconTone; kbd?: string; danger?: boolean; disabled?: boolean; checked?: boolean; visible?: boolean }) | null
-		resolved: InterpolationArgs & { label: string; labelKey: string | null; description: string; descriptionKey: string | null; meta: string; badge: string; badgeKey: string | null; icon: string; iconTone: IconTone; kbd: string; danger: boolean; disabled: boolean; checked: boolean | null; visible: boolean }
+		raw: ({ label?: string; labelKey?: string; description?: string; descriptionKey?: string; meta?: string; badge?: string; badgeKey?: string; value?: string | number; value2?: string | number; value3?: string | number; icon?: string; iconTone?: IconTone; kbd?: string; danger?: boolean; disabled?: boolean; checked?: boolean; visible?: boolean; hidden?: boolean; responsive?: Responsive<{ hidden?: boolean }> }) | null
+		resolved: InterpolationArgs & { label: string; labelKey: string | null; description: string; descriptionKey: string | null; meta: string; badge: string; badgeKey: string | null; icon: string; iconTone: IconTone; kbd: string; danger: boolean; disabled: boolean; checked: boolean | null; visible: boolean; base: { hidden?: boolean }; responsive?: Responsive<{ hidden?: boolean }> }
 	}
 	/** `checked` is `null` for an item that is not a check item. */
 	state: { disabled: boolean; visible: boolean; checked: boolean | null }
@@ -5723,7 +6077,7 @@ export interface MenuItemInterfaces {
 		description: string
 		badgeResult: TranslationResult
 		badge: string
-		look: { icon: string; iconTone: IconTone; meta: string; kbd: string; danger: boolean; touch: boolean }
+		look: { icon: string; iconTone: IconTone; meta: string; kbd: string; danger: boolean; touch: boolean; hidden: boolean }
 		theme: string
 	}
 }
@@ -5732,7 +6086,7 @@ export const menuItemPlugin = createWidgetPlugin('MenuItem')
 	.description('One item of a Menu: a translatable label (which may interpolate {value}, {value2} and {value3}) with an optional description line under it, a leading Lucide icon (in a tone), a literal mono `meta` text and a soft `badge` at the end, a shortcut hint, a `danger` look for a destructive action, and author-writable `disabled`, `visible` and `checked` states (a `checked` item is a check item with `aria-checked`, and shows a check). A press fires `click` and closes the menu; Enter and Space press it.')
 	.interfaces<MenuItemInterfaces>()
 	.config({
-		description: 'MenuItem configuration. `label`, `description` and `badge` accept `$i18n` bindings (lowered to `labelKey`, `descriptionKey`, `badgeKey`); `{value}`, `{value2}` and `{value3}` interpolate `value`, `value2` and `value3` into the label and description. `icon` takes a Lucide name (`iconTone` colors it) and `kbd` a shortcut such as `⌘⌫`; `meta` is literal mono text at the end (a size, a count). `danger` marks a destructive item. `checked` makes the item a check item and is the initial value of the `checked` state (leave it out for a plain item).',
+		description: 'MenuItem configuration. `label`, `description` and `badge` accept `$i18n` bindings (lowered to `labelKey`, `descriptionKey`, `badgeKey`); `{value}`, `{value2}` and `{value3}` interpolate `value`, `value2` and `value3` into the label and description. `icon` takes a Lucide name (`iconTone` colors it) and `kbd` a shortcut such as `⌘⌫`; `meta` is literal mono text at the end (a size, a count). `danger` marks a destructive item. `checked` makes the item a check item and is the initial value of the `checked` state (leave it out for a plain item). `hidden` (also in `responsive.medium` and `responsive.compact`) hides the item on a viewport tier: an entry the app does not offer on a phone.',
 		schema: configSchema({
 			label: { type: 'string' }, labelKey: { type: 'string' },
 			description: { type: 'string' }, descriptionKey: { type: 'string' },
@@ -5748,25 +6102,30 @@ export const menuItemPlugin = createWidgetPlugin('MenuItem')
 			disabled: { type: 'boolean' },
 			checked: { type: 'boolean' },
 			visible: { type: 'boolean' },
+			hidden: { type: 'boolean' },
 		}),
 		validate: (c): c is MenuItemInterfaces['config']['raw'] => isConfigOrOmitted(c),
-		resolve: raw => ({
-			label: stringOr(raw?.label, ''),
-			labelKey: optionalString(raw?.labelKey),
-			description: stringOr(raw?.description, ''),
-			descriptionKey: optionalString(raw?.descriptionKey),
-			meta: stringOr(raw?.meta, ''),
-			badge: stringOr(raw?.badge, ''),
-			badgeKey: optionalString(raw?.badgeKey),
-			...interpolationArgs(raw),
-			icon: stringOr(raw?.icon, ''),
-			iconTone: oneOf(raw?.iconTone, ICON_TONES, 'muted'),
-			kbd: stringOr(raw?.kbd, ''),
-			danger: Boolean(raw?.danger),
-			disabled: Boolean(raw?.disabled),
-			checked: raw?.checked === undefined ? null : Boolean(raw.checked),
-			visible: raw?.visible === undefined ? true : Boolean(raw.visible),
-		}),
+		resolve: (raw) => {
+			const { label, labelKey, description, descriptionKey, meta, badge, badgeKey, value, value2, value3, icon, iconTone, kbd, danger, disabled, checked, visible, ...presentation } = raw ?? {}
+			return {
+				label: stringOr(label, ''),
+				labelKey: optionalString(labelKey),
+				description: stringOr(description, ''),
+				descriptionKey: optionalString(descriptionKey),
+				meta: stringOr(meta, ''),
+				badge: stringOr(badge, ''),
+				badgeKey: optionalString(badgeKey),
+				...interpolationArgs({ value, value2, value3 }),
+				icon: stringOr(icon, ''),
+				iconTone: oneOf(iconTone, ICON_TONES, 'muted'),
+				kbd: stringOr(kbd, ''),
+				danger: Boolean(danger),
+				disabled: Boolean(disabled),
+				checked: checked === undefined ? null : Boolean(checked),
+				visible: visible === undefined ? true : Boolean(visible),
+				...splitResponsive<{ hidden?: boolean }>(presentation),
+			}
+		},
 	})
 	.state(state => state
 		.disabled({ authorWritable: true, validate: isBoolean, default: ({ config }) => config.disabled })
@@ -5784,7 +6143,10 @@ export const menuItemPlugin = createWidgetPlugin('MenuItem')
 		.badge(translatedText<MenuItemInterfaces['config']['resolved']>(c => ({ key: c.badgeKey, literal: c.badge })))
 		.look({
 			registerDeps: viewportDeps,
-			compute: ({ config, deps }) => ({ icon: config.icon, iconTone: config.iconTone, meta: config.meta, kbd: config.kbd, danger: config.danger, touch: isTouchTier(tierOf(readViewport(deps.viewport()))) }),
+			compute: ({ config, deps }) => {
+				const tier = tierOf(readViewport(deps.viewport()))
+				return { icon: config.icon, iconTone: config.iconTone, meta: config.meta, kbd: config.kbd, danger: config.danger, touch: isTouchTier(tier), hidden: Boolean(cascade(config.base, config.responsive, tier).hidden) }
+			},
 		})
 		.theme(themeProperty()),
 	)
@@ -5806,7 +6168,7 @@ export const MenuItemRenderer = defineComponent({
 				'aria-checked': checked === null || checked === undefined ? undefined : String(checked),
 				'aria-disabled': state.disabled.value ? 'true' : undefined,
 				tabindex: -1,
-				class: ['uiux-ref-scope', 'uiux-ref-menu-item', props.theme.value, look?.danger ? 'is-danger' : '', look?.touch ? 'is-touch' : '', state.disabled.value ? 'is-disabled' : '', state.visible.value ? '' : 'uiux-ref-hidden'],
+				class: ['uiux-ref-scope', 'uiux-ref-menu-item', props.theme.value, look?.danger ? 'is-danger' : '', look?.touch ? 'is-touch' : '', state.disabled.value ? 'is-disabled' : '', state.visible.value && !look?.hidden ? '' : 'uiux-ref-hidden'],
 				onClick: () => {
 					if (!state.disabled.value) emit.click()
 				},
@@ -5910,8 +6272,8 @@ const TOOLTIP_PLACEMENTS: readonly TooltipPlacement[] = ['top', 'bottom', 'left'
 
 export interface TooltipInterfaces {
 	config: {
-		raw: ({ text?: string; textKey?: string; kbd?: string | string[]; value?: string | number; value2?: string | number; value3?: string | number; placement?: TooltipPlacement; focusable?: boolean; open?: boolean; visible?: boolean }) | null
-		resolved: InterpolationArgs & { text: string; textKey: string | null; kbd: string[]; placement: TooltipPlacement; focusable: boolean; open: boolean; visible: boolean }
+		raw: ({ text?: string; textKey?: string; kbd?: string | string[]; value?: string | number; value2?: string | number; value3?: string | number; placement?: TooltipPlacement; focusable?: boolean; open?: boolean; visible?: boolean; hidden?: boolean; responsive?: Responsive<{ hidden?: boolean }> }) | null
+		resolved: InterpolationArgs & { text: string; textKey: string | null; kbd: string[]; placement: TooltipPlacement; focusable: boolean; open: boolean; visible: boolean; base: { hidden?: boolean }; responsive?: Responsive<{ hidden?: boolean }> }
 	}
 	slots: 'content'
 	/**
@@ -5925,7 +6287,7 @@ export interface TooltipInterfaces {
 		value3Text: string
 		textResult: TranslationResult
 		text: string
-		look: { placement: TooltipPlacement; focusable: boolean }
+		look: { placement: TooltipPlacement; focusable: boolean; hidden: boolean }
 		theme: string
 	}
 }
@@ -5941,7 +6303,7 @@ export const tooltipPlugin = createWidgetPlugin('Tooltip')
 	.description('A short text hint for the Widget in its `content` slot: it shows while the pointer is over the content or the keyboard focus is inside it (Escape hides it), and always while the author-writable `open` state is true, so a Variant can draw it shown. The text (`text`, which may interpolate {value}, {value2} and {value3}, and which the author-writable `textKey` state replaces with another Locale key) is the `tooltip` that describes the first control of the content (`aria-describedby`). A shortcut hint (`kbd`, one key cap per entry, also a state) follows the text.')
 	.interfaces<TooltipInterfaces>()
 	.config({
-		description: 'Tooltip configuration. `text` accepts an `$i18n` binding (lowered to `textKey`); `{value}`, `{value2}` and `{value3}` interpolate `value`, `value2` and `value3`. `kbd` is the shortcut after the text, one key cap per entry (`["⇧", "C"]`; a string is one cap). `placement` is the side of the content the hint sits on (`top` by default). `focusable` makes the content itself reachable by keyboard (a plain Text or Badge that has no control of its own), so the hint can describe it. `open` is the initial value of the `open` state (shown); `visible` of the `visible` state.',
+		description: 'Tooltip configuration. `text` accepts an `$i18n` binding (lowered to `textKey`); `{value}`, `{value2}` and `{value3}` interpolate `value`, `value2` and `value3`. `kbd` is the shortcut after the text, one key cap per entry (`["⇧", "C"]`; a string is one cap). `placement` is the side of the content the hint sits on (`top` by default). `focusable` makes the content itself reachable by keyboard (a plain Text or Badge that has no control of its own), so the hint can describe it. `open` is the initial value of the `open` state (shown); `visible` of the `visible` state. `hidden` (also in `responsive.medium` and `responsive.compact`) hides the content and its hint on a viewport tier.',
 		schema: configSchema({
 			text: { type: 'string' }, textKey: { type: 'string' },
 			kbd: { type: ['string', 'array'], items: { type: 'string' } },
@@ -5952,18 +6314,23 @@ export const tooltipPlugin = createWidgetPlugin('Tooltip')
 			focusable: { type: 'boolean' },
 			open: { type: 'boolean' },
 			visible: { type: 'boolean' },
+			hidden: { type: 'boolean' },
 		}),
 		validate: (c): c is TooltipInterfaces['config']['raw'] => isConfigOrOmitted(c),
-		resolve: raw => ({
-			text: stringOr(raw?.text, ''),
-			textKey: optionalString(raw?.textKey),
-			kbd: keyCaps(raw?.kbd),
-			...interpolationArgs(raw),
-			placement: oneOf(raw?.placement, TOOLTIP_PLACEMENTS, 'top'),
-			focusable: Boolean(raw?.focusable),
-			open: Boolean(raw?.open),
-			visible: raw?.visible === undefined ? true : Boolean(raw.visible),
-		}),
+		resolve: (raw) => {
+			const { text, textKey, kbd, value, value2, value3, placement, focusable, open, visible, ...presentation } = raw ?? {}
+			return {
+				text: stringOr(text, ''),
+				textKey: optionalString(textKey),
+				kbd: keyCaps(kbd),
+				...interpolationArgs({ value, value2, value3 }),
+				placement: oneOf(placement, TOOLTIP_PLACEMENTS, 'top'),
+				focusable: Boolean(focusable),
+				open: Boolean(open),
+				visible: visible === undefined ? true : Boolean(visible),
+				...splitResponsive<{ hidden?: boolean }>(presentation),
+			}
+		},
 	})
 	.slots({ content: { description: 'The Widget the hint is about (a Button, an icon, a badge)' } })
 	.state(state => state
@@ -5985,7 +6352,10 @@ export const tooltipPlugin = createWidgetPlugin('Tooltip')
 			registerDeps: ({ dep }) => ({ result: dep.self.properties.get('textResult') }),
 			compute: ({ deps }) => textOfResult(deps.result()),
 		})
-		.look({ compute: ({ config }) => ({ placement: config.placement, focusable: config.focusable }) })
+		.look({
+			registerDeps: viewportDeps,
+			compute: ({ config, deps }) => ({ placement: config.placement, focusable: config.focusable, hidden: Boolean(cascade(config.base, config.responsive, tierOf(readViewport(deps.viewport()))).hidden) }),
+		})
 		.theme(themeProperty()),
 	)
 	.done()
@@ -6014,7 +6384,7 @@ export const TooltipRenderer = defineComponent({
 			return h('span', {
 				ref: root,
 				[WIDGET_ID_ATTRIBUTE]: widgetId,
-				class: ['uiux-ref-scope', 'uiux-ref-tooltip', props.theme.value, state.visible.value ? '' : 'uiux-ref-hidden'],
+				class: ['uiux-ref-scope', 'uiux-ref-tooltip', props.theme.value, state.visible.value && !props.look.value?.hidden ? '' : 'uiux-ref-hidden'],
 				onMouseenter: () => { hover.value = true },
 				onMouseleave: () => { hover.value = false },
 				onFocusin: () => { focus.value = true },
@@ -6895,6 +7265,14 @@ function i18nFieldsWithValue(fields: readonly string[], plain: readonly string[]
 	return { i18n: { fields: Object.fromEntries([...fields.map(field => [field, i18nField(field, VALUE_PARAMS)]), ...plain.map(field => [field, i18nField(field)])]) } }
 }
 
+/**
+ * The arguments of Text and Badge as i18n fields (Discussion #448, Rule 01a194f4-83bd): the parameter `{value}` maps to the
+ * text Property `value` of the i18n field `value` (Config `valueKey`), likewise `value2` and `value3`.
+ */
+const VALUE_TEXT_PARAMS = { value: 'value', value2: 'value2', value3: 'value3' } as const
+
+const VALUE_FIELDS = { value: i18nField('value'), value2: i18nField('value2'), value3: i18nField('value3') } as const
+
 const RENDER_CONTEXT_PARAMS = {
 	viewportId: 'contextViewportId',
 	viewport: 'contextViewport',
@@ -6905,10 +7283,10 @@ const RENDER_CONTEXT_PARAMS = {
 const catalogWidgets: Readonly<Record<string, AdapterWidgetCatalogEntry>> = {
 	Stack: {},
 	Panel: { i18n: { fields: { title: i18nField('title', VALUE_PARAMS), description: i18nField('description', VALUE_PARAMS), closeLabel: i18nField('closeLabel') } } },
-	Text: { i18n: { fields: { text: i18nField('text', VALUE_PARAMS) } } },
-	Button: { i18n: { fields: { label: i18nField('label', VALUE_PARAMS) } } },
+	Text: { i18n: { fields: { text: i18nField('text', VALUE_TEXT_PARAMS), ...VALUE_FIELDS } } },
+	Button: { i18n: { fields: { label: i18nField('label', { ...VALUE_TEXT_PARAMS, ...RENDER_CONTEXT_PARAMS }), ...VALUE_FIELDS } } },
 	ButtonGroup: i18nFields('label'),
-	Badge: { i18n: { fields: { label: i18nField('label', { value: 'valueText', ...RENDER_CONTEXT_PARAMS }) } } },
+	Badge: { i18n: { fields: { label: i18nField('label', { ...VALUE_TEXT_PARAMS, ...RENDER_CONTEXT_PARAMS }), ...VALUE_FIELDS } } },
 	TextInput: i18nFieldsWithValue(['placeholder', 'label', 'help', 'error'], ['value']),
 	NavItem: i18nFields('label', 'meta', 'badge'),
 	Divider: {},
@@ -6931,7 +7309,7 @@ const catalogWidgets: Readonly<Record<string, AdapterWidgetCatalogEntry>> = {
 	Icon: i18nFields('label'),
 	Skeleton: i18nFields('label'),
 	ListItem: {},
-	Checkbox: i18nFieldsWithValue(['label', 'description']),
+	Checkbox: i18nFieldsWithValue(['label', 'description', 'badge', 'note', 'note2']),
 	Select: i18nFieldsWithValue(['label', 'help', 'placeholder'], ['value', 'searchPlaceholder']),
 	SelectOption: i18nFieldsWithValue(['label', 'description']),
 	Disclosure: { i18n: { fields: { label: i18nField('label', VALUE_PARAMS) } } },

@@ -8,7 +8,8 @@ import Icon from './Icon.vue'
  * `toggle` with the requested value; the box shows the `checked` it is given, so a parent that does
  * not accept the change leaves it as it was. `indeterminate` is the mixed state, which a press clears.
  * The label names the control and the description describes it. A `warning` description carries an
- * icon, so color is never the only signal.
+ * icon, so color is never the only signal. The `badge` slot puts a badge after the label (it is part of
+ * the accessible name) and the `notes` slot adds further lines under the description (they describe it).
  */
 const props = defineProps<{
   label?: string
@@ -66,16 +67,22 @@ function onChange(event: Event): void {
       :name="name"
       :checked="checked"
       :disabled="disabled"
-      :aria-labelledby="label ? `${controlId}-label` : undefined"
-      :aria-describedby="description ? `${controlId}-description` : undefined"
+      :aria-labelledby="label || $slots.badge ? `${controlId}-label` : undefined"
+      :aria-describedby="[description ? `${controlId}-description` : '', $slots.notes ? `${controlId}-notes` : ''].filter(Boolean).join(' ') || undefined"
       @change="onChange"
     >
     <span class="kit-checkbox__text">
       <span
-        v-if="label"
+        v-if="label || $slots.badge"
         :id="`${controlId}-label`"
-        class="kit-checkbox__label"
-      >{{ label }}</span>
+        class="kit-checkbox__title"
+      >
+        <span
+          v-if="label"
+          class="kit-checkbox__label"
+        >{{ label }}</span>
+        <slot name="badge" />
+      </span>
       <span
         v-if="description"
         :id="`${controlId}-description`"
@@ -88,6 +95,11 @@ function onChange(event: Event): void {
           :size="14"
         />{{ description }}
       </span>
+      <span
+        v-if="$slots.notes"
+        :id="`${controlId}-notes`"
+        class="kit-checkbox__notes"
+      ><slot name="notes" /></span>
     </span>
     <span
       v-if="meta"
@@ -105,7 +117,9 @@ function onChange(event: Event): void {
 .kit-checkbox__control { flex-shrink: 0; width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--kit-primary); cursor: inherit; }
 .kit-checkbox__control:focus-visible { outline: 2px solid var(--kit-primary); outline-offset: 2px; }
 .kit-checkbox__text { display: flex; flex-direction: column; min-width: 0; flex: 1 1 auto; }
+.kit-checkbox__title { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; min-width: 0; }
 .kit-checkbox__label { font-weight: 500; overflow-wrap: anywhere; }
+.kit-checkbox__notes { display: flex; flex-direction: column; min-width: 0; font-size: 12px; line-height: 18px; overflow-wrap: anywhere; }
 .kit-checkbox__description { display: flex; align-items: flex-start; gap: 4px; font-size: 12px; line-height: 18px; overflow-wrap: anywhere; }
 .kit-checkbox__description.is-muted { color: var(--kit-text-muted); }
 .kit-checkbox__description.is-warning { color: var(--kit-warning); }

@@ -34,11 +34,11 @@
       "target": "app/components/kit"
     },
     "checkbox": {
-      "componentDigest": "sha256:ab2e68eb8fd562ae67fea2db578bb8722c8e928ffa0492771a1b3d7e2c7ad29e",
-      "exportedAt": "2026-10-31T01:45:54.108Z",
+      "componentDigest": "sha256:74e9715ea2b1f6bd94d55829257d7784e955bd68b3bc0353a84a144326ee1973",
+      "exportedAt": "2026-11-01T09:43:24.321Z",
       "files": {
         "app/components/kit/ui/Checkbox.vue": {
-          "digest": "sha256:f461c86dae4340891ed2c5ad672b80daa551b39a7f847269624115ac659f3e5a",
+          "digest": "sha256:8aad99ecb59ac94ee30a68ac507190dca1b0af17a021c23635877962ef2e574f",
           "source": "src/ui/Checkbox.vue"
         }
       },
