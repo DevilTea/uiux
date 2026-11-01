@@ -402,15 +402,28 @@ describe('version records carry Product Kit provenance (Clause 01a11bb1-b6ae-7cf
 			return { record: (await stores.host.readVersion(boundary!.external!))!, elapsed }
 		}
 
+		// A record whose in-lock budget (2 s) ran out under host load goes without productKit; the slow
+		// phase below is what asserts the budget. Here the question is which kit files are read, so such a
+		// record is retried once the digests finished outside the lock (issue #263: one record took about
+		// 0.8 s of the 2 s when 16 copies of this file ran at once).
+		const externalVersionInBudget = async () => {
+			for (let attempt = 0; attempt < 5; attempt++) {
+				const version = await externalVersion()
+				if (version.record.productKit !== undefined) return version
+				await kitFileDigestCache.digests(await locateKitProject(root, 'kit'))
+			}
+			throw new Error('the Product Kit provenance never fit the in-lock budget')
+		}
+
 		// Unchanged kit: no kit file is read under the lock.
 		hashed.length = 0
-		const unchanged = await externalVersion()
+		const unchanged = await externalVersionInBudget()
 		expect(hashed).toEqual([])
 		expect(unchanged.record.productKit).toEqual(await provenance(persistence))
 
 		// One changed kit file: only it is read.
 		await put(root, 'kit/src/many/3/f3.ts', 'export const v3 = 33\n')
-		const changed = await externalVersion()
+		const changed = await externalVersionInBudget()
 		expect(hashed).toEqual(['src/many/3/f3.ts'])
 		expect(changed.record.productKit).toEqual(await provenance(persistence))
 
@@ -427,6 +440,7 @@ describe('version records carry Product Kit provenance (Clause 01a11bb1-b6ae-7cf
 		}
 		kitFileDigestCache.hashFile = counted
 		hashed.length = 0
+		logged.length = 0
 		await put(root, 'kit/src/many/4/f4.ts', 'export const v4 = 44\n')
 		const slow = await externalVersion()
 		expect(hashed).toEqual(['src/many/4/f4.ts'])

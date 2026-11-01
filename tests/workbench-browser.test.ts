@@ -991,7 +991,21 @@ describe('Canvas comments (R6 targeting and composer, R7a pins and bubble)', () 
 			const pin = page.locator(`.pin-anchor:not([hidden]) [data-pin-thread="${threadId}"]`)
 			expect(await pin.count()).toBe(0)
 			const more = bubble.getByRole('button', { name: 'More', exact: true })
-			const pressed = (await more.boundingBox())!
+			// The bubble is placed from measured text and fonts: read the button once its box has held still for
+			// several animation frames, or a late sub-pixel settle would count as a move after the press.
+			const frames = (count: number) => page.evaluate(n => new Promise<void>((resolve) => {
+				let left = n
+				const tick = () => (--left ? requestAnimationFrame(tick) : resolve())
+				requestAnimationFrame(tick)
+			}), count)
+			let pressed = (await more.boundingBox())!
+			await expect.poll(async () => {
+				await frames(5)
+				const now = (await more.boundingBox())!
+				const still = Math.hypot(now.x - pressed.x, now.y - pressed.y) < 0.01
+				pressed = now
+				return still
+			}, { timeout: 10_000 }).toBe(true)
 
 			// Press More, let the Preview draw the pin, and only then release.
 			await page.mouse.move(pressed.x + pressed.width / 2, pressed.y + pressed.height / 2)
@@ -1005,7 +1019,11 @@ describe('Canvas comments (R6 targeting and composer, R7a pins and bubble)', () 
 				const tick = () => (--frames ? requestAnimationFrame(tick) : resolve())
 				requestAnimationFrame(tick)
 			}))
-			expect(await more.boundingBox()).toEqual(pressed)
+			// Still means not moved by the jump to the pin (hundreds of px); a sub-pixel layout rounding is not a move.
+			const stillBox = (await more.boundingBox())!
+			expect(Math.hypot(stillBox.x - pressed.x, stillBox.y - pressed.y)).toBeLessThan(1)
+			expect(Math.abs(stillBox.width - pressed.width)).toBeLessThan(1)
+			expect(Math.abs(stillBox.height - pressed.height)).toBeLessThan(1)
 			await page.mouse.up()
 			const menu = page.locator('[role="menu"]')
 			await menu.waitFor({ timeout: 5_000 })

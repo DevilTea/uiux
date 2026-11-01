@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { chromium, type Browser, type BrowserContext, type Frame, type Page } from 'playwright'
+import { chromium, type Browser, type BrowserContext, type Frame, type Locator, type Page } from 'playwright'
 import { startWorkbenchServer, type WorkbenchServer } from './support/workbench-server'
 
 /**
@@ -67,7 +67,18 @@ async function open(path: string): Promise<{ context: BrowserContext; page: Page
 type Review = { resource: { displayHint?: { pin: { x: number; y: number } } } }
 const hintOf = async (threadId: string) => (await api<Review>(`/api/resources/review/${threadId}`)).resource.displayHint?.pin
 const live = (page: Page) => page.locator('[role="status"][aria-live="polite"]')
-const liveText = (page: Page) => live(page).allTextContents().then(texts => texts.join(' '))
+/**
+ * The box of an element once it has one. `boundingBox()` answers null while the element is detached or
+ * not laid out, as a pin is for a moment whenever the pin layer re-renders (a live refresh after the hint
+ * is written, a Preview geometry report under load): the read waits for the box instead of dereferencing
+ * null (issue #263).
+ */
+async function boxOf(locator: Locator): Promise<{ x: number; y: number; width: number; height: number }> {
+	let box: { x: number; y: number; width: number; height: number } | null = null
+	await expect.poll(async () => { box = await locator.boundingBox(); return box !== null }, { timeout: 15_000 }).toBe(true)
+	return box!
+}
+const liveText = (page: Page) =>live(page).allTextContents().then(texts => texts.join(' '))
 
 describe('Keyboard pin move (issue #118)', () => {
 	it('moves a pin with M and the arrows, writes once on Enter, and announces each state', async () => {
@@ -81,7 +92,7 @@ describe('Keyboard pin move (issue #118)', () => {
 			expect(await page.locator(`#${describedBy}`).textContent()).toContain('Press M to move this pin')
 			const writes: string[] = []
 			page.on('request', (request) => { if (request.url().includes('/display-hint')) writes.push(request.method()) })
-			const tip = async () => { const box = (await pin.boundingBox())!; return { x: box.x, y: box.y + box.height } }
+			const tip = async () => { const box = await boxOf(pin); return { x: box.x, y: box.y + box.height } }
 
 			await pin.focus()
 			const before = await tip()
@@ -154,7 +165,7 @@ describe('Keyboard pin move (issue #118)', () => {
 			await pin.waitFor({ timeout: 15_000 })
 			const writes: string[] = []
 			page.on('request', (request) => { if (request.url().includes('/display-hint')) writes.push(request.method()) })
-			const tip = async () => { const box = (await pin.boundingBox())!; return { x: box.x, y: box.y + box.height } }
+			const tip = async () => { const box = await boxOf(pin); return { x: box.x, y: box.y + box.height } }
 			await pin.focus()
 			const before = await tip()
 
@@ -190,7 +201,7 @@ describe('Pointer pin move and physical hints', () => {
 			page.on('request', (request) => {
 				if (request.method() !== 'GET' && new URL(request.url()).pathname.startsWith('/api/reviews')) writes.push({ method: request.method(), url: new URL(request.url()).pathname })
 			})
-			const box = (await pin.boundingBox())!
+			const box = await boxOf(pin)
 			const from = { x: box.x + box.width / 2, y: box.y + box.height / 2 }
 			await page.mouse.move(from.x, from.y)
 			await page.mouse.down()
@@ -228,11 +239,11 @@ describe('Pointer pin move and physical hints', () => {
 			const card = frame.locator('[data-widget-id="card"]')
 			// The pin's tip is the bottom-left corner of its box.
 			const tipError = async () => {
-				const rect = (await card.boundingBox())!
-				const pinBox = (await pin.boundingBox())!
+				const rect = await boxOf(card)
+				const pinBox = await boxOf(pin)
 				return { error: Math.hypot(pinBox.x - (rect.x + 0.2 * rect.width), pinBox.y + pinBox.height - (rect.y + 0.5 * rect.height)), left: pinBox.x < rect.x + rect.width / 2 }
 			}
-			const cardLtr = (await card.boundingBox())!
+			const cardLtr = await boxOf(card)
 			expect(await tipError()).toMatchObject({ left: true })
 
 			// The right-to-left Locale is chosen, and the Preview lays its content out right to left.
@@ -240,7 +251,7 @@ describe('Pointer pin move and physical hints', () => {
 			await page.getByRole('option', { name: 'ar-SA' }).click()
 			await expect.poll(() => new URL(page.url()).searchParams.get('locale')).toBe('ar-SA')
 			await frame.evaluate(() => { document.documentElement.setAttribute('dir', 'rtl'); document.body.setAttribute('dir', 'rtl') })
-			await expect.poll(async () => (await card.boundingBox())!.x, { timeout: 15_000 }).toBeGreaterThan(cardLtr.x + 50)
+			await expect.poll(async () => (await boxOf(card)).x, { timeout: 15_000 }).toBeGreaterThan(cardLtr.x + 50)
 
 			// The pin follows the Widget's physical box: 20 % from its left edge, however far right the Widget now lies.
 			await expect.poll(async () => (await tipError()).error, { timeout: 15_000 }).toBeLessThan(2)
