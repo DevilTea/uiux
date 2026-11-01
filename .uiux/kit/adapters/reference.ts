@@ -1214,7 +1214,7 @@ export const ButtonRenderer = defineComponent({
 			return h(KitButton, {
 				[WIDGET_ID_ATTRIBUTE]: widgetId,
 				label: countOnly ? '' : label,
-				'aria-label': countOnly ? label : undefined,
+				...(countOnly ? { 'aria-label': label } : {}),
 				variant: (state.variant.value ?? 'secondary') as ButtonVariant,
 				size: (presentation?.size ?? 'md') as 'xs' | 'sm' | 'md' | 'lg',
 				icon: props.icon.value || undefined,
