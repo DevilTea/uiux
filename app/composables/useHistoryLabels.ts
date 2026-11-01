@@ -52,7 +52,7 @@ export function useHistoryLabels() {
 	/** Every Asset's name, page by page so no Asset past the first page is named by its key. */
 	async function readAllAssetNames(): Promise<Map<string, string>> {
 		const names = new Map<string, string>()
-		const { items } = await listAllResources<{ key: string; summary?: { name?: string } }>(uiux, ['asset'])
+		const { items } = await listAllResources<{ key: string; summary?: { name?: string } }>(uiux, ['asset'], { maxPages: Number.POSITIVE_INFINITY })
 		for (const item of items) if (item.summary?.name) names.set(item.key, item.summary.name)
 		return names
 	}

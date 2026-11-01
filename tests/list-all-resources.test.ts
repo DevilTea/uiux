@@ -68,6 +68,15 @@ describe('listAllResources', () => {
 		expect(await listAllResources<number>(exact, ['view'], { maxPages: 2 })).toEqual({ items: [0, 1], complete: true })
 	})
 
+	it('reads past LIST_ALL_MAX_PAGES pages when the caller is unbounded', async () => {
+		const total = LIST_ALL_MAX_PAGES + 5
+		const client = fakeClient(pagesOf(total, 1))
+		const result = await listAllResources<number>(client, ['asset'], { maxPages: Number.POSITIVE_INFINITY })
+		expect(result.complete).toBe(true)
+		expect(client.calls).toHaveLength(total)
+		expect(result.items).toHaveLength(total)
+	})
+
 	it('passes `detail` on every page', async () => {
 		const client = fakeClient(pagesOf(2, 1))
 		await listAllResources<number>(client, ['view'], { detail: 'expanded' })

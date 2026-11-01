@@ -16,7 +16,8 @@ export const LIST_ALL_MAX_PAGES = 20
 
 /**
  * Every summary of the given kinds, following `nextCursor` page by page at the server's largest page
- * size. `complete` is false when `maxPages` pages ran out while a cursor was still returned. A failed
+ * size. `complete` is false when `maxPages` pages ran out while a cursor was still returned;
+ * `Number.POSITIVE_INFINITY` reads until no cursor is returned. A failed
  * page read rejects, so each caller keeps its own error behavior.
  */
 export async function listAllResources<T>(

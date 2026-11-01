@@ -37,7 +37,7 @@ export function usePendingDecisions() {
 		}
 		try {
 			type Item = { key: string; revision: string; detail?: ViewDiscoveryDetail }
-			const { items } = await listAllResources<Item>(uiux, ['view'], { detail: 'expanded' })
+			const { items } = await listAllResources<Item>(uiux, ['view'], { detail: 'expanded', maxPages: Number.POSITIVE_INFINITY })
 			const holders = items.filter(item => (item.detail?.decisionCounts?.pending ?? 0) > 0)
 			const previous = reads.value
 			const next = new Map<string, ViewRead>()
