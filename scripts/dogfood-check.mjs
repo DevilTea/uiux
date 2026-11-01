@@ -53,7 +53,7 @@ import { parseArgs } from 'node:util'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
 import { assessRequirementCoverage, assessRoutes, coverageNumbers, describeNumbers, enumeratePages, ROUTE_MAP_FILE } from './dogfood-coverage.mjs'
-import { exportCommitted, git, makeScratch, mergeBase, resolveBase } from './dogfood-guard.mjs'
+import { collectableTrackedBlobs, exportCommitted, git, makeScratch, mergeBase, resolveBase } from './dogfood-guard.mjs'
 
 const REPOSITORY = join(dirname(fileURLToPath(import.meta.url)), '..')
 const HOST = '127.0.0.1'
@@ -707,6 +707,13 @@ export async function runCheck({ source, keep = false, base }) {
 		makeProviderWorkTree(copiedRoot)
 		header.push(`copy: ${files} files${hasSpec ? ' and .spec/' : ''}, temporary UIUX_HOME, --workspace ${copiedRoot}`)
 		const modules = await loadRepositoryModules(scratch.base)
+		// Report-only: Evidence blobs the committed tree still tracks that gc would collect (select lists the deletions).
+		try {
+			header.push(`collectable tracked blobs: ${collectableTrackedBlobs(REPOSITORY).length} (uiux artifacts gc --dry-run of HEAD's committed .uiux/; pnpm dogfood:worktree select lists the deletions)`)
+		}
+		catch (error) {
+			header.push(`collectable tracked blobs: not computed (${String(error?.message ?? error).split('\n')[0]})`)
+		}
 
 		const attempt = async (id, title, work) => {
 			try { await work() }

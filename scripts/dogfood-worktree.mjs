@@ -17,6 +17,9 @@
  * `history/` replaced by the one in HEAD). It never selects `.uiux/history/**` (the worktree's
  * Baseline Checkpoint and host history) or an unreferenced blob, prints the exact `git add` list
  * (and runs it with `--stage`), and changes nothing else.
+ *
+ * After a recapture it also lists the deletions of tracked blobs that the same gc dry-run would
+ * collect (the Evidence the recapture superseded) as `git rm` lines; `--stage` runs them too.
  */
 
 import { execFileSync, spawnSync } from 'node:child_process'
@@ -26,7 +29,7 @@ import { dirname, join, relative, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
 import { fileURLToPath } from 'node:url'
 
-import { DOGFOOD_DIR, GuardError, HISTORY_DIR, exportCommitted, git, listGarbageBlobs, makeScratch } from './dogfood-guard.mjs'
+import { BLOB_DIR, DOGFOOD_DIR, GuardError, HISTORY_DIR, exportCommitted, git, listGarbageBlobs, makeScratch } from './dogfood-guard.mjs'
 
 const BLOB_PATH = /^\.uiux\/artifacts\/sha256\/[0-9a-f]{2}\/([0-9a-f]{64})$/
 // The CLI that runs this script: in a worktree, the worktree's own bin/uiux.mjs.
@@ -124,7 +127,9 @@ function buildCommittable(repo, destRoot, entries) {
 /**
  * Classifies the changes under `.uiux/` for committing. Returns `{ add, history, collectable, damaged }`:
  * `add` the paths to stage (deletions included), `history` the skipped history paths, `collectable`
- * the skipped unreferenced new blobs, `damaged` the tracked blobs that were modified or deleted.
+ * the skipped unreferenced new blobs, `damaged` the tracked blobs that were modified or deleted, and
+ * `remove` the tracked blobs gc would collect from the as-committed tree (deletions to stage; a blob
+ * whose deletion is already staged is left out, and a working-tree deletion of one is not damage).
  */
 /** @param {string} repo @param {{ uiuxBin?: string }} [options] */
 export function select(repo, { uiuxBin } = {}) {
@@ -133,9 +138,12 @@ export function select(repo, { uiuxBin } = {}) {
 	const history = []
 	const damaged = []
 	const newBlobs = []
+	const trackedBlobs = new Set(git(repo, ['ls-tree', '-r', '--name-only', 'HEAD', '--', BLOB_DIR]).split('\n').filter(path => BLOB_PATH.test(path)))
+	const deleted = new Map()
 	for (const { status, path } of entries) {
 		const blob = BLOB_PATH.exec(path)
 		if (path.startsWith(`${HISTORY_DIR}/`)) history.push(path)
+		else if (blob && status.includes('D') && trackedBlobs.has(path)) deleted.set(path, status)
 		else if (blob && status !== '??' && status !== 'A ') damaged.push(path)
 		else if (blob) newBlobs.push({ path, hex: blob[1] })
 		else add.push(path)
@@ -143,19 +151,24 @@ export function select(repo, { uiuxBin } = {}) {
 
 	let collectable = []
 	let blobs = newBlobs
-	if (newBlobs.length > 0) {
+	let remove = []
+	if (newBlobs.length > 0 || trackedBlobs.size > 0) {
 		const scratch = makeScratch()
 		try {
 			buildCommittable(repo, scratch.workspaceRoot, entries)
 			const garbage = listGarbageBlobs({ workspaceRoot: scratch.workspaceRoot, home: scratch.home, ...(uiuxBin ? { uiuxBin } : {}) })
 			collectable = newBlobs.filter(blob => garbage.has(blob.hex)).map(blob => blob.path)
 			blobs = newBlobs.filter(blob => !garbage.has(blob.hex))
+			remove = [...trackedBlobs].filter(path => garbage.has(BLOB_PATH.exec(path)[1])).sort()
 		}
 		finally {
 			scratch.remove()
 		}
 	}
-	return { add: [...add, ...blobs.map(blob => blob.path)].sort(), resources: add.length, blobs: blobs.length, history, collectable, damaged }
+	// A deleted tracked blob that gc would not collect is damage; one it would collect is a wanted deletion.
+	for (const path of deleted.keys()) if (!remove.includes(path)) damaged.push(path)
+	remove = remove.filter(path => deleted.get(path)?.[0] !== 'D')
+	return { add: [...add, ...blobs.map(blob => blob.path)].sort(), resources: add.length, blobs: blobs.length, history, collectable, damaged, remove }
 }
 
 const shellQuote = path => `'${path.replaceAll('\'', '\'\\\'\'')}'`
@@ -172,13 +185,18 @@ export function formatSelection(result) {
 		lines.push('', 'git add -- \\')
 		result.add.forEach((path, index) => lines.push(`  ${shellQuote(path)}${index < result.add.length - 1 ? ' \\' : ''}`))
 	}
+	if (result.remove.length > 0) {
+		lines.push('', `${result.remove.length} tracked blob(s) that gc --dry-run (empty UIUX_HOME) would collect from the tree as committed (superseded Evidence); delete them in this PR:`)
+		lines.push('git rm -q -- \\')
+		result.remove.forEach((path, index) => lines.push(`  ${shellQuote(path)}${index < result.remove.length - 1 ? ' \\' : ''}`))
+	}
 	lines.push('', 'Then commit, and run pnpm dogfood:guard before opening the PR.')
 	return lines
 }
 
-function stage(repo, paths) {
+function stage(repo, paths, subcommand = ['add']) {
 	for (let index = 0; index < paths.length; index += STAGE_CHUNK)
-		execFileSync('git', ['add', '--', ...paths.slice(index, index + STAGE_CHUNK)], { cwd: repo, stdio: 'ignore' })
+		execFileSync('git', [...subcommand, '--', ...paths.slice(index, index + STAGE_CHUNK)], { cwd: repo, stdio: 'ignore' })
 }
 
 async function main() {
@@ -196,9 +214,10 @@ async function main() {
 			if (!isLinkedWorktree(repo)) throw new GuardError(`${repo} is the primary checkout; select runs in the authoring worktree.`)
 			const result = select(repo)
 			console.log(formatSelection(result).join('\n'))
-			if (values.stage && result.add.length > 0) {
+			if (values.stage && (result.add.length > 0 || result.remove.length > 0)) {
 				stage(repo, result.add)
-				console.log(`\nStaged ${result.add.length} path(s).`)
+				stage(repo, result.remove, ['rm', '-q', '--ignore-unmatch'])
+				console.log(`\nStaged ${result.add.length} path(s) and ${result.remove.length} deletion(s).`)
 			}
 			return 0
 		}

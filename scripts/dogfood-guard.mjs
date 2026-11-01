@@ -165,6 +165,25 @@ export function checkBlobs(repo, { from, to, head, uiuxBin }) {
 	}
 }
 
+/**
+ * The tracked Evidence blobs of `ref` that `uiux artifacts gc --dry-run` (empty `UIUX_HOME`) would
+ * collect from `ref`'s committed `.uiux/`: repository-relative paths. Report-only (dogfood:check).
+ */
+/** @param {string} repo @param {string} [ref] @param {{ uiuxBin?: string }} [options] */
+export function collectableTrackedBlobs(repo, ref = 'HEAD', { uiuxBin } = {}) {
+	const tracked = new Set(git(repo, ['ls-tree', '-r', '--name-only', ref, '--', BLOB_DIR]).split('\n').filter(Boolean))
+	if (tracked.size === 0) return []
+	const scratch = makeScratch()
+	try {
+		exportCommitted(repo, ref, scratch.workspaceRoot)
+		const garbage = listGarbageBlobs({ workspaceRoot: scratch.workspaceRoot, home: scratch.home, ...(uiuxBin ? { uiuxBin } : {}) })
+		return [...garbage].map(hex => blobPath(hex)).filter(path => tracked.has(path)).sort()
+	}
+	finally {
+		scratch.remove()
+	}
+}
+
 /** Runs both guards; returns `{ ok, lines }` for the caller to print. */
 /** @param {string} repo @param {{ base?: string, head?: string, env?: Record<string, string | undefined>, uiuxBin?: string, allowHistory?: boolean }} [options] */
 export function runGuard(repo, { base, head = 'HEAD', env, uiuxBin, allowHistory = false } = {}) {
