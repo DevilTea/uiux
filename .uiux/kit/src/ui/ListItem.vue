@@ -3,7 +3,12 @@
  * The Kit list item: one generic row for lists, timelines, step lists and trees. Three slots hold
  * what the row shows: `leading` (an icon, a marker or a number), `content` (the default slot works
  * too) and `trailing` (a badge, a time or an action). It is controlled and has no state: `selected`,
- * `dimmed`, `level` (the indent, 16px per level) and `divided` (a hairline below) render from props.
+ * `dimmed`, `level` (the indent, `indent` px per level, 16 by default), `divided` (a hairline below)
+ * and `expanded` render from props.
+ *
+ * A row that opens or closes a branch of a tree sets `expanded` (`true` open, `false` closed): it
+ * exposes `aria-expanded` (which a button allows), so make it `interactive`. A row with no
+ * `expanded` (a leaf, or a plain list) exposes none.
  *
  * `interactive` makes the whole row one button-like target: focusable, and Enter or Space press it.
  * Its press reaches the parent as the native `click` event. An interactive row must not hold another
@@ -14,8 +19,12 @@ const props = defineProps<{
   selected?: boolean
   /** The row is de-emphasized, such as a version after the one shown. */
   dimmed?: boolean
-  /** Indent depth, 16px per level. Default 0. */
+  /** Indent depth, `indent` px per level. Default 0. */
   level?: number
+  /** The indent of one level in px. Default 16. */
+  indent?: number
+  /** A branch row: `true` while its children show, `false` while they are hidden (`aria-expanded`). Leave it out for a leaf. */
+  expanded?: boolean
   /** A hairline below the row. */
   divided?: boolean
   /** The row is pressable. */
@@ -43,10 +52,11 @@ function onKeydown(event: KeyboardEvent): void {
       `kit-list-item--${size ?? 'sm'}`,
       { 'is-selected': selected, 'is-dimmed': dimmed, 'is-divided': divided, 'is-interactive': interactive, 'is-align-start': align === 'start', 'is-selected-neutral': selectedLook === 'neutral' },
     ]"
-    :style="level ? { '--kit-list-item-level': level } : undefined"
+    :style="level || indent ? { '--kit-list-item-level': level ?? 0, ...(indent ? { '--kit-list-item-indent': `${indent}px` } : {}) } : undefined"
     :role="interactive ? 'button' : undefined"
     :tabindex="interactive ? 0 : undefined"
     :aria-current="selected ? 'true' : undefined"
+    :aria-expanded="expanded === undefined ? undefined : expanded ? 'true' : 'false'"
     @keydown="onKeydown"
   >
     <div class="kit-list-item__leading">
@@ -66,7 +76,7 @@ function onKeydown(event: KeyboardEvent): void {
 <style>
 .kit-list-item {
   position: relative; display: flex; align-items: center; gap: 8px; min-width: 0; box-sizing: border-box; min-height: 28px;
-  padding: 4px 8px; padding-inline-start: calc(8px + 16px * var(--kit-list-item-level, 0));
+  padding: 4px 8px; padding-inline-start: calc(8px + var(--kit-list-item-indent, 16px) * var(--kit-list-item-level, 0));
   font-size: 13px; line-height: 20px; color: var(--kit-text); border-radius: 6px;
 }
 .kit-list-item.kit-list-item--md { min-height: 36px; }

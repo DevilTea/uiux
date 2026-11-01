@@ -7,8 +7,10 @@ import Icon from './Icon.vue'
  * while `open`, a listbox panel that holds the default slot (SelectOption rows). It is controlled and
  * has no state of its own: `value` is the text to show (a `multiple` select shows its chosen values
  * joined with a comma and a space, as the Workbench's own select does), `open` shows the panel, and the
- * trigger press and Escape reach the parent as `toggle`. Choosing and searching belong to the product's
- * own select; this component is its look, its roles and its keyboard entry.
+ * trigger press and Escape reach the parent as `toggle`. Choosing and filtering belong to the product's
+ * own select; this component is its look, its roles and its keyboard entry. A `searchable` select shows
+ * a Find field above its options (a `searchbox` that names the list it filters): its text is `search`,
+ * and typing reaches the parent as `update:search`.
  *
  * The trigger is a select-only combobox: the label names it, the help text describes it, and it
  * exposes `aria-expanded`, `aria-required` and `aria-invalid`.
@@ -30,6 +32,12 @@ const props = defineProps<{
   disabled?: boolean
   /** The listbox panel is shown. */
   open?: boolean
+  /** The open panel starts with a Find field. */
+  searchable?: boolean
+  /** The text of the Find field. */
+  search?: string
+  /** The placeholder, and the accessible name, of the Find field. */
+  searchPlaceholder?: string
   /** The trigger's id; generated when omitted. */
   id?: string
 }>()
@@ -37,6 +45,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   /** The trigger was pressed, or Escape asked to close: the parent flips `open`. */
   (e: 'toggle'): void
+  /** The Find field's text changed. */
+  (e: 'update:search', value: string): void
 }>()
 
 const generatedId = useId()
@@ -44,6 +54,7 @@ const triggerId = computed(() => props.id ?? `kit-select-${generatedId}`)
 const labelId = computed(() => `${triggerId.value}-label`)
 const listId = computed(() => `${triggerId.value}-list`)
 const helpId = computed(() => `${triggerId.value}-help`)
+const searchId = computed(() => `${triggerId.value}-search`)
 
 function onKeydown(event: KeyboardEvent): void {
   if (event.key === 'Escape' && props.open) {
@@ -104,6 +115,26 @@ function onKeydown(event: KeyboardEvent): void {
         :aria-label="label ? undefined : (placeholder || undefined)"
         @keydown="onKeydown"
       >
+        <div
+          v-if="searchable"
+          class="kit-select__search"
+        >
+          <Icon
+            name="search"
+            :size="14"
+          />
+          <input
+            :id="searchId"
+            class="kit-select__search-input"
+            type="search"
+            autocomplete="off"
+            :value="search ?? ''"
+            :placeholder="searchPlaceholder"
+            :aria-label="searchPlaceholder || undefined"
+            :aria-controls="listId"
+            @input="emit('update:search', ($event.target as HTMLInputElement).value)"
+          >
+        </div>
         <slot />
       </div>
     </div>
@@ -139,5 +170,8 @@ function onKeydown(event: KeyboardEvent): void {
   position: absolute; z-index: 10; inset-inline: 0; top: 100%; margin-top: 4px; box-sizing: border-box; max-height: 240px; overflow-y: auto; padding: 4px;
   background-color: var(--kit-bg-surface); border: 1px solid var(--kit-border-subtle); border-radius: 8px; box-shadow: var(--kit-shadow-overlay);
 }
+.kit-select__search { display: flex; align-items: center; gap: 6px; margin: -4px -4px 4px; padding: 0 10px; height: 36px; box-sizing: border-box; border-bottom: 1px solid var(--kit-border-subtle); color: var(--kit-text-subtle); position: sticky; top: -4px; background-color: var(--kit-bg-surface); }
+.kit-select__search-input { flex: 1 1 auto; min-width: 0; height: 100%; padding: 0; font-family: inherit; font-size: 13px; line-height: 20px; color: var(--kit-text); background: transparent; border: 0; outline: none; }
+.kit-select__search-input::placeholder { color: var(--kit-text-subtle); }
 .kit-select__help { font-size: 12px; line-height: 18px; color: var(--kit-text-muted); margin: 0; }
 </style>
