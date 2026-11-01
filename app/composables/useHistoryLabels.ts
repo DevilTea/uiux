@@ -4,7 +4,7 @@ import type { HistoryVersionType } from '../../src/domain/history/constants'
 import type { HistoryActor } from '../../src/domain/history/schema'
 import type { VersionListItem } from '../../src/application/services/history-service'
 import { MAX_RESOURCE_DISCOVERY_LIMIT } from '../../src/application/dto/resource-discovery'
-import { systemCheckpointTitle, type HistoryResourceRef } from '../utils/version-history'
+import { singletonResourceName, systemCheckpointTitle, type HistoryResourceRef } from '../utils/version-history'
 import { useUiuxClient } from './useUiuxClient'
 import { useWorkbench } from './useWorkbench'
 
@@ -102,7 +102,8 @@ export function useHistoryLabels() {
 
 	/** The resource's current name where the Workbench knows it, else its key. */
 	function resourceName(resource: HistoryResourceRef): string {
-		if (resource.kind === 'workspace') return t('history.kind.workspace')
+		const singleton = singletonResourceName(resource, kindLabel)
+		if (singleton !== undefined) return singleton
 		if (resource.kind === 'view') return views.value.find(view => view.key === resource.key)?.summary.name || resource.key
 		if (resource.kind === 'flow') return flows.value.find(flow => flow.key === resource.key)?.summary.name || resource.key
 		if (resource.kind === 'asset') {

@@ -6,7 +6,7 @@ import type { Diagnostic } from '../../src/domain/validation'
 import type { VersionRecord } from '../../src/domain/history/schema'
 import { forgetComparisonsAfterDeletion, refreshKeyChanged } from '../utils/comparison-refresh'
 import { describeFetchError, type FetchErrorDetails } from '../utils/fetch-error'
-import { comparisonEndpoints, CURRENT_COMPARE, diffRequestQuery, filterVersions, PARENT_COMPARE, versionListQuery, type ComparisonEndpoints, type HistoryResourceRef, type HistorySelection, type TimelineFilters } from '../utils/version-history'
+import { comparisonEndpoints, CURRENT_COMPARE, diffRequestQuery, filterVersions, PARENT_COMPARE, VERSIONED_EVENT_KINDS, versionListQuery, type ComparisonEndpoints, type HistoryResourceRef, type HistorySelection, type TimelineFilters } from '../utils/version-history'
 import { useWorkbench } from './useWorkbench'
 import { touchesKinds, useLiveEvents } from './useLiveEvents'
 
@@ -68,9 +68,6 @@ export function useWorkbenchSignature() {
 		...Object.values(localeRevisions.value),
 	].join(','))
 }
-
-/** The change-event kinds whose commits record versions. */
-const VERSIONED_EVENT_KINDS = ['view', 'flow', 'locale', 'asset', 'workspace', 'access-presets'] as const
 
 /** A focus and a visibility change arrive together; one read serves both. */
 const MIN_REFRESH_GAP_MS = 2000

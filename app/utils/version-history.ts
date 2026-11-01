@@ -1,5 +1,5 @@
 import type { LocationQuery, LocationQueryRaw } from 'vue-router'
-import { HISTORY_RESOURCE_KINDS, type HistoryVersionType } from '../../src/domain/history/constants'
+import { HISTORY_RESOURCE_KINDS, SINGLETON_HISTORY_RESOURCE_KINDS, type HistoryVersionType } from '../../src/domain/history/constants'
 import type { HistoryActor, VersionRecord } from '../../src/domain/history/schema'
 import type { VersionListItem } from '../../src/application/services/history-service'
 
@@ -143,6 +143,21 @@ export type TimelineFilters = Readonly<{
  * every kind this build knows, so a changed Product Kit or Access presets can be filtered too.
  */
 export const TIMELINE_KIND_FILTERS: readonly string[] = HISTORY_RESOURCE_KINDS
+
+/**
+ * The change-event kinds whose commits record versions: exactly the history resource kinds, so a
+ * timeline re-reads on a Product Kit or Access presets change too. Review threads are not versioned
+ * and are left out.
+ */
+export const VERSIONED_EVENT_KINDS: readonly string[] = HISTORY_RESOURCE_KINDS
+
+/**
+ * A singleton resource (Workspace settings, Product Kit, Access presets) has no name of its own: its
+ * key is its kind, so the kind label names it. `undefined` for any other kind.
+ */
+export function singletonResourceName(resource: HistoryResourceRef, kindLabel: (kind: string) => string): string | undefined {
+	return (SINGLETON_HISTORY_RESOURCE_KINDS as readonly string[]).includes(resource.kind) ? kindLabel(resource.kind) : undefined
+}
 
 /** The value `GET /api/history/versions?actor=` takes for this actor: its ID, or `external`. */
 export function actorFilterValue(actor: HistoryActor): string {
