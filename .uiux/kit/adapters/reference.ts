@@ -626,8 +626,8 @@ export interface PanelInterfaces {
 		}
 	}
 	slots: 'header' | 'content' | 'footer'
-	/** `titleKey` and `descriptionKey` are Locale keys: while set, each replaces the Config title or description (empty = the Config's). */
-	state: { visible: boolean; titleKey: string; descriptionKey: string }
+	/** `titleKey` and `descriptionKey` are Locale keys: while set, each replaces the Config title or description (empty = the Config's). `value`, `value2` and `value3` are the interpolation arguments, started from the Config's. */
+	state: { visible: boolean; titleKey: string; descriptionKey: string; value: string; value2: string; value3: string }
 	events: { close: readonly [] }
 	properties: {
 		valueText: string
@@ -647,7 +647,7 @@ export interface PanelInterfaces {
 }
 
 export const panelPlugin = createWidgetPlugin('Panel')
-	.description('Surface container with optional translatable title and description (which may interpolate {value}, {value2} and {value3}, and which the author-writable `titleKey` and `descriptionKey` states replace with another Locale key), header, footer, styling variants (`dialog` adds a header description, a close button, header and footer separators and a dimmed backdrop), viewport-tier overrides, and an author-writable `visible` state.')
+	.description('Surface container with optional translatable title and description (which may interpolate {value}, {value2} and {value3}, and which the author-writable `titleKey` and `descriptionKey` states replace with another Locale key, and whose `value`, `value2` and `value3` are states a Variant can set), header, footer, styling variants (`dialog` adds a header description, a close button, header and footer separators and a dimmed backdrop), viewport-tier overrides, and an author-writable `visible` state.')
 	.interfaces<PanelInterfaces>()
 	.config({
 		description: 'Panel configuration. `title`, `description` and `closeLabel` accept `$i18n` bindings (lowered to `titleKey`, `descriptionKey`, `closeLabelKey`); `{value}`, `{value2}` and `{value3}` in the title or description interpolate `value`, `value2` and `value3` (literal).',
@@ -703,15 +703,18 @@ export const panelPlugin = createWidgetPlugin('Panel')
 	.state(state => state
 		.visible({ ...visibleState, default: ({ config }) => config.base.visible !== false })
 		.titleKey({ ...stringState, default: () => '' })
-		.descriptionKey({ ...stringState, default: () => '' }))
+		.descriptionKey({ ...stringState, default: () => '' })
+		.value({ ...stringState, default: ({ config }) => config.value })
+		.value2({ ...stringState, default: ({ config }) => config.value2 })
+		.value3({ ...stringState, default: ({ config }) => config.value3 }))
 	.properties(p => p
-		.valueText({ valueContract: STRING, compute: ({ config }) => config.value })
-		.value2Text({ valueContract: STRING, compute: ({ config }) => config.value2 })
-		.value3Text({ valueContract: STRING, compute: ({ config }) => config.value3 })
+		.valueText({ valueContract: STRING, registerDeps: ({ dep }) => ({ a: dep.self.state.get('value') }), compute: ({ deps }) => stringFromResult(deps.a()) })
+		.value2Text({ valueContract: STRING, registerDeps: ({ dep }) => ({ a: dep.self.state.get('value2') }), compute: ({ deps }) => stringFromResult(deps.a()) })
+		.value3Text({ valueContract: STRING, registerDeps: ({ dep }) => ({ a: dep.self.state.get('value3') }), compute: ({ deps }) => stringFromResult(deps.a()) })
 		.titleResult({
 			valueContract: TRANSLATION_RESULT,
-			registerDeps: ({ dep }) => ({ ...translateDeps({ dep }), stateKey: dep.self.state.get('titleKey') }),
-			compute: ({ config, deps }) => translateFieldWithStateKey({ key: config.titleKey, literal: config.title }, stringFromResult(deps.stateKey()), (key, params) => deps.t(key, params), interpolationParams(config)),
+			registerDeps: ({ dep }) => ({ ...translateDeps({ dep }), stateKey: dep.self.state.get('titleKey'), a1: dep.self.state.get('value'), a2: dep.self.state.get('value2'), a3: dep.self.state.get('value3') }),
+			compute: ({ config, deps }) => translateFieldWithStateKey({ key: config.titleKey, literal: config.title }, stringFromResult(deps.stateKey()), (key, params) => deps.t(key, params), argumentParams(deps)),
 		})
 		.title({
 			valueContract: STRING,
@@ -720,8 +723,8 @@ export const panelPlugin = createWidgetPlugin('Panel')
 		})
 		.descriptionResult({
 			valueContract: TRANSLATION_RESULT,
-			registerDeps: ({ dep }) => ({ ...translateDeps({ dep }), stateKey: dep.self.state.get('descriptionKey') }),
-			compute: ({ config, deps }) => translateFieldWithStateKey({ key: config.descriptionKey, literal: config.description }, stringFromResult(deps.stateKey()), (key, params) => deps.t(key, params), interpolationParams(config)),
+			registerDeps: ({ dep }) => ({ ...translateDeps({ dep }), stateKey: dep.self.state.get('descriptionKey'), a1: dep.self.state.get('value'), a2: dep.self.state.get('value2'), a3: dep.self.state.get('value3') }),
+			compute: ({ config, deps }) => translateFieldWithStateKey({ key: config.descriptionKey, literal: config.description }, stringFromResult(deps.stateKey()), (key, params) => deps.t(key, params), argumentParams(deps)),
 		})
 		.description({
 			valueContract: STRING,
@@ -1199,22 +1202,25 @@ export const ButtonRenderer = defineComponent({
 			const runs = props.labelRuns.value
 			const hasCode = Boolean(runs?.some(run => run.code)) && !presentation?.iconOnly
 			const count = String(state.count.value ?? '')
+			// An icon-only button that has a count shows the icon and the count (no label), named by its label.
+			const countOnly = count !== '' && Boolean(presentation?.iconOnly)
 			const slots: Record<string, () => (VNode | string | null)[]> = {
 				...(hasCode ? { default: () => runNodes(runs, label) } : {}),
 				// A count pill sits after the label, before the trailing icon.
-				...(count !== '' && !presentation?.iconOnly
+				...(count !== ''
 					? { trailing: () => [h(KitBadge, { variant: 'count', label: count }), iconNode(presentation?.trailingIcon, 14, 'kit-btn__trailing')] }
 					: {}),
 			}
 			return h(KitButton, {
 				[WIDGET_ID_ATTRIBUTE]: widgetId,
-				label,
+				label: countOnly ? '' : label,
+				'aria-label': countOnly ? label : undefined,
 				variant: (state.variant.value ?? 'secondary') as ButtonVariant,
 				size: (presentation?.size ?? 'md') as 'xs' | 'sm' | 'md' | 'lg',
 				icon: props.icon.value || undefined,
 				trailingIcon: presentation?.trailingIcon || undefined,
 				kbd: presentation?.kbd.length ? presentation.kbd : undefined,
-				iconOnly: Boolean(presentation?.iconOnly),
+				iconOnly: Boolean(presentation?.iconOnly) && !countOnly,
 				fullWidth: Boolean(presentation?.fullWidth),
 				truncate: Boolean(presentation?.truncate),
 				pressed: state.pressed.value ?? undefined,
@@ -3069,11 +3075,11 @@ export interface ContextBarInterfaces {
 		resolved: { label: string; labelKey: string | null; base: { hidden?: boolean }; responsive?: Responsive<{ hidden?: boolean }> }
 	}
 	slots: 'start' | 'end'
-	properties: { labelResult: TranslationResult; label: string; hidden: boolean; theme: string }
+	properties: { labelResult: TranslationResult; label: string; hidden: boolean; scrolls: boolean; theme: string }
 }
 
 export const contextBarPlugin = createWidgetPlugin('ContextBar')
-	.description('44px canvas toolbar with a start group (render-context chips) and an end group (session status, zoom, fit). Scrolls horizontally rather than wrapping on narrow tiers.')
+	.description('44px canvas toolbar with a start group (render-context chips) and an end group (session status, zoom, fit). Scrolls horizontally rather than wrapping on a phone; on wider tiers it does not clip, so a Menu opened from a chip or a zoom control drops out of the bar.')
 	.interfaces<ContextBarInterfaces>()
 	.config({
 		description: 'ContextBar configuration. `label` (toolbar accessible name) accepts an `$i18n` binding (lowered to `labelKey`).',
@@ -3092,6 +3098,10 @@ export const contextBarPlugin = createWidgetPlugin('ContextBar')
 			registerDeps: viewportDeps,
 			compute: ({ config, deps }) => Boolean(cascade(config.base, config.responsive, tierOf(readViewport(deps.viewport()))).hidden),
 		})
+		.scrolls({
+			registerDeps: viewportDeps,
+			compute: ({ deps }) => tierOf(readViewport(deps.viewport())) === 'compact',
+		})
 		.theme(themeProperty()),
 	)
 	.done()
@@ -3105,7 +3115,7 @@ export const ContextBarRenderer = defineComponent({
 			[WIDGET_ID_ATTRIBUTE]: widgetId,
 			role: 'toolbar',
 			'aria-label': props.label.value || undefined,
-			class: ['uiux-ref-scope', 'uiux-ref-contextbar', props.theme.value, props.hidden.value ? 'uiux-ref-hidden' : ''],
+			class: ['uiux-ref-scope', 'uiux-ref-contextbar', props.theme.value, props.scrolls.value ? 'is-scroll' : '', props.hidden.value ? 'uiux-ref-hidden' : ''],
 		}, [
 			h('div', { class: 'uiux-ref-contextbar-start' }, [h(WidgetSlot, { name: 'start' })]),
 			h('div', { class: 'uiux-ref-contextbar-end' }, [h(WidgetSlot, { name: 'end' })]),
@@ -5528,9 +5538,10 @@ export const ImageRenderer = defineComponent({
 type MenuPlacement = 'bottom-start' | 'bottom-end' | 'top-start' | 'top-end' | 'right-start' | 'left-start'
 const MENU_PLACEMENTS: readonly MenuPlacement[] = ['bottom-start', 'bottom-end', 'top-start', 'top-end', 'right-start', 'left-start']
 
-/** The first control inside `root` that takes the keyboard: what a Menu or Tooltip trigger Widget renders. */
+/** The first shown control inside `root` that takes the keyboard (one a Variant hides is skipped): what a Menu or Tooltip trigger Widget renders. */
 function firstFocusable(root: Element | null | undefined): HTMLElement | null {
-	return root?.querySelector<HTMLElement>('button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])') ?? null
+	const controls = root?.querySelectorAll<HTMLElement>('button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])')
+	return (controls && Array.from(controls).find(control => !control.closest('.uiux-ref-hidden'))) ?? null
 }
 
 export interface MenuInterfaces {
@@ -5609,10 +5620,12 @@ export const MenuRenderer = defineComponent({
 		const items = (): HTMLElement[] => Array.from(root.value?.querySelectorAll<HTMLElement>('.uiux-ref-menu-panel [role^="menuitem"]:not([aria-disabled="true"])') ?? [])
 		/** The trigger Widget renders its own control; the menu tells assistive technology what it opens. */
 		const annotate = (): void => {
-			const control = trigger()
-			if (!control) return
-			control.setAttribute('aria-haspopup', 'menu')
-			control.setAttribute('aria-expanded', state.open.value ? 'true' : 'false')
+			// Every control of the trigger Widget, also one a Variant swaps in later, so the shown one is always named.
+			const controls = root.value?.querySelectorAll<HTMLElement>('.uiux-ref-menu-trigger :is(button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"]))')
+			for (const control of Array.from(controls ?? [])) {
+				control.setAttribute('aria-haspopup', 'menu')
+				control.setAttribute('aria-expanded', state.open.value ? 'true' : 'false')
+			}
 		}
 		const toggle = (): void => {
 			state.open.value = !state.open.value
@@ -6086,8 +6099,8 @@ export interface SheetInterfaces {
 		}
 	}
 	slots: 'header' | 'content' | 'footer'
-	/** `titleKey` and `descriptionKey` are Locale keys: while set, each replaces the Config title or description (empty = the Config's). */
-	state: { visible: boolean; titleKey: string; descriptionKey: string }
+	/** `titleKey` and `descriptionKey` are Locale keys: while set, each replaces the Config title or description (empty = the Config's). `value`, `value2` and `value3` are the interpolation arguments, started from the Config's. */
+	state: { visible: boolean; titleKey: string; descriptionKey: string; value: string; value2: string; value3: string }
 	events: { close: readonly [] }
 	properties: {
 		valueText: string
@@ -6106,7 +6119,7 @@ export interface SheetInterfaces {
 }
 
 export const sheetPlugin = createWidgetPlugin('Sheet')
-	.description('A flush, full-height slide-over (or a bottom sheet) with the page behind it dimmed, drawn as part of the Widget (the static page behind is a scrim). Header (translatable title and description, which may interpolate {value}, {value2} and {value3} and which the author-writable `titleKey` and `descriptionKey` states replace with another Locale key, and an optional close button), a scrolling body and a separated footer. `side` is `end`, `start` or `bottom`, with viewport-tier overrides (a phone turns a slide-over into a bottom sheet with a handle). The author-writable `visible` state drives Variants.')
+	.description('A flush, full-height slide-over (or a bottom sheet) with the page behind it dimmed, drawn as part of the Widget (the static page behind is a scrim). Header (translatable title and description, which may interpolate {value}, {value2} and {value3} and which the author-writable `titleKey` and `descriptionKey` states replace with another Locale key, with `value`, `value2` and `value3` states as the arguments, and an optional close button), a scrolling body and a separated footer. `side` is `end`, `start` or `bottom`, with viewport-tier overrides (a phone turns a slide-over into a bottom sheet with a handle). The author-writable `visible` state drives Variants.')
 	.interfaces<SheetInterfaces>()
 	.config({
 		description: 'Sheet configuration. `title`, `description` and `closeLabel` accept `$i18n` bindings (lowered to `titleKey`, `descriptionKey`, `closeLabelKey`); `{value}`, `{value2}` and `{value3}` interpolate `value`, `value2` and `value3`. `side` is `end` (default), `start` or `bottom`; `width` and `maxWidth` size a side sheet, `height` a bottom sheet. `backdrop` dims the page behind (on by default). `handle` draws a bottom sheet\'s drag handle. `responsive.medium` applies below 1280px viewport width, `responsive.compact` below 640px.',
@@ -6153,15 +6166,18 @@ export const sheetPlugin = createWidgetPlugin('Sheet')
 	.state(state => state
 		.visible({ ...visibleState, default: ({ config }) => config.base.visible !== false })
 		.titleKey({ ...stringState, default: () => '' })
-		.descriptionKey({ ...stringState, default: () => '' }))
+		.descriptionKey({ ...stringState, default: () => '' })
+		.value({ ...stringState, default: ({ config }) => config.value })
+		.value2({ ...stringState, default: ({ config }) => config.value2 })
+		.value3({ ...stringState, default: ({ config }) => config.value3 }))
 	.properties(p => p
-		.valueText({ valueContract: STRING, compute: ({ config }) => config.value })
-		.value2Text({ valueContract: STRING, compute: ({ config }) => config.value2 })
-		.value3Text({ valueContract: STRING, compute: ({ config }) => config.value3 })
+		.valueText({ valueContract: STRING, registerDeps: ({ dep }) => ({ a: dep.self.state.get('value') }), compute: ({ deps }) => stringFromResult(deps.a()) })
+		.value2Text({ valueContract: STRING, registerDeps: ({ dep }) => ({ a: dep.self.state.get('value2') }), compute: ({ deps }) => stringFromResult(deps.a()) })
+		.value3Text({ valueContract: STRING, registerDeps: ({ dep }) => ({ a: dep.self.state.get('value3') }), compute: ({ deps }) => stringFromResult(deps.a()) })
 		.titleResult({
 			valueContract: TRANSLATION_RESULT,
-			registerDeps: ({ dep }) => ({ ...translateDeps({ dep }), stateKey: dep.self.state.get('titleKey') }),
-			compute: ({ config, deps }) => translateFieldWithStateKey({ key: config.titleKey, literal: config.title }, stringFromResult(deps.stateKey()), (key, params) => deps.t(key, params), interpolationParams(config)),
+			registerDeps: ({ dep }) => ({ ...translateDeps({ dep }), stateKey: dep.self.state.get('titleKey'), a1: dep.self.state.get('value'), a2: dep.self.state.get('value2'), a3: dep.self.state.get('value3') }),
+			compute: ({ config, deps }) => translateFieldWithStateKey({ key: config.titleKey, literal: config.title }, stringFromResult(deps.stateKey()), (key, params) => deps.t(key, params), argumentParams(deps)),
 		})
 		.title({
 			valueContract: STRING,
@@ -6170,8 +6186,8 @@ export const sheetPlugin = createWidgetPlugin('Sheet')
 		})
 		.descriptionResult({
 			valueContract: TRANSLATION_RESULT,
-			registerDeps: ({ dep }) => ({ ...translateDeps({ dep }), stateKey: dep.self.state.get('descriptionKey') }),
-			compute: ({ config, deps }) => translateFieldWithStateKey({ key: config.descriptionKey, literal: config.description }, stringFromResult(deps.stateKey()), (key, params) => deps.t(key, params), interpolationParams(config)),
+			registerDeps: ({ dep }) => ({ ...translateDeps({ dep }), stateKey: dep.self.state.get('descriptionKey'), a1: dep.self.state.get('value'), a2: dep.self.state.get('value2'), a3: dep.self.state.get('value3') }),
+			compute: ({ config, deps }) => translateFieldWithStateKey({ key: config.descriptionKey, literal: config.description }, stringFromResult(deps.stateKey()), (key, params) => deps.t(key, params), argumentParams(deps)),
 		})
 		.description({
 			valueContract: STRING,
@@ -6270,28 +6286,29 @@ const RADIO_APPEARANCES: readonly RadioAppearance[] = ['list', 'card']
 
 export interface RadioGroupInterfaces {
 	config: {
-		raw: ({ label?: string; labelKey?: string; hideLabel?: boolean; appearance?: RadioAppearance; visible?: boolean }) | null
-		resolved: { label: string; labelKey: string | null; hideLabel: boolean; appearance: RadioAppearance; visible: boolean }
+		raw: ({ label?: string; labelKey?: string; hideLabel?: boolean; appearance?: RadioAppearance; orientation?: 'vertical' | 'horizontal'; visible?: boolean }) | null
+		resolved: { label: string; labelKey: string | null; hideLabel: boolean; appearance: RadioAppearance; orientation: 'vertical' | 'horizontal'; visible: boolean }
 	}
 	slots: 'options'
 	state: { visible: boolean }
 	properties: {
 		labelResult: TranslationResult
 		label: string
-		look: { appearance: RadioAppearance; hideLabel: boolean }
+		look: { appearance: RadioAppearance; orientation: 'vertical' | 'horizontal'; hideLabel: boolean }
 		theme: string
 	}
 }
 
 export const radioGroupPlugin = createWidgetPlugin('RadioGroup')
-	.description('A named group (`radiogroup`) of Radio Widgets in its `options` slot, with a visible legend (`label`) unless `hideLabel`. `appearance: "card"` draws each option as a bordered card, `list` (the default) as a plain row. Which option is chosen is the `selected` state of its Radio, so a Variant draws a choice.')
+	.description('A named group (`radiogroup`) of Radio Widgets in its `options` slot, with a visible legend (`label`) unless `hideLabel`. `appearance: "card"` draws each option as a bordered card, `list` (the default) as a plain row; `orientation: "horizontal"` lays the options side by side. Which option is chosen is the `selected` state of its Radio, so a Variant draws a choice.')
 	.interfaces<RadioGroupInterfaces>()
 	.config({
-		description: 'RadioGroup configuration. `label` names the group and is its legend; it accepts an `$i18n` binding (lowered to `labelKey`). `hideLabel` keeps the name for assistive technology only. `appearance` is `list` (default) or `card`.',
+		description: 'RadioGroup configuration. `label` names the group and is its legend; it accepts an `$i18n` binding (lowered to `labelKey`). `hideLabel` keeps the name for assistive technology only. `appearance` is `list` (default) or `card`; `orientation` is `vertical` (default) or `horizontal`.',
 		schema: configSchema({
 			label: { type: 'string' }, labelKey: { type: 'string' },
 			hideLabel: { type: 'boolean' },
 			appearance: { enum: [...RADIO_APPEARANCES] },
+			orientation: { enum: ['vertical', 'horizontal'] },
 			visible: { type: 'boolean' },
 		}),
 		validate: (c): c is RadioGroupInterfaces['config']['raw'] => isConfigOrOmitted(c),
@@ -6300,6 +6317,7 @@ export const radioGroupPlugin = createWidgetPlugin('RadioGroup')
 			labelKey: optionalString(raw?.labelKey),
 			hideLabel: Boolean(raw?.hideLabel),
 			appearance: oneOf(raw?.appearance, RADIO_APPEARANCES, 'list'),
+			orientation: oneOf(raw?.orientation, ['vertical', 'horizontal'] as const, 'vertical'),
 			visible: raw?.visible === undefined ? true : Boolean(raw.visible),
 		}),
 	})
@@ -6308,7 +6326,7 @@ export const radioGroupPlugin = createWidgetPlugin('RadioGroup')
 	.properties(p => p
 		.labelResult(translatedResult<RadioGroupInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
 		.label(translatedText<RadioGroupInterfaces['config']['resolved']>(c => ({ key: c.labelKey, literal: c.label })))
-		.look({ compute: ({ config }) => ({ appearance: config.appearance, hideLabel: config.hideLabel }) })
+		.look({ compute: ({ config }) => ({ appearance: config.appearance, orientation: config.orientation, hideLabel: config.hideLabel }) })
 		.theme(themeProperty()),
 	)
 	.done()
@@ -6326,7 +6344,7 @@ export const RadioGroupRenderer = defineComponent({
 				[WIDGET_ID_ATTRIBUTE]: widgetId,
 				role: 'radiogroup',
 				'aria-label': label || undefined,
-				class: ['uiux-ref-scope', 'uiux-ref-radio-group', props.theme.value, `appearance-${look?.appearance ?? 'list'}`, state.visible.value ? '' : 'uiux-ref-hidden'],
+				class: ['uiux-ref-scope', 'uiux-ref-radio-group', props.theme.value, `appearance-${look?.appearance ?? 'list'}`, `orientation-${look?.orientation ?? 'vertical'}`, state.visible.value ? '' : 'uiux-ref-hidden'],
 			}, [
 				label && !look?.hideLabel ? h('div', { class: 'uiux-ref-radio-legend', 'aria-hidden': 'true' }, label) : null,
 				h('div', { class: 'uiux-ref-radio-options' }, [h(WidgetSlot, { name: 'options' })]),
@@ -6454,6 +6472,9 @@ export interface FileInputInterfaces {
 			/** Names the control and the chip's remove button for assistive technology. */
 			removeLabel?: string
 			removeLabelKey?: string
+			/** The error line under the zone, shown while `invalid`. */
+			error?: string
+			errorKey?: string
 			fileName?: string
 			fileSize?: string
 			invalid?: boolean
@@ -6469,6 +6490,8 @@ export interface FileInputInterfaces {
 			fileIcon: string
 			removeLabel: string
 			removeLabelKey: string | null
+			error: string
+			errorKey: string | null
 			fileName: string
 			fileSize: string
 			invalid: boolean
@@ -6486,22 +6509,25 @@ export interface FileInputInterfaces {
 		description: string
 		removeLabelResult: TranslationResult
 		removeLabel: string
+		errorResult: TranslationResult
+		error: string
 		look: { icon: string; fileIcon: string }
 		theme: string
 	}
 }
 
 export const fileInputPlugin = createWidgetPlugin('FileInput')
-	.description('A file field: a dashed drop zone (icon, translatable title and description) that a real file chooser backs, and the chosen-file chip that replaces it while the author-writable `fileName` state is set (the file name, its `fileSize` as literal text and a remove button that fires `remove`). `invalid` rings the zone in the error ink; `disabled` locks it. The static drop zone and chip are drawn only; no file is read.')
+	.description('A file field: a dashed drop zone (icon, translatable title and description) that a real file chooser backs, and the chosen-file chip that replaces it while the author-writable `fileName` state is set (the file name, its `fileSize` as literal text and a remove button that fires `remove`). `invalid` rings the zone in the error ink and shows the translatable `error` line under it; `disabled` locks it. The static drop zone and chip are drawn only; no file is read.')
 	.interfaces<FileInputInterfaces>()
 	.config({
-		description: 'FileInput configuration. `title`, `description` and `removeLabel` accept `$i18n` bindings (lowered to `titleKey`, `descriptionKey`, `removeLabelKey`). `icon` is the zone\'s Lucide icon (`upload` by default) and `fileIcon` the chip\'s (`file`). `fileName` and `fileSize` are the initial values of the states of the same name (a file name is literal, never translated).',
+		description: 'FileInput configuration. `title`, `description`, `removeLabel` and `error` accept `$i18n` bindings (lowered to `titleKey`, `descriptionKey`, `removeLabelKey`, `errorKey`). `icon` is the zone\'s Lucide icon (`upload` by default) and `fileIcon` the chip\'s (`file`). `fileName` and `fileSize` are the initial values of the states of the same name (a file name is literal, never translated).',
 		schema: configSchema({
 			title: { type: 'string' }, titleKey: { type: 'string' },
 			description: { type: 'string' }, descriptionKey: { type: 'string' },
 			icon: { type: 'string' },
 			fileIcon: { type: 'string' },
 			removeLabel: { type: 'string' }, removeLabelKey: { type: 'string' },
+			error: { type: 'string' }, errorKey: { type: 'string' },
 			fileName: { type: 'string' },
 			fileSize: { type: 'string' },
 			invalid: { type: 'boolean' },
@@ -6518,6 +6544,8 @@ export const fileInputPlugin = createWidgetPlugin('FileInput')
 			fileIcon: stringOr(raw?.fileIcon, 'file'),
 			removeLabel: stringOr(raw?.removeLabel, 'Remove'),
 			removeLabelKey: optionalString(raw?.removeLabelKey),
+			error: stringOr(raw?.error, ''),
+			errorKey: optionalString(raw?.errorKey),
 			fileName: stringOr(raw?.fileName, ''),
 			fileSize: stringOr(raw?.fileSize, ''),
 			invalid: Boolean(raw?.invalid),
@@ -6538,6 +6566,8 @@ export const fileInputPlugin = createWidgetPlugin('FileInput')
 		.description(translatedText<FileInputInterfaces['config']['resolved']>(c => ({ key: c.descriptionKey, literal: c.description })))
 		.removeLabelResult(translatedResult<FileInputInterfaces['config']['resolved']>(c => ({ key: c.removeLabelKey, literal: c.removeLabel })))
 		.removeLabel(translatedText<FileInputInterfaces['config']['resolved']>(c => ({ key: c.removeLabelKey, literal: c.removeLabel })))
+		.errorResult(translatedResult<FileInputInterfaces['config']['resolved']>(c => ({ key: c.errorKey, literal: c.error })))
+		.error(translatedText<FileInputInterfaces['config']['resolved']>(c => ({ key: c.errorKey, literal: c.error })))
 		.look({ compute: ({ config }) => ({ icon: config.icon, fileIcon: config.fileIcon }) })
 		.theme(themeProperty()),
 	)
@@ -6582,6 +6612,9 @@ export const FileInputRenderer = defineComponent({
 							title ? h('span', { class: 'uiux-ref-file-drop-title' }, title) : null,
 							description ? h('span', { class: 'uiux-ref-file-drop-description' }, description) : null,
 						]),
+				state.invalid.value && props.error.value
+					? h('p', { class: 'uiux-ref-file-error', role: 'alert' }, [iconNode('circle-alert', 14), h('span', props.error.value)])
+					: null,
 			])
 		}
 	},
@@ -6917,7 +6950,7 @@ const catalogWidgets: Readonly<Record<string, AdapterWidgetCatalogEntry>> = {
 	Sheet: { i18n: { fields: { title: i18nField('title', VALUE_PARAMS), description: i18nField('description', VALUE_PARAMS), closeLabel: i18nField('closeLabel') } } },
 	RadioGroup: i18nFields('label'),
 	Radio: i18nFieldsWithValue(['label', 'description']),
-	FileInput: i18nFields('title', 'description', 'removeLabel'),
+	FileInput: i18nFields('title', 'description', 'removeLabel', 'error'),
 	NumberField: i18nFields('label', 'help', 'error', 'roleDescription'),
 	Progress: { i18n: { fields: { label: i18nField('label', VALUE_PARAMS) } } },
 }

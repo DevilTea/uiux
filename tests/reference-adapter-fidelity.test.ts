@@ -1643,3 +1643,100 @@ describe('the Kit and Adapter capabilities of the second #399 batch (sheets, for
 		})
 	})
 })
+
+describe('the second #399 batch: states that follow from the dogfood conversions', () => {
+	const fire = (element: Element, type: string) => element.dispatchEvent(new window.Event(type, { bubbles: true }) as never)
+	const settle = () => new Promise(resolve => setTimeout(resolve, 5))
+
+	describe('interpolation arguments as states of Panel and Sheet', () => {
+		const locales = { 'en-US': { 't.edit': 'Edit access for {value}', 'd.edit': '{value} holds {value2} keys' } }
+
+		it.each(['Panel', 'Sheet'])('fills {value} and {value2} of a %s title and description from the states a Variant sets', async (type) => {
+			const base = { titleKey: 't.edit', descriptionKey: 'd.edit', value: 'dana', value2: 8 }
+			const { container, bridge } = await mount([{ type, id: 'drawer', config: base }], { locales, variants: { other: { state: { drawer: { value: 'ines', value2: '17' } } } } })
+			const text = () => widget(container, 'drawer').textContent?.replace(/\s+/g, ' ').trim()
+			expect(text()).toContain('Edit access for dana')
+			expect(text()).toContain('dana holds 8 keys')
+			await applyVariant(bridge, 'other')
+			expect(text()).toContain('Edit access for ines')
+			expect(text()).toContain('ines holds 17 keys')
+			bridge.dispose()
+		})
+	})
+
+	describe('FileInput error line', () => {
+		it('shows the translated `error` under the zone only while `invalid`', async () => {
+			const locales = { 'en-US': { 'f.required': 'Choose a file to upload.' } }
+			const { container, bridge } = await mount(
+				[{ type: 'FileInput', id: 'file', config: { title: 'Drop a file', errorKey: 'f.required' } }],
+				{ locales, variants: { bad: { state: { file: { invalid: true } } } } },
+			)
+			expect(widget(container, 'file').querySelector('.uiux-ref-file-error')).toBeNull()
+			await applyVariant(bridge, 'bad')
+			expect(widget(container, 'file').querySelector('.uiux-ref-file-error')!.textContent).toBe('Choose a file to upload.')
+			expect(widget(container, 'file').querySelector('input')!.getAttribute('aria-invalid')).toBe('true')
+			bridge.dispose()
+		})
+	})
+
+	describe('RadioGroup orientation', () => {
+		it('lays the options side by side with `orientation: "horizontal"`', async () => {
+			const group = (id: string, config: Record<string, unknown>): Widget => ({ type: 'RadioGroup', id, config: { label: 'Roots', ...config }, slots: { options: [{ type: 'Radio', id: `${id}-a`, config: { label: 'Whole Workspace', selected: true } }] } })
+			const { container, bridge } = await mount([group('side', { orientation: 'horizontal' }), group('stack', {})])
+			expect(widget(container, 'side').classList.contains('orientation-horizontal')).toBe(true)
+			expect(widget(container, 'stack').classList.contains('orientation-vertical')).toBe(true)
+			bridge.dispose()
+		})
+	})
+
+	describe('Button count on an icon-only button', () => {
+		it('shows the icon and the count, no label, named by its label, while a phone layout makes the button icon-only', async () => {
+			const { container, bridge } = await mount(
+				[{ type: 'Button', id: 'filters', config: { label: 'Filters', icon: 'list-filter', responsive: { compact: { iconOnly: true } } } }],
+				{ variants: { two: { state: { filters: { count: '2' } } } }, context: { viewportId: 'phone', viewport: { width: 390, height: 844 } } },
+			)
+			expect(widget(container, 'filters').classList.contains('is-icon-only')).toBe(true)
+			await applyVariant(bridge, 'two')
+			const button = widget(container, 'filters')
+			expect(button.classList.contains('is-icon-only')).toBe(false)
+			expect(button.getAttribute('aria-label')).toBe('Filters')
+			expect(button.querySelector('.kit-badge')!.textContent!.trim()).toBe('2')
+			expect(button.querySelector('.kit-btn__label')!.textContent).toBe('')
+			bridge.dispose()
+		})
+	})
+
+	describe('Menu trigger swapped by a Variant', () => {
+		it('names the shown control of the trigger, and skips one a Variant hides', async () => {
+			const { container, bridge } = await mount([{
+				type: 'Menu',
+				id: 'menu',
+				config: { label: 'Viewport', open: true },
+				slots: {
+					trigger: [
+						{ type: 'Stack', id: 'normal', config: { visible: false }, slots: { content: [{ type: 'Button', id: 'chip', config: { label: 'FHD' } }] } },
+						{ type: 'Stack', id: 'missing', slots: { content: [{ type: 'Button', id: 'chip-bad', config: { label: 'phone-small' } }] } },
+					],
+					items: [{ type: 'MenuItem', id: 'item', config: { label: 'FHD Desktop' } }],
+				},
+			}])
+			await settle()
+			expect(widget(container, 'chip-bad').getAttribute('aria-expanded')).toBe('true')
+			expect(widget(container, 'chip-bad').getAttribute('aria-haspopup')).toBe('menu')
+			fire(widget(container, 'chip-bad'), 'focusin')
+			bridge.dispose()
+		})
+	})
+
+	describe('ContextBar overflow', () => {
+		it('clips (scrolls) only on a phone, so a Menu from a chip drops out of the bar on wider tiers', async () => {
+			const bar: Widget = { type: 'ContextBar', id: 'bar', config: { label: 'Render context' }, slots: { start: [{ type: 'Text', id: 'text', config: { text: 'Base state' } }] } }
+			const phone = await mount([bar], { context: { viewportId: 'phone', viewport: { width: 390, height: 844 } } })
+			expect(widget(phone.container, 'bar').classList.contains('is-scroll')).toBe(true)
+			phone.bridge.dispose()
+			const desktop = await mount([bar])
+			expect(widget(desktop.container, 'bar').classList.contains('is-scroll')).toBe(false)
+			desktop.bridge.dispose()
+		})
+	})
+})

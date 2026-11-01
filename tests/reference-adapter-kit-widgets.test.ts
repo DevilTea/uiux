@@ -79,7 +79,7 @@ describe('the catalog of the phase-5 Widgets', () => {
 		for (const [type, field] of [['Sheet', 'title'], ['Sheet', 'description'], ['Progress', 'label']] as const) {
 			expect(manifest.catalog.widgets[type]?.i18n?.fields[field]?.params, `${type}.${field}`).toEqual({ value: 'valueText', value2: 'value2Text', value3: 'value3Text' })
 		}
-		expect(Object.keys(manifest.catalog.widgets.FileInput?.i18n?.fields ?? {})).toEqual(['title', 'description', 'removeLabel'])
+		expect(Object.keys(manifest.catalog.widgets.FileInput?.i18n?.fields ?? {})).toEqual(['title', 'description', 'removeLabel', 'error'])
 		expect(Object.keys(manifest.catalog.widgets.NumberField?.i18n?.fields ?? {})).toEqual(['label', 'help', 'error', 'roleDescription'])
 	})
 

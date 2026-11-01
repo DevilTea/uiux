@@ -224,8 +224,9 @@
 /* ContextBar & ContextChip */
 .uiux-ref-contextbar {
   display: flex; align-items: center; gap: 4px; min-height: 44px; padding: 4px 12px; flex-shrink: 0;
-  background: var(--kit-bg-surface); border-bottom: 1px solid var(--kit-border); overflow-x: auto;
+  background: var(--kit-bg-surface); border-bottom: 1px solid var(--kit-border);
 }
+.uiux-ref-contextbar.is-scroll { overflow-x: auto; }
 .uiux-ref-contextbar-start, .uiux-ref-contextbar-end { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
 .uiux-ref-contextbar-end { margin-left: auto; }
 .uiux-ref-chip {
@@ -466,8 +467,9 @@
 
 /* RadioGroup and Radio: a legend, then plain rows or bordered cards. */
 .uiux-ref-radio-group { display: flex; flex-direction: column; gap: 8px; }
-.uiux-ref-radio-legend { font-size: 12px; line-height: 16px; font-weight: 500; color: var(--kit-text); }
+.uiux-ref-radio-legend { font-size: 13px; line-height: 20px; font-weight: 500; color: var(--kit-text-highlighted); }
 .uiux-ref-radio-options { display: flex; flex-direction: column; gap: 8px; }
+.uiux-ref-radio-group.orientation-horizontal .uiux-ref-radio-options { flex-flow: row wrap; gap: 8px 16px; }
 .uiux-ref-radio { display: flex; align-items: flex-start; gap: 8px; padding: 2px 0; cursor: pointer; outline: none; font-size: 13px; line-height: 20px; color: var(--kit-text); }
 .uiux-ref-radio:focus-visible { outline: 2px solid var(--kit-primary); outline-offset: 2px; border-radius: 6px; }
 .uiux-ref-radio.is-touch { min-height: 44px; }
@@ -494,6 +496,7 @@
 .uiux-ref-file-drop-icon { display: inline-flex; color: var(--kit-text-muted); }
 .uiux-ref-file-drop-title { font-size: 13px; line-height: 20px; font-weight: 500; color: var(--kit-text); }
 .uiux-ref-file-drop-description { font-size: 12px; line-height: 16px; color: var(--kit-text-muted); }
+.uiux-ref-file-error { display: flex; gap: 6px; align-items: flex-start; margin: 6px 0 0; font-size: 12px; line-height: 18px; color: var(--kit-danger); }
 .uiux-ref-file-chip { display: flex; align-items: center; gap: 8px; padding: 10px 12px; box-sizing: border-box; border: 1px solid var(--kit-border); border-radius: 8px; background-color: var(--kit-bg-surface); }
 .uiux-ref-file-chip-icon { display: inline-flex; flex-shrink: 0; color: var(--kit-text-muted); }
 .uiux-ref-file-chip-text { display: flex; flex: 1 1 0; flex-direction: column; min-width: 0; }
