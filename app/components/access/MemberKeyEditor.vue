@@ -6,6 +6,7 @@ import { isCatalogKey, isHumanOnlyKey, keyRequirements, type PermissionKey } fro
 import { memberLabel, type LabelPreset } from '../../../src/application/access/labels'
 import type { MemberKind } from '../../../src/application/access/principal'
 import KitBadge from '~/components/kit/ui/Badge.vue'
+import KitCheckbox from '~/components/kit/ui/Checkbox.vue'
 import KitButton from '~/components/kit/ui/Button.vue'
 import KitIcon from '~/components/kit/ui/Icon.vue'
 import { applyPreset, catalogByDomain, toggleKey } from '../../utils/member-keys'
@@ -148,6 +149,7 @@ const presetItems = computed<DropdownMenuItem[]>(() => props.presets.map(preset 
           class="px-2 py-1.5"
           :data-key="key"
         >
+          <!-- Stays Nuxt UI: the Kit Checkbox takes a string label, and this label carries a "Human only" badge in its accessible name. -->
           <UCheckbox
             :model-value="held.has(key)"
             :disabled="readonly || disabledFor(key)"
@@ -224,18 +226,14 @@ const presetItems = computed<DropdownMenuItem[]>(() => props.presets.map(preset 
           class="px-2 py-1.5"
           :data-key="key"
         >
-          <UCheckbox
-            :model-value="held.has(key)"
+          <KitCheckbox
+            :checked="held.has(key)"
             :disabled="readonly"
-            @update:model-value="(value: boolean | 'indeterminate') => setKey(key, value === true)"
-          >
-            <template #label>
-              <code
-                class="font-mono text-xs text-highlighted"
-                translate="no"
-              >{{ key }}</code>
-            </template>
-          </UCheckbox>
+            :label="key"
+            mono
+            translate="no"
+            @toggle="(value: boolean) => setKey(key, value)"
+          />
         </li>
       </ul>
     </section>

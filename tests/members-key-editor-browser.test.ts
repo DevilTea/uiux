@@ -97,7 +97,7 @@ const label = (editor: Locator) => editor.locator('[data-key-editor-label]')
 async function checkedKeys(editor: Locator): Promise<string[]> {
 	const keys: string[] = []
 	for (const item of await editor.locator('[data-key]').all()) {
-		if (await item.getByRole('checkbox').getAttribute('aria-checked') === 'true') keys.push((await item.getAttribute('data-key'))!)
+		if (await item.getByRole('checkbox').isChecked()) keys.push((await item.getAttribute('data-key'))!)
 	}
 	return orderedKeys(keys)
 }

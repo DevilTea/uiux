@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { definePageMeta, useI18n, useRoute } from '#imports'
+import KitBadge from '~/components/kit/ui/Badge.vue'
 import KitIcon from '~/components/kit/ui/Icon.vue'
 import { useUiuxClient } from '../composables/useUiuxClient'
 import { describeFetchError } from '../utils/fetch-error'
@@ -962,15 +963,14 @@ onUnmounted(() => {
         <template #description>
           <div class="space-y-2">
             <p class="flex flex-wrap items-center gap-2">
-              <UBadge
-                color="warning"
+              <KitBadge
+                tone="warning"
                 variant="soft"
-                size="sm"
                 class="font-mono"
                 translate="no"
               >
                 adapter.materialization_unavailable
-              </UBadge>
+              </KitBadge>
               <span class="text-xs font-medium">{{ t('preview.adapterUnavailable.seam') }}</span>
             </p>
             <i18n-t
