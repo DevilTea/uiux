@@ -94,7 +94,9 @@ import {
 	type FormalEvidenceItem,
 	type ViewRenderInput,
 } from './formal-capture'
-import { createProductKitChecksService, type ProductKitChecksResult } from './product-kit-checks'
+import { NO_THUMBNAILS } from './thumbnails'
+import type { ThumbnailOperations, ThumbnailStatus } from '../ports/thumbnails'
+import { createProductKitChecksService,type ProductKitChecksResult } from './product-kit-checks'
 import { readCurrentProductKitProvenance } from './product-kit-provenance'
 import type { CurrentProductKitProvenance } from '../../domain/product-kit/provenance'
 import { readCurrentAdapterProvenance, type AdapterProvenanceSource } from './adapter-provenance'
@@ -194,6 +196,10 @@ export interface WorkspaceApplicationSession {
 	updateWorkspaceSettings<R = never>(command: UpdateWorkspaceSettingsCommand, guard?: WorkspaceSettingsGuard<R>): Promise<WorkspaceAuthoringResult | R>
 	/** The requirement coverage (Clause 01a18120-f903-…), the content of `uiux://requirements`. */
 	readRequirements(): Promise<RequirementsCoverage>
+	/** View thumbnails (Feature 01a19b99-c9ee-…); without the server's thumbnail worker no View has one. */
+	readViewThumbnail(viewId: string): Promise<Uint8Array | undefined>
+	listViewThumbnails(viewIds?: readonly string[]): Promise<readonly ThumbnailStatus[]>
+	requestViewThumbnails(viewIds: readonly string[]): Promise<readonly ThumbnailStatus[]>
 	readProductKit(): Promise<ProductKitRead | undefined>
 	composeProductKit<R = never>(command: ComposeProductKitCommand, guard?: ProductKitGuard<R>): Promise<ProductKitAuthoringResult | R>
 	updateProductKit<R = never>(command: UpdateProductKitCommand, guard?: ProductKitGuard<R>): Promise<ProductKitAuthoringResult | R>
@@ -294,8 +300,11 @@ export function createWorkspaceApplicationSession(
 		 * not in it with `removed: true` (Rule 01a11485-f185-7c23-8f2a-e045a279cd27); without it nothing is marked.
 		 */
 		memberIds?: () => Promise<ReadonlySet<string>>
+		/** The server's thumbnail service (Feature 01a19b99-c9ee-…), which runs under `uiux dev`; without it no View has a thumbnail. */
+		thumbnails?: ThumbnailOperations
 	},
 ): WorkspaceApplicationSession {
+	const thumbnails: ThumbnailOperations = options?.thumbnails ?? NO_THUMBNAILS
 	const viewAuthoring = createViewAuthoringService(persistence)
 	const workspaceAuthoring = createWorkspaceAuthoringService(persistence)
 	const localeAuthoring = createLocaleAuthoringService(persistence)
@@ -588,6 +597,9 @@ export function createWorkspaceApplicationSession(
 		listEvidence: formalCapture.listEvidence,
 		viewRenderInputs: formalCapture.viewRenderInputs,
 		readRequirements: requirements.readCoverage,
+		readViewThumbnail: viewId => thumbnails.read(viewId),
+		listViewThumbnails: viewIds => thumbnails.list(viewIds),
+		requestViewThumbnails: viewIds => thumbnails.request(viewIds),
 		flowInputs: formalCapture.flowInputs,
 		runProductKitChecks: command => productKitChecks.run({ ...(command?.readSource === false ? { readSource: false } : {}) }),
 		productKitProvenance: () => readCurrentProductKitProvenance(persistence),

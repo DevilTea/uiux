@@ -1681,6 +1681,15 @@
       "noMatch": "沒有符合篩選條件的 View。"
     },
     "viewCount": "沒有 View | {n} 個 View | {n} 個 View",
+    "layout": {
+      "label": "排列方式",
+      "list": "清單",
+      "grid": "格狀"
+    },
+    "thumbnail": {
+      "stale": "預覽已過期",
+      "refreshing": "預覽更新中"
+    },
     "reviews": {
       "ready": "{n} 則待審核",
       "open": "{n} 則未解決"

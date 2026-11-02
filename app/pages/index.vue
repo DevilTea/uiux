@@ -6,14 +6,17 @@ import type { TableColumn, TabsItem } from '@nuxt/ui'
 import { useMediaQuery } from '../composables/useMediaQuery'
 import { useReadiness } from '../composables/useReadiness'
 import { useRequirements } from '../composables/useRequirements'
+import { useViewThumbnails } from '../composables/useViewThumbnails'
 import { useWorkbench } from '../composables/useWorkbench'
 import { useWorkbenchShell } from '../composables/useWorkbenchShell'
 import { splitReadinessDiagnostics, updatedSince } from '../utils/readiness'
 import { viewLocation } from '../utils/workbench-routes'
 import KitBadge from '~/components/kit/ui/Badge.vue'
 import KitButton from '~/components/kit/ui/Button.vue'
+import KitButtonGroup from '~/components/kit/ui/ButtonGroup.vue'
 import KitIcon from '~/components/kit/ui/Icon.vue'
 import KitSkeleton from '~/components/kit/ui/Skeleton.vue'
+import ViewThumbnail from '../components/workbench/ViewThumbnail.vue'
 import WorkbenchPage from '../components/workbench/WorkbenchPage.vue'
 import OverviewChecks from '../components/readiness/OverviewChecks.vue'
 import OverviewActivity from '../components/readiness/OverviewActivity.vue'
@@ -173,6 +176,37 @@ const tabs = computed<TabsItem[]>(() => [
 	...(requirements.hasSpecProvider.value ? [{ value: 'requirements', slot: 'requirements' as const, label: t('overview.tab.requirements') }] : []),
 	{ value: 'activity', slot: 'activity' as const, label: t('overview.tab.activity') },
 ])
+
+// ----- Layout and thumbnails ------------------------------------------------------------------
+
+/**
+ * The Views tab shows the filtered Views as a list (the table, or the card list on a phone) or as a
+ * grid of thumbnail cards (Rule 01a19b99-daf6-780f-a2ae-c96a4e27d37a). The choice is this browser's,
+ * kept in `localStorage` like the Workbench's other per-browser choices, and the list when none was
+ * chosen or the browser keeps nothing (Rule 01a19b99-db8e-7df7-b97e-5903af08a78b).
+ */
+const LAYOUT_KEY = 'uiux.workbench.viewsLayout'
+const layout = ref<'list' | 'grid'>('list')
+try { if (globalThis.localStorage?.getItem(LAYOUT_KEY) === 'grid') layout.value = 'grid' }
+catch { /* storage unavailable: the list */ }
+watch(layout, (value) => {
+	try { globalThis.localStorage?.setItem(LAYOUT_KEY, value) }
+	catch { /* storage unavailable: the choice lasts for this page only */ }
+})
+
+const thumbnails = useViewThumbnails()
+/** The Views requested for the current opening of the tab; reset when the tab is left, so each opening asks again. */
+let requestedFor = ''
+watch([tab, () => views.value.map(view => view.key).join(',')], ([current, signature]) => {
+	if (current !== 'views') {
+		requestedFor = ''
+		return
+	}
+	// Opening the Views tab requests the thumbnails of the Views it lists (Rule 01a19b99-dfe8-7396-95d8-8e0cf1acf533).
+	if (!signature || signature === requestedFor) return
+	requestedFor = signature
+	void thumbnails.request(signature.split(','))
+}, { immediate: true })
 
 const exportOpen = ref(false)
 const canExport = computed(() => workbench.canWrite('handoff.export') && atLeastTablet.value)
@@ -339,10 +373,86 @@ function evidenceLabel(row: ViewRow): { text: string; icon: string; tone: string
                 class="w-40"
               />
               <span class="ms-auto text-sm text-muted tabular-nums">{{ t('overview.viewCount', filtered.length) }}</span>
+              <KitButtonGroup :label="t('overview.layout.label')">
+                <KitButton
+                  icon="list"
+                  icon-only
+                  :label="t('overview.layout.list')"
+                  :pressed="layout === 'list'"
+                  data-views-layout="list"
+                  @click="layout = 'list'"
+                />
+                <KitButton
+                  icon="layout-grid"
+                  icon-only
+                  :label="t('overview.layout.grid')"
+                  :pressed="layout === 'grid'"
+                  data-views-layout="grid"
+                  @click="layout = 'grid'"
+                />
+              </KitButtonGroup>
             </div>
 
+            <!-- Grid layout: one card per View (Rules 01a19b99-dc1f-7f8c-86ed-d4f70b7e1533 and 01a19b99-e07a-7e6c-a5ac-04e44e3ee035). -->
+            <ul
+              v-if="layout === 'grid'"
+              class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4"
+              data-views-grid
+            >
+              <li
+                v-for="row in filtered"
+                :key="row.key"
+              >
+                <ULink
+                  :to="viewLocation(row.key, { panel: 'readiness' })"
+                  :aria-label="row.name"
+                  class="block overflow-hidden rounded-lg border border-default hover:bg-muted"
+                  :data-view-row="row.key"
+                  data-view-card
+                >
+                  <ViewThumbnail
+                    size="card"
+                    :name="row.name"
+                    :url="thumbnails.imageUrl(row.key)"
+                    :stale="thumbnails.entryOf(row.key).state === 'stale'"
+                    :refreshing="thumbnails.entryOf(row.key).refreshing"
+                  />
+                  <span class="flex flex-col gap-2 p-3">
+                    <span class="flex items-center gap-2">
+                      <span
+                        v-if="row.updated"
+                        class="size-2 shrink-0 rounded-full bg-primary"
+                      ><span class="sr-only">{{ t('overview.updated') }}</span></span>
+                      <span class="min-w-0 flex-1 truncate text-sm font-medium text-highlighted">{{ row.name }}</span>
+                      <span
+                        v-if="row.key === lastViewId"
+                        class="shrink-0 text-xs text-muted"
+                        data-last-opened
+                      >{{ t('workbench.views.lastOpened') }}</span>
+                    </span>
+                    <span class="flex items-center gap-2">
+                      <KitBadge
+                        :tone="READINESS_BADGE[row.readiness].tone"
+                        :icon="READINESS_BADGE[row.readiness].icon"
+                        :spin="row.readiness === 'checking'"
+                        :data-readiness="row.readiness"
+                        :label="readinessLabel(row)"
+                      />
+                      <span class="min-w-0 flex-1 truncate text-end font-mono text-xs text-muted">{{ row.feature }}</span>
+                    </span>
+                  </span>
+                </ULink>
+              </li>
+              <li
+                v-if="!filtered.length && !loading"
+                class="col-span-full py-6 text-center text-sm text-muted"
+              >
+                {{ t('overview.filter.noMatch') }}
+              </li>
+            </ul>
+
             <UTable
-              v-if="atLeastTablet"
+              v-else-if="atLeastTablet"
               v-model:sorting="sorting"
               :data="filtered"
               :columns="columns"
@@ -368,7 +478,14 @@ function evidenceLabel(row: ViewRow): { text: string; icon: string; tone: string
                 />
               </template>
               <template #name-cell="{ row }">
-                <span class="flex items-center gap-2">
+                <span class="flex items-center gap-3">
+                  <ViewThumbnail
+                    size="row"
+                    :name="row.original.name"
+                    :url="thumbnails.imageUrl(row.original.key)"
+                    :stale="thumbnails.entryOf(row.original.key).state === 'stale'"
+                    :refreshing="thumbnails.entryOf(row.original.key).refreshing"
+                  />
                   <span
                     v-if="row.original.updated"
                     class="size-2 shrink-0 rounded-full bg-primary"
@@ -460,6 +577,13 @@ function evidenceLabel(row: ViewRow): { text: string; icon: string; tone: string
                   :data-view-row="row.key"
                 >
                   <span class="flex items-center gap-2">
+                    <ViewThumbnail
+                      size="row"
+                      :name="row.name"
+                      :url="thumbnails.imageUrl(row.key)"
+                      :stale="thumbnails.entryOf(row.key).state === 'stale'"
+                      :refreshing="thumbnails.entryOf(row.key).refreshing"
+                    />
                     <span
                       v-if="row.updated"
                       class="size-2 shrink-0 rounded-full bg-primary"

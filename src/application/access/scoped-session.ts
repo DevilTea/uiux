@@ -50,6 +50,7 @@ import type {
 import type { AccessPresetsAuthoringResult, AccessPresetsRead, UpdateAccessPresetsCommand } from '../services/access-presets-authoring'
 import type { KitBuildLogRead, KitBuildRead, RestartKitBuildResult } from '../services/kit-build'
 import type { KitSourceService } from '../services/kit-source'
+import type { ThumbnailStatus } from '../ports/thumbnails'
 import { keyRequirements, writeKeyForKind, type PermissionKey } from './keys'
 import {
 	LOCKABLE_KINDS,
@@ -185,6 +186,10 @@ export interface ScopedWorkspaceSession {
 	readProductKit(): Promise<ProductKitRead | undefined>
 	/** The requirement coverage (Clause 01a18120-f903-…); `workspace.read`. */
 	readRequirements(): Promise<RequirementsCoverage>
+	/** View thumbnails (Clause 01a19bb9-8f1f-7482-b6fd-f131a284178e): each needs `workspace.read` and no other key. */
+	readViewThumbnail(viewId: string): Promise<Uint8Array | undefined>
+	listViewThumbnails(viewIds?: readonly string[]): Promise<readonly ThumbnailStatus[]>
+	requestViewThumbnails(viewIds: readonly string[]): Promise<readonly ThumbnailStatus[]>
 	/**
 	 * The Product Kit operations (Clause 01a11bb1-b35a-7e69-bba5-978e3f47c4fa): each needs its own key
 	 * and, checked in the service on the file the write replaces, the keys of what its change touches.
@@ -591,6 +596,9 @@ export function createScopedWorkspaceSession(
 		updateWorkspaceSettings: command => write('updateWorkspaceSettings', 'workspace', { kind: 'workspace', key: 'workspace' }, () => app.updateWorkspaceSettings(command)),
 		async readProductKit() { assert('readProductKit'); return app.readProductKit() },
 		async readRequirements() { assert('readRequirements'); return app.readRequirements() },
+		async readViewThumbnail(viewId) { assert('readViewThumbnail'); return app.readViewThumbnail(viewId) },
+		async listViewThumbnails(viewIds) { assert('listViewThumbnails'); return app.listViewThumbnails(viewIds) },
+		async requestViewThumbnails(viewIds) { assert('requestViewThumbnails'); return app.requestViewThumbnails(viewIds) },
 		composeProductKit: command => write('composeProductKit', PRODUCT_KIT_KEY, PRODUCT_KIT_LEASE, () => app.composeProductKit(command, productKitGuard('composeProductKit'))),
 		updateProductKit: command => write('updateProductKit', PRODUCT_KIT_KEY, PRODUCT_KIT_LEASE, () => app.updateProductKit(command, productKitGuard('updateProductKit'))),
 		updateComponentRegistry: command => write('updateComponentRegistry', PRODUCT_KIT_KEY, PRODUCT_KIT_LEASE, () => app.updateComponentRegistry(command, productKitGuard('updateComponentRegistry'))),

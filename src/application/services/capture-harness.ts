@@ -166,11 +166,14 @@ export async function openHarnessPreview(browser: Browser, input: Readonly<{
 	timeoutMs?: number
 	/** A bound on the wait for web fonts. Formal capture passes none, so its wait stays unbounded as before. */
 	fontsTimeoutMs?: number
+	/** The browser context's pixel ratio; View thumbnails pass 480 / viewport width. Formal capture passes none (the default ratio of 1). */
+	deviceScaleFactor?: number
 }>): Promise<HarnessPreview> {
 	const timeout = input.timeoutMs ?? HARNESS_LOAD_TIMEOUT_MS
 	const browserContext = await browser.newContext({
 		viewport: { width: input.context.viewport.width, height: input.context.viewport.height },
 		reducedMotion: 'reduce',
+		...(input.deviceScaleFactor === undefined ? {} : { deviceScaleFactor: input.deviceScaleFactor }),
 	})
 	const close = async () => {
 		await browserContext.close().catch(() => undefined)

@@ -204,6 +204,7 @@ export function changeEventFrame(change: ChangeEvent): string {
 		case 'resource.removed': return eventFrame(change.type, { kind: change.kind, key: change.key })
 		case 'lock.changed': return eventFrame(change.type, { kind: change.kind, key: change.key })
 		case 'access.changed': return eventFrame(change.type, {})
+		case 'thumbnail.changed': return eventFrame(change.type, { key: change.key })
 	}
 }
 
