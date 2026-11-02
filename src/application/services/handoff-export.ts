@@ -10,7 +10,6 @@ import { type AdapterProvenance, type AdapterWidgetCatalogEntry } from '../../do
 import { validateAssetBinding } from '../../domain/assets/schema'
 import {
 	FLOW_TRACE_KIND,
-	validateFormalEvidenceRecord,
 	type EvidenceReference,
 	type FormalEvidenceRecord,
 } from '../../domain/evidence/schema'
@@ -54,6 +53,7 @@ import { componentDigest } from '../../domain/product-kit/digest'
 import { PRODUCT_KIT_RESOURCE_KEY, PRODUCT_KIT_RESOURCE_KIND, validateProductKit, type ProductKit } from '../../domain/product-kit/schema'
 import { productKitFreshnessContext, type ProductKitProvenance } from '../../domain/product-kit/provenance'
 import { readCurrentProductKitProvenance } from './product-kit-provenance'
+import { evidenceRecordOfKinds } from './evidence-selection'
 import { collectWidgetTypesFromIr } from '../../preview/preview-runtime'
 import { deriveReviewResolution, isWorkspaceAnchor, REVIEW_RESOLUTIONS, type ReviewResolution } from '../../domain/reviews/schema'
 
@@ -1266,8 +1266,7 @@ function collectAssetReferencesFromIr(
  * Handoff reads (Rule 01a11544-6734-7a24-a957-e23ddeb3e396); any other artifact is ignored.
  */
 function handoffEvidenceRecordOf(value: unknown): FormalEvidenceRecord | undefined {
-	const validation = validateFormalEvidenceRecord(value)
-	return validation.ok && (validation.value.kind === 'formal_capture' || validation.value.kind === FLOW_TRACE_KIND) ? validation.value : undefined
+	return evidenceRecordOfKinds(value, ['formal_capture', FLOW_TRACE_KIND])
 }
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {

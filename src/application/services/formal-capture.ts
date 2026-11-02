@@ -19,6 +19,7 @@ import type { TranslationEvaluation } from '../../preview/translation-evaluation
 import type { FileNativePersistence } from '../../persistence'
 import { PersistenceError } from '../../persistence/errors'
 import { keptChecksRuns } from '../../persistence/artifact-gc'
+import { evidenceRecordOfKinds } from './evidence-selection'
 import { settledValue } from '../../persistence/file-native'
 import type { KitBuildStatus } from '../ports/kit-build'
 import { ASSET_LOAD_FAILED_DIAGNOSTIC, ASSET_LOAD_FAILED_STATUS, captureHarnessScreenshot, HARNESS_LAUNCH_ARGS, evaluateHarnessTranslations, openHarnessPreview, type HarnessPreview } from './capture-harness'
@@ -105,12 +106,6 @@ export interface FormalCaptureService {
 /** The formal capture record in a parsed artifact, if it is one; used to filter inside the read lock. */
 export function formalCaptureRecordOf(value: unknown): FormalEvidenceRecord | undefined {
 	return evidenceRecordOfKinds(value, ['formal_capture'])
-}
-
-/** The Evidence record in a parsed artifact when it is one of `kinds`. */
-function evidenceRecordOfKinds(value: unknown, kinds: readonly string[]): FormalEvidenceRecord | undefined {
-	const validation = validateFormalEvidenceRecord(value)
-	return validation.ok && kinds.includes(validation.value.kind) ? validation.value : undefined
 }
 
 export function createFormalCaptureService(
