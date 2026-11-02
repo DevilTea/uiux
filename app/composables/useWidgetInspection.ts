@@ -1,4 +1,4 @@
-import { computed, ref, shallowRef, watch } from 'vue'
+import { computed, onScopeDispose, ref, shallowRef, watch } from 'vue'
 import { anchorViewId, anchorWidgetId, type ReviewThread } from '../../src/domain/reviews/schema'
 import {
 	findIrNode,
@@ -7,6 +7,12 @@ import {
 	widgetAncestry,
 	widgetLabelSource,
 } from '../utils/widget-inspection'
+import {
+	createBaseStateRequests,
+	mintBaseStateRequestId,
+	type BaseStateCell,
+	type BaseStateTarget,
+} from '../utils/base-state-requests'
 import { useUiuxClient } from './useUiuxClient'
 import type { Workbench } from './useWorkbench'
 import type { ReviewSummary } from './workbench-types'
@@ -79,6 +85,56 @@ export function useWidgetInspection(workbench: Workbench) {
 	const variantFaults = computed(() => variantDiagnostics(selectedView.value, variantName.value))
 	const overrides = computed(() => node.value ? variantOverrides(selectedView.value, variantName.value, node.value.id) : [])
 
+	/**
+	 * The base-state values of the State members this Variant overrides on the selected Widget (issue
+	 * #52, Rule 01a19a9d-a01a-72bd-9ea0-cad4e90ae7fc): read from the open Preview with one request at
+	 * a time, abandoned by any change of what is shown. Nothing is asked of a Variant that is invalid.
+	 */
+	const baseStateVersion = ref(0)
+	const baseState = createBaseStateRequests({
+		send: request => preview.sendBaseStateRequest(request),
+		mintRequestId: mintBaseStateRequestId,
+		changed: () => { baseStateVersion.value++ },
+	})
+	const stopBaseState = preview.onBaseState(event => baseState.receive(event))
+	const baseStateTarget = computed<BaseStateTarget>(() => {
+		const options = contextOptions.value
+		const viewId = selectedViewId.value
+		const generation = preview.runtimeGenerationId.value
+		const revision = selectedView.value?.revision
+		const dimensions = options.viewports.selectedDimensions
+		const variantId = variantName.value
+		return {
+			supported: preview.baseStateSupported.value,
+			...(viewId && generation
+				? { context: { previewSessionId: preview.previewSessionId.value, runtimeGenerationId: generation, viewId, ...(variantId ? { variantId } : {}) } }
+				: {}),
+			...(revision
+				? {
+						renderContext: {
+							viewRevision: revision,
+							locale: options.locales.selected,
+							viewportId: options.viewports.selectedId,
+							viewport: { width: dimensions.width, height: dimensions.height },
+							themeId: options.themes.selected,
+						},
+					}
+				: {}),
+			...(node.value ? { widgetId: node.value.id } : {}),
+			keys: variantName.value && !variantInvalid.value ? overrides.value.map(item => item.property) : [],
+		}
+	})
+	watch(baseStateTarget, target => baseState.retarget(target), { immediate: true })
+	onScopeDispose(() => {
+		stopBaseState()
+		baseState.dispose()
+	})
+	/** What each overridden State member's Base cell shows: pending, the base value, or Unavailable. */
+	const baseCells = computed<ReadonlyMap<string, BaseStateCell>>(() => {
+		void baseStateVersion.value
+		return new Map(overrides.value.map(item => [item.property, baseState.read(item.property)]))
+	})
+
 	const findings = computed(() => {
 		if (!node.value || !selectedView.value) return []
 		const id = node.value.id
@@ -134,6 +190,7 @@ export function useWidgetInspection(workbench: Workbench) {
 		variantInvalid,
 		variantFaults,
 		overrides,
+		baseCells,
 		findings,
 		geometry,
 		visibility,

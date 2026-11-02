@@ -9,6 +9,7 @@ import { useWorkbench } from '../../composables/useWorkbench'
 import { useMediaQuery, WORKBENCH_BREAKPOINTS } from '../../composables/useMediaQuery'
 import { useWidgetInspection, type WidgetThreadRow } from '../../composables/useWidgetInspection'
 import { actorInitials, formatStateValue, relativeTime, truncateMiddle, widgetTypeIcon } from '../../utils/widget-inspection'
+import type { BaseStateCell } from '../../utils/base-state-requests'
 import { diagnosticText } from '../../utils/diagnostic-copy'
 import { copyText } from '../../utils/copy-text'
 
@@ -32,7 +33,7 @@ const inspection = useWidgetInspection(workbench)
 const isPhone = useMediaQuery(WORKBENCH_BREAKPOINTS.handset)
 const {
 	hasSelection, node, missing, irNode, ancestry, label, variantName, variantInvalid, variantFaults,
-	overrides, findings, geometry, visibility, threads,
+	overrides, baseCells, findings, geometry, visibility, threads,
 } = inspection
 
 const THREAD_ROWS = 6
@@ -61,8 +62,13 @@ const size = computed(() => {
 	}
 })
 
-type DiffRow = { property: string; value: string }
-const diffRows = computed<DiffRow[]>(() => overrides.value.map(item => ({ property: item.property, value: formatStateValue(item.value) })))
+type DiffRow = { property: string; value: string; base: BaseStateCell }
+const PENDING_BASE: BaseStateCell = { status: 'pending' }
+const diffRows = computed<DiffRow[]>(() => overrides.value.map(item => ({
+	property: item.property,
+	value: formatStateValue(item.value),
+	base: baseCells.value.get(item.property) ?? PENDING_BASE,
+})))
 const diffColumns = computed<TableColumn<DiffRow>[]>(() => [
 	{ accessorKey: 'property', header: t('inspect.property'), meta: { class: { td: 'text-default' } } },
 	{ id: 'base', header: t('inspect.base') },
@@ -382,8 +388,22 @@ function onKeydown(event: KeyboardEvent): void {
             td: 'px-1.5 py-1 align-top font-mono text-xs whitespace-normal break-all text-muted',
           }"
         >
-          <template #base-cell>
-            <span class="font-sans text-dimmed">{{ t('inspect.widgetDefault') }}</span>
+          <template #base-cell="{ row }">
+            <span
+              v-if="row.original.base.status === 'value'"
+              data-base-state="value"
+              translate="no"
+            >{{ formatStateValue(row.original.base.value) }}</span>
+            <span
+              v-else-if="row.original.base.status === 'pending'"
+              class="font-sans text-dimmed"
+              data-base-state="pending"
+            >{{ t('inspect.baseReading') }}</span>
+            <span
+              v-else
+              class="font-sans text-dimmed"
+              data-base-state="unavailable"
+            >{{ t('inspect.baseUnavailable') }}</span>
           </template>
           <template #value-cell="{ row }">
             <span translate="no">{{ row.original.value }}</span>
