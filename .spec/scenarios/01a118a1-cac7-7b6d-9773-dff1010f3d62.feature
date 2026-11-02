@@ -1,7 +1,7 @@
 Feature: Review desk
   # Source: spec import batch 8 (Scenarios), priority P1. Decisions behind the demonstrated Rules and Clauses: #1 c19 https://github.com/DevilTea/uiux/discussions/1#discussioncomment-18561501; #7 c2 d5 https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18673968; #7 c9 d4 table https://github.com/DevilTea/uiux/discussions/7#discussioncomment-18772095.
   # Test: code@a021f9e `tests/transport-authoring.test.ts#L892` "creates an open review thread, appends messages, re-anchors, submits ready, and resolves with human actor". https://github.com/DevilTea/uiux/blob/a021f9e1dc892ef7a5845683a228a999c3d5f827/tests/transport-authoring.test.ts#L892
-  # Test: code@a021f9e `tests/review-submission.test.ts#L14` "names the anchored View at its current revision and references formal captures". https://github.com/DevilTea/uiux/blob/a021f9e1dc892ef7a5845683a228a999c3d5f827/tests/review-submission.test.ts#L14
+  # Test: code@3bc4020 `tests/review-submission.test.ts#L19` "names the anchored View at its current revision and references Evidence". https://github.com/DevilTea/uiux/blob/3bc4020379b331eadcbfda7062f602b119a8736e/tests/review-submission.test.ts#L19
   # Status: built as of a021f9e.
   @spec:id:01a118a1-cac7-73e4-b219-2a9175ebcafb
   @spec:demonstrates:01a11544-5459-73a9-89d2-dd4d3ed42da3
