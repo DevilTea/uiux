@@ -72,7 +72,11 @@ export function readBaseState(
 		const built = build({ view: mounted.view, adapters: mounted.adapters, assets: mounted.assets, context })
 		if (built.state !== 'ready') return { renderContext, readings: unavailableReadings(keys) }
 		runtime = built.runtime
-		return { renderContext, readings: keys.map(key => ({ key, member: readMember(runtime!, widgetId, key) })) }
+		// The Widget is looked up once for all keys; a Runtime that cannot be inspected throws here.
+		const inspection = inspectRuntime(runtime)
+		const node = inspection.blueprint.nodes.find(candidate => candidate.resolved && candidate.node.id === widgetId)
+		const widget = node?.resolved ? inspection.getWidget(node.nodeId) : null
+		return { renderContext, readings: keys.map(key => ({ key, member: widget ? readMember(widget, key) : UNAVAILABLE_MEMBER })) }
 	}
 	catch {
 		// An Adapter that throws while the Runtime is built or read leaves every key unreadable.
@@ -88,21 +92,40 @@ export function readBaseState(
 	}
 }
 
-function readMember(runtime: WidgetSystemRuntime, widgetId: string, key: string): BaseStateMember {
+function readMember(widget: NonNullable<ReturnType<ReturnType<typeof inspectRuntime>['getWidget']>>, key: string): BaseStateMember {
 	try {
-		const inspection = inspectRuntime(runtime)
-		const node = inspection.blueprint.nodes.find(candidate => candidate.resolved && candidate.node.id === widgetId)
-		if (!node?.resolved) return UNAVAILABLE_MEMBER
-		const state = inspection.getWidget(node.nodeId)?.getState(key)
+		const state = widget.getState(key)
 		if (!state) return UNAVAILABLE_MEMBER
 		const copied = toBaseStateValue(state.getSnapshot().value)
 		return copied.ok ? Object.freeze({ value: copied.value }) : UNAVAILABLE_MEMBER
 	}
 	catch {
-		// A Runtime this widget-core module instance did not create (`WidgetInspectionError`) cannot be
-		// read, and neither can a member whose read throws.
+		// A member whose read throws cannot be read.
 		return UNAVAILABLE_MEMBER
 	}
+}
+
+/**
+ * Sends `response` through `send`. A response the bridge refuses as `invalid` (for example a
+ * `renderContext` text member beyond its bound) is replaced by the same answer with every key
+ * Unavailable and the same `renderContext`, so the Workbench is answered rather than left to time
+ * out; `onUnsendable` is called when even that is refused. Any other result (a gate that is not
+ * open) is the caller's to ignore: nothing is sent and nothing is a failure.
+ */
+export function sendBaseStateAnswer(
+	response: BaseStateResponseMessage,
+	send: (message: BaseStateResponseMessage) => Readonly<{ status: string }>,
+	onUnsendable: () => void,
+): void {
+	if (send(response).status !== 'invalid') return
+	const fallback = encodeBaseStateResponse({
+		context: response.context,
+		requestId: response.payload.requestId,
+		widgetId: response.payload.widgetId,
+		renderContext: response.payload.renderContext,
+		readings: unavailableReadings(Object.keys(response.payload.values)),
+	})
+	if (send(fallback).status === 'invalid') onUnsendable()
 }
 
 /**

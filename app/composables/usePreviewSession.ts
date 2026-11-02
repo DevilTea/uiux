@@ -59,15 +59,20 @@ import type { SessionPhase } from './workbench-types'
 export type CanvasTool = 'select' | 'comment' | 'interact'
 
 /**
- * A committed comment-range target (Part 3): the hit-tested Widget and the transient click point
- * in inner content-viewport CSS px. Keyboard paths (tree, Inspector) have no point.
+ * An inbound `inspection.base-state` event the session hands its subscribers (see `onBaseState`).
+ * A `rejected` event ends the request it names; one without a `requestId` names none, and a
+ * subscriber ignores it: the pending request then ends by its own 5000 ms wait (Clause
+ * 01a19a9b-3c4d-74cb-9695-ce20087e2188).
  */
-/** An inbound `inspection.base-state` event the session hands its subscribers (see `onBaseState`). */
 export type BaseStateInbound =
 	| Readonly<{ kind: 'response'; message: BaseStateResponseMessage }>
 	| Readonly<{ kind: 'rejected'; requestId?: string }>
 
-export type CommentTarget =Readonly<{ widgetId: string; point?: Point }>
+/**
+ * A committed comment-range target (Part 3): the hit-tested Widget and the transient click point
+ * in inner content-viewport CSS px. Keyboard paths (tree, Inspector) have no point.
+ */
+export type CommentTarget = Readonly<{ widgetId: string; point?: Point }>
 
 /** What the session chip shows (brief b, section 6). */
 export type SessionStatusKind = 'idle' | 'connecting' | 'live' | 'reconnecting' | 'stopped'

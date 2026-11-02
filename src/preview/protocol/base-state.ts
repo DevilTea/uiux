@@ -1,6 +1,5 @@
 import {
 	isCanonicalLocaleTag,
-	isJsonValue,
 	jsonPointer,
 	validateUuid,
 	Validator,
@@ -120,19 +119,14 @@ export function validateBaseStateMessage(input: unknown): ValidationResult<BaseS
 		v.issue('protocol.unknown_message_type', '/type', 'This decoder accepts only inspection.base-state.request and inspection.base-state.response.')
 	if (!context || !payload || !isBaseStateMessageType(type)) return v.finish<BaseStateMessage>(input)
 	const response = type === 'inspection.base-state.response'
-	if (response && jsonLength(input) > MAX_BASE_STATE_RESPONSE_LENGTH) {
-		v.issue('protocol.base_state_too_large', '', `An inspection.base-state.response holds at most ${MAX_BASE_STATE_RESPONSE_LENGTH} characters of JSON.`)
-		return v.finish<BaseStateMessage>(input)
-	}
-
 	for (const key of ['previewSessionId', 'runtimeGenerationId', 'viewId'] as const) {
 		if (!Object.hasOwn(context, key)) v.issue('protocol.missing_context_identity', `/context/${key}`, `${type} requires context.${key}.`)
 	}
 	for (const key of ['previewSessionId', 'runtimeGenerationId'] as const) {
-		if (Object.hasOwn(context, key)) boundedText(context[key], `/context/${key}`, v)
+		if (Object.hasOwn(context, key)) boundedText(context[key], `/context/${key}`, true, v)
 	}
 	if (Object.hasOwn(context, 'viewId')) validateUuid(context.viewId, '/context/viewId', v, 'View identity')
-	if (Object.hasOwn(context, 'variantId')) boundedText(context.variantId, '/context/variantId', v)
+	if (Object.hasOwn(context, 'variantId')) boundedText(context.variantId, '/context/variantId', true, v)
 	for (const key of INAPPLICABLE_CONTEXT_KEYS) {
 		if (Object.hasOwn(context, key)) v.issue('protocol.inapplicable_context_identity', `/context/${key}`, `${type} carries no ${key}.`)
 	}
@@ -143,14 +137,15 @@ export function validateBaseStateMessage(input: unknown): ValidationResult<BaseS
 		if (value === null) v.issue('protocol.null_optional_field', `/context/${key}`, 'Optional protocol fields are omitted instead of encoded as null.')
 	}
 
-	const requestId = requiredText(payload, 'requestId', v)
-	const widgetId = requiredText(payload, 'widgetId', v)
+	// Only `requestId` must be non-empty; a Widget identity and a State member name are display-safe text (Clause 01a19a9b-347f-782c-bd9a-22dc52096603).
+	const requestId = requiredText(payload, 'requestId', true, v)
+	const widgetId = requiredText(payload, 'widgetId', false, v)
 	let keys: readonly string[] | undefined
 	let renderContext: BaseStateRenderContext | undefined
 	let values: Readonly<Record<string, BaseStateMember>> | undefined
 	if (response) {
 		renderContext = decodeRenderContext(payload.renderContext, '/payload/renderContext', v)
-		values = decodeValues(payload.values, '/payload/values', v)
+		values = decodeValues(payload.values, '/payload/values', createValueBudget(), v)
 	}
 	else {
 		keys = decodeKeys(payload.keys, '/payload/keys', v)
@@ -164,11 +159,17 @@ export function validateBaseStateMessage(input: unknown): ValidationResult<BaseS
 		...(typeof context.variantId === 'string' ? { variantId: context.variantId } : {}),
 	})
 	if (response) {
-		return v.finish<BaseStateMessage>(Object.freeze({
+		const message = Object.freeze({
 			type,
 			context: normalizedContext,
 			payload: Object.freeze({ requestId: requestId!, widgetId: widgetId!, renderContext: renderContext!, values: values! }),
-		}))
+		})
+		// The bound is on the envelope the Workbench acts on; the values were walked under a budget first, so measuring it is cheap.
+		if (jsonLength(message) > MAX_BASE_STATE_RESPONSE_LENGTH) {
+			v.issue('protocol.base_state_too_large', '', `An inspection.base-state.response holds at most ${MAX_BASE_STATE_RESPONSE_LENGTH} characters of JSON.`)
+			return v.finish<BaseStateMessage>(input)
+		}
+		return v.finish<BaseStateMessage>(message)
 	}
 	return v.finish<BaseStateMessage>(Object.freeze({
 		type,
@@ -188,7 +189,7 @@ function decodeKeys(value: unknown, path: string, v: Validator): readonly string
 	const seen = new Set<string>()
 	const keys: string[] = []
 	list.forEach((item, index) => {
-		const key = boundedText(item, jsonPointer(path, index), v)
+		const key = boundedText(item, jsonPointer(path, index), false, v)
 		if (key === undefined) return
 		if (seen.has(key)) v.issue('protocol.duplicate_base_state_key', jsonPointer(path, index), 'A request names each key at most once.')
 		seen.add(key)
@@ -201,11 +202,11 @@ function decodeRenderContext(value: unknown, path: string, v: Validator): BaseSt
 	const entry = v.object(value, path)
 	if (!entry) return undefined
 	const before = v.diagnostics.length
-	const viewRevision = boundedText(entry.viewRevision, `${path}/viewRevision`, v)
-	const locale = boundedText(entry.locale, `${path}/locale`, v)
+	const viewRevision = boundedText(entry.viewRevision, `${path}/viewRevision`, true, v)
+	const locale = boundedText(entry.locale, `${path}/locale`, true, v)
 	if (locale !== undefined && !isCanonicalLocaleTag(locale)) v.issue('render_context.invalid_locale', `${path}/locale`, 'Locale must be a canonical BCP 47 tag.')
-	const viewportId = boundedText(entry.viewportId, `${path}/viewportId`, v)
-	const themeId = boundedText(entry.themeId, `${path}/themeId`, v)
+	const viewportId = boundedText(entry.viewportId, `${path}/viewportId`, true, v)
+	const themeId = boundedText(entry.themeId, `${path}/themeId`, true, v)
 	const viewport = v.object(entry.viewport, `${path}/viewport`)
 	const width = viewport ? v.finiteNumber(viewport.width, `${path}/viewport/width`) : undefined
 	const height = viewport ? v.finiteNumber(viewport.height, `${path}/viewport/height`) : undefined
@@ -220,7 +221,7 @@ function decodeRenderContext(value: unknown, path: string, v: Validator): BaseSt
 }
 
 /** Reads `values` through its own members only; a prototype member of another name is never consulted. */
-function decodeValues(value: unknown, path: string, v: Validator): Readonly<Record<string, BaseStateMember>> | undefined {
+function decodeValues(value: unknown, path: string, budget: ValueBudget, v: Validator): Readonly<Record<string, BaseStateMember>> | undefined {
 	const entry = v.object(value, path)
 	if (!entry) return undefined
 	const keys = Object.keys(entry)
@@ -232,19 +233,19 @@ function decodeValues(value: unknown, path: string, v: Validator): Readonly<Reco
 	const decoded: Record<string, BaseStateMember> = Object.create(null)
 	for (const key of keys) {
 		const memberPath = jsonPointer(path, key)
-		boundedText(key, memberPath, v)
+		boundedText(key, memberPath, false, v)
 		const descriptor = Object.getOwnPropertyDescriptor(entry, key)
 		if (!descriptor || !('value' in descriptor)) {
 			v.issue('protocol.invalid_base_state_member', memberPath, 'A member is a plain data member.')
 			continue
 		}
-		const member = decodeMember(descriptor.value, memberPath, v)
+		const member = decodeMember(descriptor.value, memberPath, budget, v)
 		if (member) Object.defineProperty(decoded, key, { value: member, enumerable: true, writable: true, configurable: true })
 	}
 	return v.diagnostics.length > before ? undefined : Object.freeze(decoded)
 }
 
-function decodeMember(item: unknown, path: string, v: Validator): BaseStateMember | undefined {
+function decodeMember(item: unknown, path: string, budget: ValueBudget, v: Validator): BaseStateMember | undefined {
 	const member = v.object(item, path)
 	if (!member) return undefined
 	const hasValue = Object.hasOwn(member, 'value')
@@ -260,25 +261,26 @@ function decodeMember(item: unknown, path: string, v: Validator): BaseStateMembe
 		}
 		return UNAVAILABLE_MEMBER
 	}
-	const copied = toBaseStateValue(member.value)
+	const copied = toBaseStateValue(member.value, budget)
 	if (!copied.ok) {
-		v.issue('protocol.invalid_base_state_value', `${path}/value`, 'A value is null, a boolean, a finite number, a string, or an array or plain object of these.')
+		if (copied.tooLarge) v.issue('protocol.base_state_too_large', `${path}/value`, 'A response is walked for at most as many values as its envelope bound has characters.')
+		else v.issue('protocol.invalid_base_state_value', `${path}/value`, 'A value is null, a boolean, a finite number, a string, or an array or plain object of these.')
 		return undefined
 	}
 	return Object.freeze({ value: copied.value })
 }
 
-function requiredText(payload: Record<string, unknown>, key: string, v: Validator): string | undefined {
+function requiredText(payload: Record<string, unknown>, key: string, nonEmpty: boolean, v: Validator): string | undefined {
 	if (!Object.hasOwn(payload, key)) {
 		v.issue('protocol.missing_base_state_member', `/payload/${key}`, `The message carries payload.${key}.`)
 		return undefined
 	}
-	return boundedText(payload[key], `/payload/${key}`, v)
+	return boundedText(payload[key], `/payload/${key}`, nonEmpty, v)
 }
 
-/** A non-empty display-safe string of at most `MAX_BASE_STATE_TEXT_LENGTH` characters. */
-function boundedText(value: unknown, path: string, v: Validator): string | undefined {
-	const text = v.string(value, path, true)
+/** A display-safe string of at most `MAX_BASE_STATE_TEXT_LENGTH` characters, non-empty when `nonEmpty`. */
+function boundedText(value: unknown, path: string, nonEmpty: boolean, v: Validator): string | undefined {
+	const text = v.string(value, path, nonEmpty)
 	if (text !== undefined && (text.length > MAX_BASE_STATE_TEXT_LENGTH || containsProtocolControl(text)))
 		v.issue('protocol.unsafe_text', path, 'Base-state text must be bounded and display-safe.')
 	return text
@@ -287,19 +289,71 @@ function boundedText(value: unknown, path: string, v: Validator): string | undef
 export const UNAVAILABLE_MEMBER: BaseStateMember = Object.freeze({ unavailable: true as const })
 
 /**
- * Whether `raw` is a value a runtime may report, and a JSON copy of it detached from the original.
- * Anything else (`undefined`, a function, a symbol, a bigint, NaN or an infinite number, a cycle, a
- * class instance, a sparse array) is not reportable and reads Unavailable; it is never coerced to
- * `null`.
+ * How many values one walk (or all the walks of one response) may visit, so a value that shares
+ * structure with itself (a DAG a few dozen levels deep is exponentially large as a tree) is refused
+ * after bounded work instead of expanded. One visit is at least one character of JSON, so a value
+ * past this many visits could not fit the envelope bound anyway.
  */
-export function toBaseStateValue(raw: unknown): Readonly<{ ok: true; value: BaseStateValue }> | Readonly<{ ok: false }> {
-	try {
-		if (!isJsonValue(raw)) return { ok: false }
-		// `JSON.parse` keeps a `__proto__` member an own member, so the copy has no prototype surprise.
-		return { ok: true, value: JSON.parse(JSON.stringify(raw)) as BaseStateValue }
+export type ValueBudget = { remaining: number }
+
+export function createValueBudget(): ValueBudget {
+	return { remaining: MAX_BASE_STATE_RESPONSE_LENGTH }
+}
+
+const NOT_REPORTABLE = Symbol('not reportable')
+const TOO_LARGE = Symbol('too large')
+
+/**
+ * Whether `raw` is a value a runtime may report, and a copy of it detached from the original.
+ * Anything else (`undefined`, a function, a symbol, a bigint, NaN or an infinite number, a cycle, a
+ * class instance, a sparse array, an accessor) is not reportable and reads Unavailable; it is never
+ * coerced to `null`. A value that takes more than `budget` visits is refused with `tooLarge`. The
+ * copy is built member by member, so a `__proto__` member stays an own member of it.
+ */
+export function toBaseStateValue(
+	raw: unknown,
+	budget: ValueBudget = createValueBudget(),
+): Readonly<{ ok: true; value: BaseStateValue }> | Readonly<{ ok: false; tooLarge?: true }> {
+	const ancestors = new Set<object>()
+	const dataMember = (owner: object, key: string): unknown => {
+		const descriptor = Object.getOwnPropertyDescriptor(owner, key)
+		if (!descriptor || !('value' in descriptor)) throw NOT_REPORTABLE
+		return descriptor.value
 	}
-	catch {
-		// A value nested too deeply to walk or to serialize is not reportable either.
+	const walk = (value: unknown): BaseStateValue => {
+		if (--budget.remaining < 0) throw TOO_LARGE
+		if (value === null || typeof value === 'string' || typeof value === 'boolean') return value
+		if (typeof value === 'number') {
+			if (!Number.isFinite(value)) throw NOT_REPORTABLE
+			return value
+		}
+		if (typeof value !== 'object' || ancestors.has(value)) throw NOT_REPORTABLE
+		ancestors.add(value)
+		let copy: BaseStateValue
+		if (Array.isArray(value)) {
+			const keys = Object.keys(value)
+			if (keys.length !== value.length || keys.some((key, index) => key !== String(index))) throw NOT_REPORTABLE
+			const items: BaseStateValue[] = []
+			for (const key of keys) items.push(walk(dataMember(value, key)))
+			copy = items
+		}
+		else {
+			const prototype = Object.getPrototypeOf(value)
+			if (prototype !== Object.prototype && prototype !== null) throw NOT_REPORTABLE
+			const members: Record<string, BaseStateValue> = {}
+			for (const key of Object.keys(value))
+				Object.defineProperty(members, key, { value: walk(dataMember(value, key)), enumerable: true, writable: true, configurable: true })
+			copy = members
+		}
+		ancestors.delete(value)
+		return copy
+	}
+	try {
+		return { ok: true, value: walk(raw) }
+	}
+	catch (cause) {
+		if (cause === TOO_LARGE) return { ok: false, tooLarge: true }
+		// Not reportable, or nested too deeply to walk (`RangeError`).
 		return { ok: false }
 	}
 }

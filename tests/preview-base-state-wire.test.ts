@@ -104,14 +104,26 @@ describe('inspection.base-state request decoder', () => {
 		expect(issues(request({}, { runtimeContextVersion: 1 }))).toContain('protocol.inapplicable_context_identity')
 	})
 
-	it('bounds requestId, widgetId and every key as non-empty display-safe text of at most 500 characters', () => {
+	it('accepts an empty widgetId and an empty key, and only requestId must be non-empty (Clause 347f)', () => {
+		expect(issues(request({ widgetId: '', keys: ['', 'count'] }))).toEqual([])
+		const decoded = validateBaseStateMessage(request({ widgetId: '', keys: [''] }))
+		expect(decoded.ok && decoded.value.type === 'inspection.base-state.request' && decoded.value.payload).toEqual({ requestId: 'request-1', widgetId: '', keys: [''] })
+		expect(issues(request({ requestId: '' }))).toContain('schema.empty_string')
+		// A response echoes them, and `""` is a key like another and a value like another.
+		const echoed = decodedResponse(response({ widgetId: '', values: { '': { value: '' } } }))
+		expect(echoed.payload.widgetId).toBe('')
+		expect(baseStateMemberOf(echoed.payload.values, '')).toEqual({ value: '' })
+		expect(baseStateResponseAnswers(echoed, { requestId: 'request-1', widgetId: '', keys: [''] })).toBe(true)
+		expect(issues(response({ requestId: '' }))).toContain('schema.empty_string')
+	})
+
+	it('bounds requestId, widgetId and every key as display-safe text of at most 500 characters', () => {
 		expect(issues(request({ requestId: 'r'.repeat(500), widgetId: 'w'.repeat(500), keys: ['k'.repeat(500)] }))).toEqual([])
 		expect(issues(request({ requestId: '' }))).toContain('schema.empty_string')
 		expect(issues(request({ requestId: 'r'.repeat(501) }))).toContain('protocol.unsafe_text')
 		expect(issues(request({ widgetId: 'w'.repeat(501) }))).toContain('protocol.unsafe_text')
 		expect(issues(request({ keys: ['k'.repeat(501)] }))).toContain('protocol.unsafe_text')
 		expect(issues(request({ keys: ['a\u0000b'] }))).toContain('protocol.unsafe_text')
-		expect(issues(request({ keys: [''] }))).toContain('schema.empty_string')
 		expect(issues(request({ keys: [3] }))).toContain('schema.expected_string')
 		const noRequestId = request()
 		delete (noRequestId.payload as Record<string, unknown>).requestId
@@ -281,6 +293,25 @@ describe('inspection.base-state values', () => {
 		for (let index = 0; index < 200_000; index++) deep = [deep]
 		expect(toBaseStateValue(deep)).toEqual({ ok: false })
 	})
+
+	it('refuses a value that shares structure with itself after bounded work, in a walk and in a decoded response', () => {
+		// A DAG 25 levels deep is 2^25 leaves as a tree: far past the budget, yet tiny in memory.
+		let dag: unknown = 'leaf'
+		for (let index = 0; index < 25; index++) dag = [dag, dag]
+		const started = performance.now()
+		expect(toBaseStateValue(dag)).toEqual({ ok: false, tooLarge: true })
+		expect(performance.now() - started).toBeLessThan(2000)
+		// A shared node that is not exponential is still fine.
+		const shared = { a: 1 }
+		expect(toBaseStateValue({ x: shared, y: shared })).toEqual({ ok: true, value: { x: { a: 1 }, y: { a: 1 } } })
+		// The decoder walks under one budget for the whole response and never serializes the raw input first.
+		const decodeStarted = performance.now()
+		expect(issues(response({ values: { dag: { value: dag } } }))).toEqual(['protocol.base_state_too_large'])
+		// Many values that each fit the budget alone but not together are refused as a whole.
+		const half: unknown[] = Array.from({ length: 600_000 }, () => 0)
+		expect(issues(response({ values: { a: { value: half }, b: { value: half } } }))).toContain('protocol.base_state_too_large')
+		expect(performance.now() - decodeStarted).toBeLessThan(5000)
+	})
 })
 
 describe('inspection.base-state response encoder', () => {
@@ -443,6 +474,19 @@ describe('inspection.base-state in the bridges', () => {
 	it('drops a response of a generation that did not declare the feature, without failing it', () => {
 		const { workbench } = openGeneration(WITHOUT_BASE_STATE)
 		expect(workbench.receive(response())).toEqual({ status: 'gated' })
+	})
+
+	it('gates before it decodes: an undecodable response of an undeclared or not yet acknowledged generation is gated, never rejected', () => {
+		const undecodable = response({ values: { count: { value: 1, unavailable: true } } })
+		const undeclared = openGeneration(WITHOUT_BASE_STATE)
+		expect(undeclared.workbench.receive(undecodable)).toEqual({ status: 'gated' })
+		// A generation admitted but not yet acknowledged is no open generation.
+		const workbench = new WorkbenchPreviewProtocolBridge('session-a', collector([]), () => compatible)
+		workbench.admitGeneration('generation-a', 'initial')
+		expect(workbench.receive(undecodable)).toEqual({ status: 'gated' })
+		expect(workbench.receive(response())).toEqual({ status: 'gated' })
+		// Declared and open: the same message is rejected whole.
+		expect(openGeneration().workbench.receive(undecodable).status).toBe('rejected')
 	})
 
 	it('rejects a response that does not decode or exceeds its bound, whole, never as an invalid message', () => {

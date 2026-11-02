@@ -7,7 +7,7 @@ import { createWidgetPlugin, createWidgetSystem, type WidgetSystemRuntime } from
 import { inspectRuntime } from '@deviltea/widget-core/inspection'
 
 import type { PreviewRuntimeBridge, PreviewRuntimeMountOptions } from '../src/preview/browser-runtime'
-import { answerBaseStateRequest, readBaseState, type BaseStateMounted } from '../src/preview/base-state'
+import { answerBaseStateRequest, readBaseState, sendBaseStateAnswer, type BaseStateMounted } from '../src/preview/base-state'
 import {
 	BASE_STATE_FEATURE,
 	MAX_BASE_STATE_RESPONSE_LENGTH,
@@ -42,9 +42,11 @@ class Opaque { readonly x = 1 }
 const cyclic: Record<string, unknown> = {}
 cyclic.self = cyclic
 let pokes = 0
+let dag: unknown = 'leaf'
+for (let index = 0; index < 25; index++) dag = [dag, dag]
 
 interface StatefulInterfaces {
-	state: { count: number; label: string; nothing: null; data: unknown; fn: unknown; nan: unknown; undef: unknown; opaque: unknown; cyclic: unknown; big: unknown; big2: unknown }
+	state: { count: number; label: string; nothing: null; data: unknown; fn: unknown; nan: unknown; undef: unknown; opaque: unknown; cyclic: unknown; big: unknown; big2: unknown; dag: unknown }
 	methods: { poke: () => null }
 	events: { poked: readonly [] }
 }
@@ -64,7 +66,8 @@ const statefulPlugin = createWidgetPlugin('Stateful')
 		.opaque({ validate: anything, default: () => new Opaque() })
 		.cyclic({ validate: anything, default: () => cyclic })
 		.big({ validate: anything, default: () => 'a'.repeat(600_000) })
-		.big2({ validate: anything, default: () => 'b'.repeat(600_000) }))
+		.big2({ validate: anything, default: () => 'b'.repeat(600_000) })
+		.dag({ validate: anything, default: () => dag }))
 	.methods(methods => methods.poke({ validateArgs: (args): args is [] => args.length === 0, execute: ({ emit }) => { pokes++; emit.poked(); return null } }))
 	.events(events => events.poked({ description: 'Poked' }))
 	.done()
@@ -137,6 +140,22 @@ describe('readBaseState', () => {
 		expect(memberOf(reading, 'count')).toEqual({ value: 0 })
 	})
 
+	it('answers Unavailable for a State value that shares structure with itself, after bounded work', () => {
+		const { build } = recordingBuilder()
+		const started = performance.now()
+		const reading = readBaseState(mounted(), 'a', ['dag', 'count'], build)
+		expect(performance.now() - started).toBeLessThan(3000)
+		expect(memberOf(reading, 'dag')).toEqual({ unavailable: true })
+		expect(memberOf(reading, 'count')).toEqual({ value: 0 })
+	})
+
+	it('answers an empty widgetId and an empty key as a Widget and a member that do not exist', () => {
+		const { build } = recordingBuilder()
+		const reading = readBaseState(mounted(), '', ['', 'count'], build)
+		expect(reading.readings).toEqual([{ key: '', member: { unavailable: true } }, { key: 'count', member: { unavailable: true } }])
+		expect(memberOf(readBaseState(mounted(), 'a', ['', 'count'], build), '')).toEqual({ unavailable: true })
+	})
+
 	it('answers every key Unavailable when no base Runtime can be built, and never throws', () => {
 		const invalid: Build = () => ({ state: 'invalid', diagnostics: [{ code: 'x', path: '', message: 'broken' }] })
 		const reading = readBaseState(mounted(), 'a', ['count', 'label'], invalid)
@@ -183,6 +202,65 @@ describe('readBaseState', () => {
 		const member = memberOf(reading, 'data')
 		expect(runtimes[0]!.isDisposed).toBe(true)
 		expect(member).toEqual({ value: JSON.parse('{"list":[1,"two",null],"flag":true,"__proto__":1}') })
+	})
+})
+
+describe('sendBaseStateAnswer', () => {
+	const answerOf = (renderContext: Record<string, unknown> = {}) => ({
+		type: 'inspection.base-state.response',
+		context: { previewSessionId: 'session-a', runtimeGenerationId: 'generation-a', viewId: VIEW_ID },
+		payload: {
+			requestId: 'request-1',
+			widgetId: 'a',
+			renderContext: { viewRevision: 'revision-9', locale: 'en-US', viewportId: 'desktop', viewport: { width: 1, height: 1 }, themeId: 'light', ...renderContext },
+			values: { count: { value: 3 }, label: { value: 'x' } },
+		},
+	}) as unknown as Parameters<typeof sendBaseStateAnswer>[0]
+
+	function openBridge() {
+		const workbenchOutbound: PreviewWireMessage[] = []
+		const runtimeOutbound: PreviewWireMessage[] = []
+		const workbench = new WorkbenchPreviewProtocolBridge('session-a', { send: message => workbenchOutbound.push(message) }, () => ({ ok: true }))
+		const runtime = new RuntimePreviewProtocolBridge('session-a', 'generation-a', { protocolVersion: 1, features: ['geometry', BASE_STATE_FEATURE] }, { send: message => runtimeOutbound.push(message) })
+		workbench.receive(runtime.declareCapabilities())
+		runtime.receive(workbenchOutbound[0])
+		return { runtime, runtimeOutbound }
+	}
+
+	it('sends a valid answer as it is', () => {
+		const { runtime, runtimeOutbound } = openBridge()
+		let unsendable = 0
+		sendBaseStateAnswer(answerOf(), message => runtime.sendBaseStateResponse(message), () => { unsendable++ })
+		expect(runtimeOutbound.at(-1)).toMatchObject({ type: 'inspection.base-state.response', payload: { values: { count: { value: 3 }, label: { value: 'x' } } } })
+		expect(unsendable).toBe(0)
+	})
+
+	it('answers with every key Unavailable and the same renderContext when the bridge refuses the answer as invalid', () => {
+		const { runtime, runtimeOutbound } = openBridge()
+		let unsendable = 0
+		// A value in the answer that the bridge's decoder refuses (the runtime found a value the wire cannot carry).
+		const refused = answerOf()
+		;(refused.payload.values as Record<string, unknown>).count = { value: undefined }
+		sendBaseStateAnswer(refused, message => runtime.sendBaseStateResponse(message), () => { unsendable++ })
+		expect(runtimeOutbound.at(-1)).toMatchObject({
+			type: 'inspection.base-state.response',
+			payload: { requestId: 'request-1', widgetId: 'a', renderContext: { viewRevision: 'revision-9' }, values: { count: { unavailable: true }, label: { unavailable: true } } },
+		})
+		expect(unsendable).toBe(0)
+	})
+
+	it('reports once more only when even the Unavailable answer is refused, and sends nothing for a closed gate', () => {
+		const { runtime, runtimeOutbound } = openBridge()
+		let unsendable = 0
+		const before = runtimeOutbound.length
+		// A renderContext the decoder refuses stays refused with every key Unavailable.
+		sendBaseStateAnswer(answerOf({ viewRevision: 'r'.repeat(501) }), message => runtime.sendBaseStateResponse(message), () => { unsendable++ })
+		expect(unsendable).toBe(1)
+		expect(runtimeOutbound).toHaveLength(before)
+		// A gate that is not open is no failure.
+		const closed = new RuntimePreviewProtocolBridge('session-a', 'generation-a', { protocolVersion: 1, features: ['geometry', BASE_STATE_FEATURE] }, { send: () => {} })
+		sendBaseStateAnswer(answerOf(), message => closed.sendBaseStateResponse(message), () => { unsendable++ })
+		expect(unsendable).toBe(1)
 	})
 })
 

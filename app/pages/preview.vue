@@ -32,6 +32,8 @@ import type { ChecksObservation } from '../../src/preview/checks-observer'
 import { buildChecksReportBody, ChecksReportPublisher, MaxWaitDebouncer } from '../../src/preview/checks-report-builder'
 import type { WidgetEventArmMessage } from '../../src/preview/protocol/widget-events'
 import type { BaseStateRequestMessage } from '../../src/preview/protocol/base-state'
+import { sendBaseStateAnswer } from '../../src/preview/base-state'
+import { diagnostics } from '../../src/logging/diagnostics'
 import type { WidgetEventReport } from '../../src/preview/widget-event-observer'
 import type {
 	PreviewMaterializationResult,
@@ -267,8 +269,16 @@ function receiveWidgetEventArm(message: WidgetEventArmMessage) {
 function receiveBaseStateRequest(message: BaseStateRequestMessage) {
 	if (harnessMode.value || versionId) return
 	const response = activeBridge?.answerBaseStateRequest?.(message)
-	if (response) runtimeBridge?.sendBaseStateResponse(response)
+	const bridge = runtimeBridge
+	if (!response || !bridge) return
+	// A response the bridge refuses as invalid is answered with every key Unavailable instead.
+	sendBaseStateAnswer(response, answer => bridge.sendBaseStateResponse(answer), () => {
+		if (baseStateUnsendableLogged) return
+		baseStateUnsendableLogged = true
+		diagnostics.warn('UIUX Preview: an inspection.base-state.response could not be sent, even with every key Unavailable.')
+	})
 }
+let baseStateUnsendableLogged = false
 
 /**
  * One armed occurrence (decision 4): it crosses as `{ armId, event }` plus context, nothing else.

@@ -378,18 +378,21 @@ export class WorkbenchPreviewProtocolBridge {
 	 */
 	private receiveBaseStateResponse(input: unknown, type: BaseStateMessage['type']): BridgeReceiveResult {
 		if (type === 'inspection.base-state.request') return { status: 'wrong-direction' }
+		// The gates come before the decode, by the identities the envelope names: traffic of a generation
+		// that is not open, or did not declare the feature, is dropped and is never `rejected`.
+		const correlation = envelopeCorrelation(input)
+		if (correlation?.runtimeGenerationId !== undefined) {
+			const gate = this.classify(correlation.previewSessionId, correlation.runtimeGenerationId)
+			if (gate) return { status: gate }
+			if (!this.session.currentGenerationDeclares(correlation.runtimeGenerationId, BASE_STATE_FEATURE)) return { status: 'gated' }
+		}
 		const decoded = validateBaseStateMessage(input)
 		if (!decoded.ok) {
 			const requestId = rawRequestId(input)
 			return { status: 'rejected', diagnostics: decoded.diagnostics, ...(requestId !== undefined ? { requestId } : {}) }
 		}
-		const message = decoded.value
-		if (isBaseStateRequestMessage(message)) return { status: 'wrong-direction' }
-		const { previewSessionId, runtimeGenerationId } = message.context
-		const gate = this.classify(previewSessionId, runtimeGenerationId)
-		if (gate) return { status: gate }
-		if (!this.session.currentGenerationDeclares(runtimeGenerationId, BASE_STATE_FEATURE)) return { status: 'gated' }
-		return { status: 'accepted', message }
+		if (isBaseStateRequestMessage(decoded.value)) return { status: 'wrong-direction' }
+		return { status: 'accepted', message: decoded.value }
 	}
 
 	/** A declaration is stale when its session is not this one or its generation is retired. */
