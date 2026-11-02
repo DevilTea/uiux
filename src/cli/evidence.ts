@@ -32,6 +32,8 @@ export type EvidenceCommandOptions = Readonly<{
 	env?: Readonly<Record<string, string | undefined>>
 	/** Test seam: reads standard input for `--token-file -`. */
 	readStdin?: () => Promise<string>
+	/** Test seam: whether standard input is an interactive terminal (`process.stdin.isTTY` by default). */
+	stdinIsTTY?: boolean
 	/** Test seam: the HTTP client; the global `fetch` by default. */
 	fetch?: typeof fetch
 	stdout?: (line: string) => void
@@ -105,9 +107,29 @@ function normalizedOrigin(value: string | undefined): string | undefined {
 	return url.origin
 }
 
+/**
+ * A `parseArgs` failure without the argument value: a value can be a Token typed into the wrong
+ * place, so the message never repeats one. An option name is repeated only when it is a plain
+ * option name.
+ */
+function describeArgumentError(error: unknown): string {
+	const code = isRecord(error) ? error.code : undefined
+	const message = error instanceof Error ? error.message : ''
+	if (code === 'ERR_PARSE_ARGS_UNEXPECTED_POSITIONAL') return 'unexpected argument.'
+	if (code === 'ERR_PARSE_ARGS_UNKNOWN_OPTION') {
+		const name = /'(--[A-Za-z][A-Za-z-]{0,23})'/.exec(message)?.[1]
+		return name ? `unknown option ${name}.` : 'unknown option.'
+	}
+	if (code === 'ERR_PARSE_ARGS_INVALID_OPTION_VALUE') {
+		const name = /'(--[A-Za-z][A-Za-z-]{0,23})(?: <value>)?'/.exec(message)?.[1]
+		return name ? `option ${name} needs a value.` : 'an option needs a value.'
+	}
+	return 'invalid arguments.'
+}
+
 function parseArguments(argv: readonly string[]): ParsedArguments {
 	const [subcommand, ...args] = argv
-	if (subcommand !== 'capture') throw new UsageError(subcommand === undefined ? 'evidence takes capture.' : `unknown evidence command: ${subcommand}.`)
+	if (subcommand !== 'capture') throw new UsageError(subcommand === undefined ? 'evidence takes capture.' : 'unknown evidence command.')
 	let values: Record<string, string | boolean | (string | boolean)[] | undefined>
 	try {
 		values = parseArgs({
@@ -129,7 +151,7 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
 		}).values
 	}
 	catch (error) {
-		throw new UsageError(error instanceof Error ? error.message : String(error))
+		throw new UsageError(describeArgumentError(error))
 	}
 	const list = (name: string): string[] | undefined => {
 		const value = values[name] as string[] | undefined
@@ -163,11 +185,13 @@ function parseArguments(argv: readonly string[]): ParsedArguments {
 async function readToken(parsed: ParsedArguments, options: EvidenceCommandOptions): Promise<string> {
 	let text: string | undefined
 	if (parsed.tokenFile !== undefined) {
+		if (parsed.tokenFile === '-' && !options.readStdin && (options.stdinIsTTY ?? process.stdin.isTTY)) throw new UsageError('--token-file - reads the Token from standard input, which is an interactive terminal; pipe the Token in, or use a file.')
 		try {
 			text = parsed.tokenFile === '-' ? await (options.readStdin ?? readProcessStdin)() : await readFile(parsed.tokenFile, 'utf8')
 		}
 		catch (error) {
-			throw new UsageError(`cannot read the Token from ${parsed.tokenFile === '-' ? 'standard input' : parsed.tokenFile}: ${error instanceof Error ? error.message : String(error)}`)
+			const code = isRecord(error) && typeof error.code === 'string' ? ` (${error.code})` : ''
+			throw new UsageError(`cannot read the Token from ${parsed.tokenFile === '-' ? 'standard input' : 'the --token-file path'}${code}.`)
 		}
 	}
 	else {
@@ -220,7 +244,7 @@ function describeDiagnostics(diagnostics: readonly Diagnostic[] | undefined): st
 }
 
 type Batch =
-	| Readonly<{ ok: true; results: readonly ContextResult[] }>
+	| Readonly<{ ok: true; results: readonly ContextResult[]; precondition: boolean }>
 	| Readonly<{ ok: false; message: string }>
 
 /** One request: the server's per-context results, or why the whole request was refused. */
@@ -231,6 +255,7 @@ async function sendBatch(fetchImpl: typeof fetch, origin: string, token: string,
 			method: 'POST',
 			headers: { 'content-type': 'application/json', 'accept': 'application/json', 'authorization': `Bearer ${token}` },
 			body: JSON.stringify({ contexts }),
+			redirect: 'error',
 		})
 	}
 	catch (error) {
@@ -255,7 +280,8 @@ async function sendBatch(fetchImpl: typeof fetch, origin: string, token: string,
 				...(Array.isArray(raw.diagnostics) && raw.diagnostics.length ? { diagnostics: raw.diagnostics as Diagnostic[] } : typeof raw.error === 'string' ? { diagnostics: [{ message: raw.error }] } : {}),
 			})
 		}
-		return { ok: true, results }
+		// 422 answers a request in which no context was captured: a refusal before any browser ran (the kit build, the default Locale or the registries) or a batch that failed whole. Either way the run stops.
+		return { ok: true, results, precondition: response.status === 422 }
 	}
 	if (response.status === 401) return { ok: false, message: 'the server did not accept the Token (401).' }
 	const detail = typeof record?.message === 'string' ? record.message : describeDiagnostics(Array.isArray(record?.diagnostics) ? record.diagnostics as Diagnostic[] : undefined)
@@ -282,37 +308,43 @@ async function run(options: EvidenceCommandOptions, out: (line: string) => void,
 	const contexts = resolved.contexts
 	if (contexts.length === 0) {
 		err('uiux: no render contexts to capture.')
-		if (parsed.json) out(JSON.stringify({ status: 'ok', results: [], summary: { total: 0, captured: 0, failed: 0 } }))
+		if (parsed.json) out(JSON.stringify({ status: 'ok', results: [], summary: { selected: 0, captured: 0, failed: 0, notAttempted: 0 } }))
 		return 0
 	}
 
 	const origin = await resolveOrigin(parsed, selected.root, persistence)
+	if (origin.startsWith('http://') && !isLoopbackHostname(new URL(origin).hostname))
+		err(`uiux: warning: ${origin} is plain http on a non-loopback host, so the Token travels in clear text.`)
 	const fetchImpl = options.fetch ?? fetch
 	const results: ContextResult[] = []
 	let stopped: string | undefined
 	for (let offset = 0; offset < contexts.length; offset += CAPTURE_BATCH_SIZE) {
 		const batch = await sendBatch(fetchImpl, origin, token, contexts.slice(offset, offset + CAPTURE_BATCH_SIZE))
 		if (!batch.ok) {
-			const notAttempted = contexts.length - results.length
-			stopped = `${batch.message} ${notAttempted} of ${contexts.length} contexts were not captured.`
+			stopped = batch.message
 			break
 		}
 		results.push(...batch.results)
+		if (batch.precondition) {
+			stopped = 'the server answered 422: no context of that request was captured, so the run stops.'
+			break
+		}
 	}
 
 	const captured = results.filter(result => result.status === 'captured').length
 	const failed = results.length - captured
-	const status = failed === 0 && !stopped ? 'ok' : captured === 0 ? 'failed' : 'incomplete'
+	const notAttempted = contexts.length - results.length
+	const status = captured === contexts.length ? 'ok' : captured === 0 ? 'failed' : 'incomplete'
 	if (parsed.json) {
-		if (results.length > 0 || !stopped)
-			out(JSON.stringify({ status, results, summary: { total: results.length, captured, failed } }))
+		if (results.length > 0)
+			out(JSON.stringify({ status, results, summary: { selected: contexts.length, captured, failed, notAttempted } }))
 	}
 	else {
 		for (const result of results) {
 			const { context } = result
 			out([result.status, context.viewId, context.variantName ?? '-', context.locale, context.viewportId, context.themeId, result.evidenceDigest ?? '-'].join('\t'))
 		}
-		if (results.length > 0) out(`Captured ${captured} of ${results.length} contexts, ${failed} failed.`)
+		if (results.length > 0) out(`Captured ${captured} of ${contexts.length} contexts, ${failed} failed${notAttempted > 0 ? `, ${notAttempted} not attempted` : ''}.`)
 	}
 	for (const result of results) {
 		if (result.status === 'failed') {
@@ -320,9 +352,6 @@ async function run(options: EvidenceCommandOptions, out: (line: string) => void,
 			err(`uiux: failed ${context.viewId}${context.variantName ? `/${context.variantName}` : ''} ${context.locale} ${context.viewportId} ${context.themeId}: ${describeDiagnostics(result.diagnostics) || 'no diagnostic'}`)
 		}
 	}
-	if (stopped) {
-		err(`uiux: ${stopped}`)
-		return 1
-	}
-	return failed === 0 ? 0 : 1
+	if (stopped) err(`uiux: ${stopped} ${notAttempted} of ${contexts.length} contexts were not attempted.`)
+	return captured === contexts.length ? 0 : 1
 }

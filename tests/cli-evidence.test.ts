@@ -60,7 +60,7 @@ async function makeWorkspace(): Promise<{ root: string; persistence: FileNativeP
 	return { root, persistence }
 }
 
-type Sent = { url: string; headers: Record<string, string>; contexts: ResolvedRenderContext[] }
+type Sent = { url: string; headers: Record<string, string>; redirect: string | undefined; contexts: ResolvedRenderContext[] }
 type Answer = (contexts: ResolvedRenderContext[], call: number) => Response | Promise<Response>
 
 function jsonResponse(status: number, body: unknown): Response {
@@ -87,7 +87,7 @@ async function run(argv: string[], options: Readonly<{ root: string; answer?: An
 	let calls = 0
 	const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
 		const body = JSON.parse(String(init?.body)) as { contexts: ResolvedRenderContext[] }
-		sent.push({ url: String(input), headers: init?.headers as Record<string, string>, contexts: body.contexts })
+		sent.push({ url: String(input), headers: init?.headers as Record<string, string>, redirect: init?.redirect, contexts: body.contexts })
 		return options.answer ? options.answer(body.contexts, calls++) : captureAnswer()(body.contexts, calls++)
 	}) as typeof fetch
 	const status = await runEvidenceCommand({
@@ -231,7 +231,7 @@ describe('uiux evidence capture: the selection and the server', () => {
 		expect(text.sent).toEqual([])
 		const json = await run(['--all', '--json', '--workspace', root], { root })
 		expect(json.status).toBe(0)
-		expect(JSON.parse(json.stdout[0]!)).toEqual({ status: 'ok', results: [], summary: { total: 0, captured: 0, failed: 0 } })
+		expect(JSON.parse(json.stdout[0]!)).toEqual({ status: 'ok', results: [], summary: { selected: 0, captured: 0, failed: 0, notAttempted: 0 } })
 	})
 
 	it('finds the server in the hold of the running server of the Workspace, and uses --origin over it', async () => {
@@ -298,7 +298,7 @@ describe('uiux evidence capture: output and exit status', () => {
 				{ context: { viewId: VIEW, locale: 'en-US', viewportId: 'desktop', viewport: { width: 1280, height: 800 }, themeId: 'light' }, status: 'captured', evidenceDigest: `sha256:${'e'.repeat(63)}0`, screenshotDigest: `sha256:${'a'.repeat(63)}0` },
 				{ context: { viewId: VIEW, variantName: 'alt', locale: 'en-US', viewportId: 'desktop', viewport: { width: 1280, height: 800 }, themeId: 'light' }, status: 'failed', diagnostics: [{ code: 'capture.execution_failed', path: '/capture', message: 'boom' }] },
 			],
-			summary: { total: 2, captured: 1, failed: 1 },
+			summary: { selected: 2, captured: 1, failed: 1, notAttempted: 0 },
 		})
 	})
 
@@ -335,8 +335,74 @@ describe('uiux evidence capture: output and exit status', () => {
 		expect(result.status).toBe(1)
 		// 20 contexts: the first batch of 8 is captured, the second is refused, and the third is never sent.
 		expect(result.sent.map(request => request.contexts.length)).toEqual([CAPTURE_BATCH_SIZE, CAPTURE_BATCH_SIZE])
-		expect(result.stdout.at(-1)).toBe('Captured 8 of 8 contexts, 0 failed.')
-		expect(result.stderr.join('\n')).toContain('12 of 20 contexts were not captured')
+		// The summary reports the selection: 8 of 20 captured, 12 not attempted.
+		expect(result.stdout.at(-1)).toBe('Captured 8 of 20 contexts, 0 failed, 12 not attempted.')
+		expect(result.stderr.join('\n')).toContain('12 of 20 contexts were not attempted')
+		const json = await run(['--all', '--json', '--workspace', persistence.root, '--origin', ORIGIN], { root: persistence.root, answer: (contexts, call) => call === 0 ? captureAnswer()(contexts, call) : jsonResponse(403, { status: 'blocked', message: 'no.' }) })
+		expect(json.status).toBe(1)
+		const parsed = JSON.parse(json.stdout[0]!) as { status: string; results: unknown[]; summary: unknown }
+		expect(parsed.status).toBe('incomplete')
+		expect(parsed.results).toHaveLength(8)
+		expect(parsed.summary).toEqual({ selected: 20, captured: 8, failed: 0, notAttempted: 12 })
+	})
+
+	it('stops after a request the server answers with 422, reporting the rest as not attempted', async () => {
+		const { persistence } = await makeWorkspace().then(async workspace => {
+			for (const locale of ['de-DE', 'fr-FR', 'it-IT', 'es-ES']) await workspace.persistence.locales.create(locale, {})
+			return workspace
+		})
+		const notReady = { code: 'capture.kit_build_not_ready', path: '/product-kit/build', message: 'Formal capture waits for the kit build: a build is running.' }
+		const answer: Answer = contexts => jsonResponse(422, {
+			status: 'failed',
+			results: contexts.map(context => ({ context, status: 'failed', diagnostics: [notReady] })),
+			summary: { total: contexts.length, captured: 0, failed: contexts.length },
+		})
+		const result = await run(['--all', '--workspace', persistence.root, '--origin', ORIGIN], { root: persistence.root, answer })
+		expect(result.status).toBe(1)
+		// 20 contexts: one request of 8 answered 422, and the other 12 are never sent.
+		expect(result.sent.map(request => request.contexts.length)).toEqual([CAPTURE_BATCH_SIZE])
+		expect(result.stdout.at(-1)).toBe('Captured 0 of 20 contexts, 8 failed, 12 not attempted.')
+		const errors = result.stderr.join('\n')
+		expect(errors).toContain('capture.kit_build_not_ready')
+		expect(errors).toContain('answered 422')
+		expect(errors).toContain('12 of 20 contexts were not attempted')
+		// A 207 (some contexts captured) does not stop the run.
+		const partial = await run(['--all', '--workspace', persistence.root, '--origin', ORIGIN], { root: persistence.root, answer: captureAnswer(context => context.themeId === 'dark') })
+		expect(partial.sent).toHaveLength(3)
+		expect(partial.status).toBe(1)
+	})
+})
+
+describe('uiux evidence capture: a Token never leaves the credential sources', () => {
+	it('does not repeat a Token-shaped argument in an error, even one typed in the wrong place', async () => {
+		const { root } = await makeWorkspace()
+		const secret = 'uiux_t_typed-where-a-path-belongs'
+		for (const args of [['capture', '--view', VIEW, '--token-file', secret], [secret], ['capture', '--view', VIEW, secret], ['capture', '--view', VIEW, `--${secret}`], ['capture', '--view', VIEW, `--${secret}=${secret}`]]) {
+			const stderr: string[] = []
+			const status = await runEvidenceCommand({ argv: [...args, ...baseArgs(root)], cwd: root, env: {}, fetch: (async () => { throw new Error('never sent') }) as typeof fetch, stdout: line => stderr.push(line), stderr: line => stderr.push(line) })
+			expect(status, args.join(' ')).toBe(2)
+			expect(stderr.join('\n'), args.join(' ')).not.toContain(secret)
+		}
+	})
+
+	it('refuses --token-file - on an interactive terminal', async () => {
+		const { root } = await makeWorkspace()
+		const stderr: string[] = []
+		const status = await runEvidenceCommand({ argv: ['capture', '--view', VIEW, '--token-file', '-', ...baseArgs(root)], cwd: root, env: {}, stdinIsTTY: true, fetch: (async () => { throw new Error('never sent') }) as typeof fetch, stdout: () => undefined, stderr: line => stderr.push(line) })
+		expect(status).toBe(2)
+		expect(stderr.join('\n')).toContain('interactive terminal')
+	})
+
+	it('warns once about a Token sent in clear text to a non-loopback http origin, and refuses redirects', async () => {
+		const { root } = await makeWorkspace()
+		const lan = await run(['--view', VIEW, '--workspace', root, '--origin', 'http://10.0.0.5:3000'], { root })
+		expect(lan.status).toBe(0)
+		expect(lan.stderr.filter(line => line.includes('clear text'))).toHaveLength(1)
+		expect(lan.sent[0]!.redirect).toBe('error')
+		for (const origin of ['http://127.0.0.1:3000', 'http://localhost:3000', 'https://uiux.example.test']) {
+			const quiet = await run(['--view', VIEW, '--workspace', root, '--origin', origin], { root })
+			expect(quiet.stderr, origin).toEqual([])
+		}
 	})
 })
 

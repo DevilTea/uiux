@@ -154,7 +154,7 @@ describe('uiux evidence capture against a running uiux dev server', () => {
 		expect(run.stdout).not.toContain(token)
 		const result = JSON.parse(run.stdout) as { status: string; results: { context: { variantName?: string; viewport: unknown }; status: string; evidenceDigest: string; screenshotDigest: string }[]; summary: unknown }
 		expect(result.status).toBe('ok')
-		expect(result.summary).toEqual({ total: 2, captured: 2, failed: 0 })
+		expect(result.summary).toEqual({ selected: 2, captured: 2, failed: 0, notAttempted: 0 })
 		expect(result.results.map(item => item.context.variantName)).toEqual([undefined, 'alt'])
 		expect(result.results.every(item => item.status === 'captured' && item.context.viewport && JSON.stringify(item.context.viewport) === '{"width":375,"height":667}')).toBe(true)
 
