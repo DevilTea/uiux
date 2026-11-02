@@ -56,8 +56,8 @@ export type ThumbnailCaptureOutcome =
 	| Readonly<{ ok: true; png: Uint8Array }>
 	| Readonly<{ ok: false; reason: string }>
 
-/** Captures one thumbnail image; it launches its browser on the first capture and `close` ends it. */
+/** Captures one thumbnail image; it launches its browser on the first capture, `close()` ends it (the next capture launches again) and `close(true)` ends it for good: no capture launches a browser after it. */
 export interface ThumbnailCapturer {
 	capture(job: Readonly<{ key: string; context: ResolvedRenderContext }>): Promise<ThumbnailCaptureOutcome>
-	close(): Promise<void>
+	close(final?: boolean): Promise<void>
 }

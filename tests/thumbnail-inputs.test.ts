@@ -4,6 +4,7 @@ import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
+import { createThumbnailCapturer } from '../src/application/services/thumbnail-capture'
 import { createThumbnailInputs } from '../src/application/services/thumbnail-inputs'
 import type { AdapterProvenanceSource } from '../src/application/services/adapter-provenance'
 import { pngSize, thumbnailDigestHex, thumbnailHeight, thumbnailInputDigest, THUMBNAIL_WIDTH, type ThumbnailInputs } from '../src/domain/thumbnails/digest'
@@ -154,6 +155,29 @@ describe('the thumbnail input digest (Clause 01a19b99-ccfa-74bb-9671-08ab5d4e265
 		await rm(join(root, 'i18n', 'en-US.json'), { force: true })
 		expect((await inputs().plans([VIEW]))[0]!.digest).toBeUndefined()
 		expect(await inputs().defaultLocaleMissing()).toBe(true)
+	})
+
+	it('resolves the default Locale the same way for the hold and the digest when the manifest names none', async () => {
+		const other = await realpath(await mkdtemp(join(tmpdir(), 'uiux-thumbnail-inputs-nolocale-')))
+		try {
+			await writeCurrentWorkspace(other, { i18n: undefined, viewports: {}, themes: {} })
+			const bare = new FileNativePersistence({ root: other, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
+			await bare.views.create(VIEW, view())
+			// No Locale file: 'en-US' is the default for both, so the hold applies and no digest is computed.
+			expect(await createThumbnailInputs(bare).defaultLocaleMissing()).toBe(true)
+			expect((await createThumbnailInputs(bare).plans([VIEW]))[0]!.digest).toBeUndefined()
+			await bare.locales.create('en-US', {})
+			expect(await createThumbnailInputs(bare).defaultLocaleMissing()).toBe(false)
+			expect((await createThumbnailInputs(bare).plans([VIEW]))[0]!.digest).toBeDefined()
+		}
+		finally { await rm(other, { recursive: true, force: true }) }
+	})
+
+	it('a closed capturer launches no browser (the service stopped)', async () => {
+		const capturer = createThumbnailCapturer(persistence, { serverOrigin: 'http://127.0.0.1:9' })
+		const [plan] = await inputs().plans([VIEW])
+		await capturer.close(true)
+		expect(await capturer.capture({ key: VIEW, context: plan!.context! })).toMatchObject({ ok: false, reason: expect.stringContaining('closed') })
 	})
 })
 

@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, realpath, rm, stat, utimes, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -46,9 +46,13 @@ describe('the thumbnail cache', () => {
 
 	it('deletes the View\'s files of other digests once the new one is in place, so one file remains', async () => {
 		await store.write(VIEW, D1, png(1))
-		await writeFile(join(thumbnailsDirectory(home, workspace), VIEW, '.crashed.png.tmp'), 'partial')
+		const directory = join(thumbnailsDirectory(home, workspace), VIEW)
+		await writeFile(join(directory, '.crashed.png.tmp'), 'partial')
+		const old = new Date(Date.now() - 10 * 60_000)
+		await utimes(join(directory, '.crashed.png.tmp'), old, old) // a crash left it long ago
+		await writeFile(join(directory, '.writing.png.tmp'), 'partial') // another server of the Workspace is writing this one now
 		await store.write(VIEW, D2, png(2))
-		expect(await readdir(join(thumbnailsDirectory(home, workspace), VIEW))).toEqual([`${D2}.png`])
+		expect((await readdir(directory)).sort()).toEqual(['.writing.png.tmp', `${D2}.png`])
 		expect(await store.read(VIEW, D1)).toBeUndefined()
 		expect(await store.read(VIEW, D2)).toEqual(png(2))
 	})

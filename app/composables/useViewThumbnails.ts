@@ -18,6 +18,7 @@ export type ThumbnailEntry = Readonly<{
 }>
 
 const REQUEST_CHUNK = 500
+const LIST_CHUNK = 200
 /** The writes that can make a thumbnail stale (Rule 01a19b99-d2cb-79ae-9e3d-ba6c24bc1f6a): the states are read again for them. */
 const RENDERING_KINDS = ['view', 'locale', 'asset', 'workspace', 'product-kit'] as const
 const MISSING: ThumbnailEntry = Object.freeze({ state: 'missing', refreshing: false, version: 0 })
@@ -31,19 +32,23 @@ export function useViewThumbnails() {
 		const next = new Map(entries.value)
 		for (const item of items) {
 			const previous = next.get(item.key)
-			const changed = !previous || previous.state !== item.state
+			// The image is read again when the stored image may have changed: its state changed, or the event is not a refreshing-only change.
+			const changed = !previous || previous.state !== item.state || (bump === 'all' && previous.refreshing === item.refreshing)
 			next.set(item.key, {
 				state: item.state,
 				refreshing: item.refreshing,
-				version: (previous?.version ?? 0) + (bump === 'all' || changed ? 1 : 0),
+				version: (previous?.version ?? 0) + (changed ? 1 : 0),
 			})
 		}
 		entries.value = next
 	}
 
 	async function refresh(keys?: readonly string[], bump: 'all' | 'changed' = 'all'): Promise<void> {
-		try { merge(await uiux.listViewThumbnails(keys), bump) }
-		catch { /* a thumbnail is decoration: a failed read leaves what is shown */ }
+		// Named Views go in the query string, so a long list is read in several requests (a header limit would refuse one).
+		for (let offset = 0; offset === 0 || (keys && offset < keys.length); offset += LIST_CHUNK) {
+			try { merge(await uiux.listViewThumbnails(keys?.slice(offset, offset + LIST_CHUNK)), bump) }
+			catch { /* a thumbnail is decoration: a failed read leaves what is shown */ }
+		}
 	}
 
 	/** Opening the Views tab asks the server to queue the missing and stale thumbnails of the listed Views (Rule 01a19b99-dfe8-7396-95d8-8e0cf1acf533). */

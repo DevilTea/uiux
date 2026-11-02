@@ -13,6 +13,8 @@ export function thumbnailsDirectory(home: string, realRoot: string): string {
 }
 
 const FILE_SUFFIX = '.png'
+/** A temporary file older than this was left by a crash. */
+const TEMPORARY_FILE_MAX_AGE_MS = 60_000
 
 /**
  * The host-local thumbnail cache of one Workspace (Clause 01a19b99-cbd0-7076-b286-a6cee12af0f3):
@@ -93,9 +95,15 @@ export function createThumbnailStore(options: Readonly<{ workspaceRoot: string; 
 				await rm(temporary, { force: true }).catch(() => undefined)
 				throw error
 			}
-			// Then the View's files of other digests (and any temporary file a crash left) go, so at most one file per View remains.
+			// Then the View's files of other digests go, so at most one file per View remains. A temporary file is left alone unless it is old
+			// (a crash left it): another server of this Workspace may be writing one now.
 			for (const other of await readdir(dir)) {
-				if (other !== name) await rm(join(dir, other), { force: true }).catch(() => undefined)
+				if (other === name) continue
+				if (other.endsWith(FILE_SUFFIX) && isThumbnailDigestHex(other.slice(0, -FILE_SUFFIX.length))) await rm(join(dir, other), { force: true }).catch(() => undefined)
+				else if (other.endsWith('.tmp')) {
+					const stats = await lstat(join(dir, other)).catch(() => undefined)
+					if (stats && Date.now() - stats.mtimeMs > TEMPORARY_FILE_MAX_AGE_MS) await rm(join(dir, other), { force: true }).catch(() => undefined)
+				}
 			}
 		},
 		async remove(viewId) {

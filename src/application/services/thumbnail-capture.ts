@@ -27,8 +27,10 @@ export function createThumbnailCapturer(persistence: FileNativePersistence, opti
 }>): ThumbnailCapturer {
 	const bindings = createViewAssetBindingCheck(persistence, options.adapterProvenance)
 	let launched: Promise<Browser> | undefined
+	let disposed = false
 
 	function browser(): Promise<Browser> {
+		if (disposed) return Promise.reject(new Error('the thumbnail capturer was closed'))
 		launched ??= chromium.launch({ headless: true, args: [...HARNESS_LAUNCH_ARGS] })
 		launched.catch(() => { launched = undefined })
 		return launched
@@ -73,7 +75,8 @@ export function createThumbnailCapturer(persistence: FileNativePersistence, opti
 				await preview?.close()
 			}
 		},
-		async close() {
+		async close(final = false) {
+			if (final) disposed = true
 			const pending = launched
 			launched = undefined
 			if (pending) await (await pending.catch(() => undefined))?.close().catch(() => undefined)

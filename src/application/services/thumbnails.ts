@@ -176,7 +176,11 @@ export function createThumbnailService(options: ThumbnailServiceOptions): Thumbn
 			const plans = await inputs.plans()
 			await dropRemoved(new Set(plans.map(plan => plan.key)))
 			for (const plan of plans) {
-				if (stateOf(plan, await store.list(plan.key)) !== 'fresh') enqueue(plan.key)
+				if (stateOf(plan, await store.list(plan.key)) === 'fresh') continue
+				// A View that failed within the failure interval is tried again by the next write or request after it, not by this pass.
+				const failed = failedAt.get(plan.key)
+				if (failed !== undefined && now() - failed < timing.failureIntervalMs) continue
+				enqueue(plan.key)
 			}
 		}
 		catch (error) {
@@ -260,6 +264,7 @@ export function createThumbnailService(options: ThumbnailServiceOptions): Thumbn
 	async function captureOne(key: string): Promise<void> {
 		const [plan] = await inputs.plans([key])
 		if (!plan) return // the View no longer exists
+		if (stopped) return // a stopped service launches no browser
 		if (!plan.digest || !plan.context) return fail(key, 'its thumbnail input digest or default context cannot be computed')
 		const hex = thumbnailDigestHex(plan.digest)
 		if ((await store.list(key)).some(file => file.digest === hex)) return // already fresh
@@ -351,7 +356,7 @@ export function createThumbnailService(options: ThumbnailServiceOptions): Thumbn
 			if (quietTimer) clearTimeout(quietTimer)
 			if (pollTimer) clearInterval(pollTimer)
 			quietTimer = pollTimer = undefined
-			await capturer.close().catch(() => undefined)
+			await capturer.close(true).catch(() => undefined)
 			await pumping?.catch(() => undefined)
 		},
 		async idle() {

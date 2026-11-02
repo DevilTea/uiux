@@ -37,6 +37,7 @@ function setup() {
 		outcome: { ok: true, png: PNG } as ThumbnailCaptureOutcome,
 		gate: undefined as Promise<void> | undefined,
 		closed: 0,
+		closedFinal: 0,
 		inFlight: 0,
 		maxInFlight: 0,
 	}
@@ -64,7 +65,7 @@ function setup() {
 			}
 			finally { state.inFlight -= 1 }
 		},
-		close: async () => { state.closed += 1 },
+		close: async (final) => { state.closed += 1; if (final) state.closedFinal += 1 },
 	}
 	const service = createThumbnailService({ inputs, store, capturer, events: bus, kitBuild: () => state.kit })
 	service.start()
@@ -235,6 +236,23 @@ describe('a request (Rule 01a19b99-d42e-7b72-b30b-480057b269d9)', () => {
 	})
 })
 
+describe('a stopped service', () => {
+	it('captures nothing more: the View queued behind the one in flight is not captured, and the capturer is closed for good', async () => {
+		h.views.set(A, digestOf('a'))
+		h.views.set(B, digestOf('b'))
+		let release!: () => void
+		h.state.gate = new Promise<void>((resolve) => { release = resolve })
+		await service.request([A, B])
+		await advance(10)
+		const stopping = service.stop()
+		release()
+		await stopping
+		await advance(THUMBNAIL_QUIET_MS)
+		expect(h.captures).toEqual([A])
+		expect(h.state.closedFinal).toBeGreaterThan(0)
+	})
+})
+
 describe('a hold (Rule 01a19b99-d5e3-7c51-a1f5-2ea86f20f9f6)', () => {
 	it.each([
 		['the kit build is running', (hh: Harness) => { hh.state.kit = { state: 'building' } }, (hh: Harness) => { hh.state.kit = { state: 'ready' } }],
@@ -290,11 +308,15 @@ describe('a failed capture (Rules 01a19b99-d6a9-7208-912e-f154133e553b and 01a19
 		expect(h.captures).toEqual([A, A])
 	})
 
-	it('does not stop the quiet-period pass from trying the View again', async () => {
+	it('keeps the quiet-period pass from queueing a View that failed within the interval, and tries it again after', async () => {
 		h.views.set(A, digestOf('v1'))
 		h.state.outcome = { ok: false, reason: 'cannot render' }
 		await service.request([A])
 		await advance(100)
+		h.write('view')
+		await advance(THUMBNAIL_QUIET_MS)
+		expect(h.captures).toEqual([A]) // the pass came within 60 s of the failure
+		await advance(THUMBNAIL_FAILURE_INTERVAL_MS)
 		h.write('view')
 		await advance(THUMBNAIL_QUIET_MS)
 		expect(h.captures).toEqual([A, A])

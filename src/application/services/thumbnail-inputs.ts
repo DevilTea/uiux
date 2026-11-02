@@ -67,9 +67,9 @@ export function createThumbnailInputs(persistence: FileNativePersistence, option
 	return {
 		plans,
 		async defaultLocaleMissing() {
+			// The default Locale as `plans` resolves it ('en-US' when the manifest names none), so the hold and the digest agree.
 			const manifest = (await persistence.workspace.readInspected()).resource
-			const defaultLocale = manifest?.i18n?.defaultLocale
-			if (!defaultLocale) return false
+			const defaultLocale = manifest?.i18n?.defaultLocale ?? 'en-US'
 			return (await persistence.locales.readRevision(defaultLocale)) === undefined
 		},
 	}
