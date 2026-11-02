@@ -1,6 +1,7 @@
 Feature: View Variants
   # Source: [#241 proposal and owner ruling 2026-11-02 (question tool, recorded by Claude on the owner's behalf): accepted, with these defaults](https://github.com/DevilTea/uiux/discussions/241#discussioncomment-19343472); issue #52 https://github.com/DevilTea/uiux/issues/52.
-  # Status: Not built as of 4e0209e (issue #52).
+  # Test: code@ba8c819 `tests/base-state-requests.test.ts#L301` "reads Unavailable and sends nothing when the generation did not declare it". https://github.com/DevilTea/uiux/blob/ba8c819347d5d521b6594aefd896cc6f1c47f9db/tests/base-state-requests.test.ts#L301
+  # Status: built as of ba8c819.
   @spec:id:01a19a9d-a4dd-7e3c-967a-ba28c1bd8198
   @spec:demonstrates:01a19a9b-3c4d-74cb-9695-ce20087e2188
   @spec:demonstrates:01a19a9d-a01a-72bd-9ea0-cad4e90ae7fc
