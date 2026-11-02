@@ -10,6 +10,15 @@ import {
 	type GeometryResponseMessage,
 } from './schema'
 import {
+	BASE_STATE_FEATURE,
+	isBaseStateMessageType,
+	isBaseStateRequestMessage,
+	validateBaseStateMessage,
+	type BaseStateMessage,
+	type BaseStateRequestMessage,
+	type BaseStateResponseMessage,
+} from './base-state'
+import {
 	CHECKS_REPORTS_FEATURE,
 	isChecksReportMessageType,
 	validateChecksReportMessage,
@@ -46,7 +55,7 @@ import {
 	type RetryAuthorizationResult,
 } from './session'
 
-export type PreviewWireMessage = CapabilityDeclareMessage | CapabilityAckMessage | GeometryMessage | TargetingMessage | WidgetEventMessage | FailureReportMessage | ChecksReportMessage
+export type PreviewWireMessage = CapabilityDeclareMessage | CapabilityAckMessage | GeometryMessage | TargetingMessage | WidgetEventMessage | FailureReportMessage | ChecksReportMessage | BaseStateMessage
 export type PreviewProtocolTransport = Readonly<{ send(message: PreviewWireMessage): void }>
 
 export type BridgeReceiveResult =
@@ -62,6 +71,13 @@ export type BridgeReceiveResult =
 	 */
 	| Readonly<{ status: 'generation-failed'; message: FailureReportMessage }>
 	| Readonly<{ status: 'invalid'; diagnostics: readonly Diagnostic[] }>
+	/**
+	 * Only the Workbench returns it: an `inspection.base-state.response` that does not decode or exceeds
+	 * its bound is rejected whole and is never a protocol failure (Clause
+	 * 01a19ab9-d028-7bb9-a370-4736992852f5), so the caller ends the request it answers without failing the
+	 * generation. `requestId` is read from the raw payload when it is a string, to name that request.
+	 */
+	| Readonly<{ status: 'rejected'; diagnostics: readonly Diagnostic[]; requestId?: string }>
 	/**
 	 * Only a runtime returns it: Workbench traffic of its own session and generation that violates
 	 * the generation's state (Clause 01a11a70-4261-7155-8aed-28bed7a89064). `detail` is display-safe
@@ -178,6 +194,7 @@ export class WorkbenchPreviewProtocolBridge {
 		}
 		if (isFailureReportMessageType(type)) return this.receiveFailureReport(input)
 		if (isChecksReportMessageType(type)) return this.receiveChecksReport(input)
+		if (isBaseStateMessageType(type)) return this.receiveBaseStateResponse(input, type)
 		if (isWidgetEventMessageType(type)) {
 			// Workbench accepts only occurrences inbound; the decoded copy carries known members only.
 			const decoded = validateWidgetEventMessage(input)
@@ -217,6 +234,23 @@ export class WorkbenchPreviewProtocolBridge {
 		if (decoded.value.type !== 'widget.event.arm') return { status: 'wrong-direction' }
 		const gate = this.classify(decoded.value.context.previewSessionId, decoded.value.context.runtimeGenerationId)
 		if (gate) return { status: gate }
+		this.transport.send(decoded.value)
+		return { status: 'sent' }
+	}
+
+	/**
+	 * Sends one `inspection.base-state.request` once the generation's capability ACK is dispatched, and
+	 * only to a generation that declared `inspection.base-state` (Clauses
+	 * 01a1161c-4283-70b7-b487-e81bc28ce875 and 01a11a59-d728-751f-bbac-287a77b75610). A request beyond a
+	 * bound is invalid and is not sent; having at most one request pending is the caller's.
+	 */
+	sendBaseStateRequest(message: BaseStateRequestMessage): BridgeSendResult {
+		const decoded = validateBaseStateMessage(message)
+		if (!decoded.ok) return { status: 'invalid', diagnostics: decoded.diagnostics }
+		if (!isBaseStateRequestMessage(decoded.value)) return { status: 'wrong-direction' }
+		const gate = this.classify(decoded.value.context.previewSessionId, decoded.value.context.runtimeGenerationId)
+		if (gate) return { status: gate }
+		if (!this.session.currentGenerationDeclares(decoded.value.context.runtimeGenerationId, BASE_STATE_FEATURE)) return { status: 'not-permitted' }
 		this.transport.send(decoded.value)
 		return { status: 'sent' }
 	}
@@ -334,6 +368,33 @@ export class WorkbenchPreviewProtocolBridge {
 		return { status: 'accepted', message }
 	}
 
+	/**
+	 * A runtime's `inspection.base-state.response`. Like any runtime traffic it is accepted only for the
+	 * current generation after its capability ACK was dispatched, and only when that generation declared
+	 * `inspection.base-state`; the correlation check before the decode already dropped a response of
+	 * another session or generation. A response that does not decode or exceeds its bound is `rejected`,
+	 * never `invalid`: it is no protocol failure (Clause 01a19ab9-d028-7bb9-a370-4736992852f5). Whether
+	 * it answers the pending request, and is current for the View and Variant, is the caller's.
+	 */
+	private receiveBaseStateResponse(input: unknown, type: BaseStateMessage['type']): BridgeReceiveResult {
+		if (type === 'inspection.base-state.request') return { status: 'wrong-direction' }
+		// The gates come before the decode, by the identities the envelope names: traffic of a generation
+		// that is not open, or did not declare the feature, is dropped and is never `rejected`.
+		const correlation = envelopeCorrelation(input)
+		if (correlation?.runtimeGenerationId !== undefined) {
+			const gate = this.classify(correlation.previewSessionId, correlation.runtimeGenerationId)
+			if (gate) return { status: gate }
+			if (!this.session.currentGenerationDeclares(correlation.runtimeGenerationId, BASE_STATE_FEATURE)) return { status: 'gated' }
+		}
+		const decoded = validateBaseStateMessage(input)
+		if (!decoded.ok) {
+			const requestId = rawRequestId(input)
+			return { status: 'rejected', diagnostics: decoded.diagnostics, ...(requestId !== undefined ? { requestId } : {}) }
+		}
+		if (isBaseStateRequestMessage(decoded.value)) return { status: 'wrong-direction' }
+		return { status: 'accepted', message: decoded.value }
+	}
+
 	/** A declaration is stale when its session is not this one or its generation is retired. */
 	private staleDeclaration(input: unknown): 'stale-session' | 'stale-generation' | undefined {
 		const correlation = envelopeCorrelation(input)
@@ -441,6 +502,7 @@ export class RuntimePreviewProtocolBridge {
 			return { status: 'accepted', message: targeting.value }
 		}
 		if (isFailureReportMessageType(type) || isChecksReportMessageType(type)) return { status: 'wrong-direction' }
+		if (isBaseStateMessageType(type)) return this.receiveBaseStateRequest(input, type)
 		if (isWidgetEventMessageType(type)) {
 			// The runtime accepts only arms inbound.
 			const decoded = validateWidgetEventMessage(input)
@@ -460,6 +522,38 @@ export class RuntimePreviewProtocolBridge {
 		// effect, as it drops any unknown type of an acknowledged generation (Clause 01a11a59-d728-751f-bbac-287a77b75610).
 		if (decoded.value.type === 'geometry.reveal' && !this.declaration.features.includes(REVEAL_GEOMETRY_FEATURE)) return { status: 'gated' }
 		return { status: 'accepted', message: decoded.value }
+	}
+
+	/**
+	 * A Workbench `inspection.base-state.request`. A runtime that did not declare the feature does not
+	 * know the type and drops it without effect (Clause 01a11a59-d728-751f-bbac-287a77b75610). A
+	 * request beyond a bound does not decode, so it is an invalid message like any other (Clause
+	 * 01a19a9b-347f-782c-bd9a-22dc52096603); whether it names the mounted View and Variant is the caller's.
+	 */
+	private receiveBaseStateRequest(input: unknown, type: BaseStateMessage['type']): BridgeReceiveResult {
+		if (!this.declaration.features.includes(BASE_STATE_FEATURE)) return { status: 'gated' }
+		const decoded = validateBaseStateMessage(input)
+		if (!decoded.ok) return { status: 'invalid', diagnostics: decoded.diagnostics }
+		if (!isBaseStateRequestMessage(decoded.value)) return { status: 'wrong-direction' }
+		const gate = this.runtimeGate(decoded.value)
+		if (gate) return this.gated(gate, type)
+		return { status: 'accepted', message: decoded.value }
+	}
+
+	/**
+	 * Sends one `inspection.base-state.response`; nothing crosses before the capability ACK, and only a
+	 * generation that declared `inspection.base-state` may send one. The caller builds it with
+	 * `encodeBaseStateResponse`, which applies the bound of the whole envelope.
+	 */
+	sendBaseStateResponse(message: BaseStateResponseMessage): BridgeSendResult {
+		const decoded = validateBaseStateMessage(message)
+		if (!decoded.ok) return { status: 'invalid', diagnostics: decoded.diagnostics }
+		if (isBaseStateRequestMessage(decoded.value)) return { status: 'wrong-direction' }
+		const gate = this.runtimeGate(decoded.value)
+		if (gate) return { status: gate }
+		if (!this.declaration.features.includes(BASE_STATE_FEATURE)) return { status: 'not-permitted' }
+		this.transport.send(decoded.value)
+		return { status: 'sent' }
 	}
 
 	/** Sends `targeting.hover` / `select` / `escape`; nothing crosses before the capability ACK. */
@@ -625,7 +719,7 @@ export class RuntimePreviewProtocolBridge {
 		return { status: gate }
 	}
 
-	private runtimeGate(message: GeometryMessage | TargetingMessage | WidgetEventMessage | FailureReportMessage | ChecksReportMessage): 'gated' | 'stale-session' | 'stale-generation' | undefined {
+	private runtimeGate(message: GeometryMessage | TargetingMessage | WidgetEventMessage | FailureReportMessage | ChecksReportMessage | BaseStateMessage): 'gated' | 'stale-session' | 'stale-generation' | undefined {
 		if (message.context.previewSessionId !== this.previewSessionId) return 'stale-session'
 		if (message.context.runtimeGenerationId !== this.runtimeGenerationId) return 'stale-generation'
 		if (!this.ackObserved || this.generationEnded) return 'gated'
@@ -666,6 +760,15 @@ export function isChecksReport(input: unknown): boolean {
 /** The `runtimeGenerationId` an envelope's context names, read without decoding the message. */
 export function envelopeGenerationId(input: unknown): string | undefined {
 	return envelopeCorrelation(input)?.runtimeGenerationId
+}
+
+/** The `requestId` of an envelope's payload, read without decoding, when it is a non-empty string. */
+function rawRequestId(input: unknown): string | undefined {
+	if (!input || typeof input !== 'object' || Array.isArray(input)) return undefined
+	const payload = (input as Record<string, unknown>).payload
+	if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return undefined
+	const requestId = Object.getOwnPropertyDescriptor(payload, 'requestId')?.value
+	return typeof requestId === 'string' && requestId ? requestId : undefined
 }
 
 function messageType(input: unknown): string | undefined {

@@ -273,7 +273,8 @@ function deduplicate(diagnostics: readonly Diagnostic[]): Diagnostic[] {
 	})
 }
 
-function withoutVariant(context: ResolvedRenderContext): ResolvedRenderContext {
+/** The render context of the base state: the same View, Locale, viewport and theme, and no Variant. */
+export function withoutVariant(context: ResolvedRenderContext): ResolvedRenderContext {
 	return {
 		viewId: context.viewId,
 		locale: context.locale,
