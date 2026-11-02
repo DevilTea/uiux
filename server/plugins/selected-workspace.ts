@@ -67,6 +67,8 @@ export default defineNitroPlugin((nitroApp) => {
 				diagnostics.warn(`uiux: could not start the kit build: ${error instanceof Error ? error.message : String(error)}`)
 			})
 			process.once('exit', () => runtime.kitBuild.stopSync())
+			// View thumbnails (Feature 01a19b99-c9ee-…): the worker runs with the server only, never in a formal capture or a CLI-only command.
+			runtime.thumbnails.start()
 		}
 	}
 	nitroApp.hooks.hook('close', async () => {

@@ -19,6 +19,8 @@ export type ChangeEvent =
 	| Readonly<{ type: 'resource.removed'; kind: ChangeEventResourceKind; key: string }>
 	| Readonly<{ type: 'lock.changed'; kind: string; key: string }>
 	| Readonly<{ type: 'access.changed' }>
+	/** Clause 01a19b99-cf3c-7a6b-8a2b-492c36c22cc7: a View's stored thumbnail or its refreshing state changed; `key` is the View's key. */
+	| Readonly<{ type: 'thumbnail.changed'; key: string }>
 
 /**
  * The resources whose commits emit (Rule 01a11485-f365-70ce-82d9-43ea3f5ea5bb, with the Access

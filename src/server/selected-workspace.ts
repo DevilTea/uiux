@@ -2,6 +2,10 @@ import { resolve } from 'node:path'
 
 import type { McpHttpHandler } from '@modelcontextprotocol/server'
 import { createLeaseManager, type LeaseManager } from '../application/access/leases'
+import type { ThumbnailCapturer } from '../application/ports/thumbnails'
+import { createThumbnailService, type ThumbnailService, type ThumbnailTiming } from '../application/services/thumbnails'
+import { createThumbnailCapturer } from '../application/services/thumbnail-capture'
+import { createThumbnailInputs } from '../application/services/thumbnail-inputs'
 import { createChangeEventBus, publishCommits, publishLeaseChanges, type ChangeEventBus } from '../application/services/change-events'
 import type { AdapterProvenanceSource } from '../application/services/adapter-provenance'
 import { createHistoryRecorder, type HistoryRecorder } from '../application/services/history-recorder'
@@ -16,6 +20,7 @@ import { AccessStore, resolveUiuxHome } from './access/store'
 import { createWorkspaceAccessPresetsReader } from './access/workspace-presets'
 import { createEventStreamHub, type EventStreamHub } from './event-stream'
 import { createHistoryStoreFactory, type HistoryStoreFactory } from './history-stores'
+import { createThumbnailStore } from './thumbnail-store'
 import { createKitBuildRunner, registerKitBuildRunner, type KitBuildRunner } from './kit-build'
 import { checkAdapterSetRuntime, getSelectedWorkspacePreviewBundle, isSelectionOnlyAdapterEntry, pinnedAdapterContentDigest, resolveSelectedWorkspaceAdapterList, selectedWorkspaceThemeSupport } from './workspace-adapters'
 
@@ -46,11 +51,32 @@ export type SelectedWorkspaceServerRuntime = Readonly<{
 	 * under `uiux dev`; `close()` stops its process.
 	 */
 	kitBuild: KitBuildRunner
+	/**
+	 * The View thumbnail worker (Feature 01a19b99-c9ee-7dcb-ae96-bbe31f12591c). The Nitro plugin starts
+	 * it under `uiux dev`; `close()` stops it. Formal capture and the CLI never start it.
+	 */
+	thumbnails: ThumbnailService
 	close(): Promise<void>
 }>
 
 let selectedRuntime: SelectedWorkspaceServerRuntime | undefined
 let configuredServerOrigin: string | undefined
+
+export type SelectedWorkspaceRuntimeOptions = Readonly<{
+	serverOrigin?: string
+	uiuxHome?: string
+	/** Test-only: the thumbnail timing values (Clause 01a19b99-ce21-7b2c-b039-f9afa8f95a97), shortened so a test need not wait. */
+	thumbnailTiming?: Partial<ThumbnailTiming>
+	/** Test-only: a capturer in place of the Chromium one. */
+	thumbnailCapturer?: ThumbnailCapturer
+}>
+
+let configuredRuntimeOptions: SelectedWorkspaceRuntimeOptions | undefined
+
+/** Test-only: the options the process-wide runtime is created with; call before the first `getSelectedWorkspaceServerRuntime`. */
+export function configureSelectedWorkspaceRuntime(options: SelectedWorkspaceRuntimeOptions | undefined): void {
+	configuredRuntimeOptions = options
+}
 
 export function setInternalServerOrigin(origin: string): void {
 	configuredServerOrigin = origin
@@ -67,7 +93,7 @@ export function resolveInternalServerOrigin(): string {
 
 export function createSelectedWorkspaceServerRuntime(
 	root: string,
-	options?: { serverOrigin?: string; uiuxHome?: string },
+	options?: SelectedWorkspaceRuntimeOptions,
 ): SelectedWorkspaceServerRuntime {
 	const selectedRoot = resolve(root)
 	const persistence = new FileNativePersistence({
@@ -101,18 +127,31 @@ export function createSelectedWorkspaceServerRuntime(
 		outputGeneration: () => kitBuild.outputVersion(),
 	}
 	adapterProvenanceHolder.source = { ...adapterResolution, kitBuild: () => kitBuild.status() }
+	const events = createChangeEventBus()
+	// Formal capture loads Preview as the in-memory `system:capture` principal (cookie-scoped to the internal origin).
+	const captureCookie = () => accessService ? { name: accessService.cookieName, value: accessService.captureCredential } : undefined
+	// Formal capture refuses a theme the current Adapter resolution does not support (Rule 01a11add-f46d-7e92-8f5a-9d10dba6473d).
+	const adapterThemeSupport = () => selectedWorkspaceThemeSupport(selectedRoot, persistence.layout)
+	// View thumbnails (Feature 01a19b99-c9ee-…): a host-local cache under `$UIUX_HOME`, captured on the shared capture engine after a quiet period.
+	const thumbnails = createThumbnailService({
+		inputs: createThumbnailInputs(persistence, { adapterProvenance: adapterProvenanceHolder.source }),
+		store: createThumbnailStore({ workspaceRoot: selectedRoot, home: () => options?.uiuxHome ?? resolveUiuxHome() }),
+		capturer: options?.thumbnailCapturer ?? createThumbnailCapturer(persistence, { serverOrigin, captureCookie, themeSupport: adapterThemeSupport, adapterProvenance: adapterProvenanceHolder.source }),
+		events,
+		kitBuild: () => kitBuild.status(),
+		...(options?.thumbnailTiming ? { timing: options.thumbnailTiming } : {}),
+	})
 	const app = createWorkspaceApplicationSession(persistence, {
 		serverOrigin,
-		// Formal capture loads Preview as the in-memory `system:capture` principal (cookie-scoped to the internal origin).
-		captureCookie: () => accessService ? { name: accessService.cookieName, value: accessService.captureCredential } : undefined,
+		captureCookie,
+		thumbnails,
 		history,
 		// A Checkpoint first closes the open autosave and records outside changes (Rule 01a11a5e-00b9-7bf5-8005-9380a388afb8).
 		historyBoundary: () => historyRecorder,
 		kitBuild,
 		// Handoff refuses an Adapter set the Preview refuses (Clause 01a116f0-cae2-7c64-9c76-d472f252789a).
 		checkAdapterSet: set => checkAdapterSetRuntime(selectedRoot, persistence.layout, set),
-		// Formal capture refuses a theme the current Adapter resolution does not support (Rule 01a11add-f46d-7e92-8f5a-9d10dba6473d).
-		adapterThemeSupport: () => selectedWorkspaceThemeSupport(selectedRoot, persistence.layout),
+		adapterThemeSupport,
 		// Formal capture, Evidence freshness and Handoff export resolve the Adapters as the Preview does (Rule 01a167bf-1f93-78b7-9045-6562c20f5a42).
 		adapterResolution,
 		// Review reads mark an actor whose member left the roster (Rule 01a11485-f185-7c23-8f2a-e045a279cd27).
@@ -123,7 +162,6 @@ export function createSelectedWorkspaceServerRuntime(
 		},
 	})
 	// Every committed write (HTTP and MCP alike) and every lease change becomes a change event.
-	const events = createChangeEventBus()
 	const stopCommitEvents = publishCommits(events, persistence)
 	const stopLeaseEvents = publishLeaseChanges(events, leases)
 	const eventStreams = createEventStreamHub({
@@ -164,7 +202,9 @@ export function createSelectedWorkspaceServerRuntime(
 		events,
 		eventStreams,
 		kitBuild,
+		thumbnails,
 		async close() {
+			await thumbnails.stop()
 			eventStreams.close()
 			stopCommitEvents()
 			stopLeaseEvents()
@@ -188,7 +228,7 @@ export function getSelectedWorkspaceServerRuntime(): SelectedWorkspaceServerRunt
 	const selectedRoot = resolve(configuredRoot)
 	if (selectedRuntime && selectedRuntime.root !== selectedRoot)
 		throw new Error('A UIUX server process cannot switch its selected Workspace root after startup.')
-	selectedRuntime ??= createSelectedWorkspaceServerRuntime(selectedRoot)
+	selectedRuntime ??= createSelectedWorkspaceServerRuntime(selectedRoot, configuredRuntimeOptions)
 	return selectedRuntime
 }
 

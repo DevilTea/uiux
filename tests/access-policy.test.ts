@@ -114,6 +114,10 @@ const ROLE_MATRIX: Readonly<Record<AccessOperation, Readonly<{ min: AccessRole; 
 	subscribeEvents: { min: 'viewer' },
 	readProductKit: { min: 'viewer' },
 	readRequirements: { min: 'viewer' },
+	// Added with View thumbnails (issue #481, Clause 01a19bb9-8f1f-7482-b6fd-f131a284178e): `workspace.read`, and no system credential.
+	readViewThumbnail: { min: 'viewer' },
+	listViewThumbnails: { min: 'viewer' },
+	requestViewThumbnails: { min: 'viewer' },
 	readAccessPresets: { min: 'viewer' },
 	diffVersions: { min: 'viewer' },
 	listVersions: { min: 'viewer' },
@@ -225,8 +229,8 @@ describe('parity: role-derived keys decide as the role matrix did', () => {
 				if ((denied === undefined) !== before) changed.push(`${id}: ${before ? 'allowed' : 'refused'} → ${denied ? 'refused' : 'allowed'}`)
 			}
 		}
-		// 67 operations, 7 lease acquires and 6 restores, for 16 members and the system credential.
-		expect(compared).toBe(80 * 17)
+		// 70 operations, 7 lease acquires and 6 restores, for 16 members and the system credential.
+		expect(compared).toBe(83 * 17)
 		expect(changed.sort()).toEqual([...INTENDED_CHANGES].sort())
 	})
 
