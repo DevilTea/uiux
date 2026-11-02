@@ -34,8 +34,11 @@ export function flowStepLocation(flowId: string, stepId?: string): { path: strin
 	return stepId ? { path: flowPath(flowId), query: { step: stepId } } : { path: flowPath(flowId) }
 }
 
-/** The one list of every View: the Overview's Views tab. */
-export const VIEWS_LOCATION = { path: '/', query: { tab: 'views' } } as const
+/**
+ * The one list of every View: the Overview's Views tab. `views` is the default tab and is written as
+ * no `tab` at all (Clause 01a116f0-96ef-700e-8dc6-e6ffbe41d15d); an incoming `?tab=views` still opens it.
+ */
+export const VIEWS_LOCATION = { path: '/' } as const
 
 /**
  * The sections of the Product Kit page (Clause 01a11be8-5cab-7e50-89fe-b89c243d773d), in their order

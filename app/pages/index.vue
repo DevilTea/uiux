@@ -138,7 +138,8 @@ const attention = computed<AttentionPart[]>(() => ([
 
 /**
  * `?tab=` is the active tab, both ways. `G V`, ⌘K "Views", the View page's parent crumb and the
- * Reviews empty state all link to `?tab=views`.
+ * Reviews empty state all link to `/`, the Views tab written with no `tab` (Clause
+ * 01a116f0-96ef-700e-8dc6-e6ffbe41d15d); an incoming `?tab=views` is still read as Views.
  * Switching tabs replaces the query (no history entry per tab), so a link to the Views tab is never
  * a same-location no-op while another tab is showing. Views is the default: no `?tab=` means
  * Views, and switching back to Views drops the query, so a bare `/` stays bare (a phone cold load of

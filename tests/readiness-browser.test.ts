@@ -206,11 +206,12 @@ describe('Overview tabs in the URL', () => {
 			expect(await page.evaluate(() => history.length)).toBe(historyLength)
 
 			// G V from another tab (the location the View crumb, ⌘K "Views" and the Reviews empty
-			// state also use) lands on the Views tab.
+			// state also use) lands on the Views tab, written with no `tab` at all
+			// (Clause 01a116f0-96ef-700e-8dc6-e6ffbe41d15d).
 			await page.keyboard.press('g')
 			await page.keyboard.press('v')
 			await expect.poll(() => selectedTab(page)).toBe('Views')
-			expect(tabParam(page)).toBe('views')
+			await expect.poll(() => new URL(page.url()).search).toBe('')
 
 			// Views is the default: switching back to it drops the query.
 			await page.keyboard.press('2')
