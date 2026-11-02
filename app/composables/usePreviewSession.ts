@@ -9,7 +9,7 @@ import {
 	WorkbenchPreviewProtocolBridge,
 	type BridgeReceiveResult,
 } from '../../src/preview/protocol/bridge'
-import { deriveWorkbenchFailure, recorrelatePreviewFailure, retryStallGraceMs } from '../../src/preview/failure-diagnostic'
+import { deriveRecoveryStallFailure, deriveWorkbenchFailure, recorrelatePreviewFailure, retryStallGraceMs } from '../../src/preview/failure-diagnostic'
 import { failureReportDiagnostic } from '../../src/preview/protocol/failure-report'
 import { CHECKS_REPORTS_FEATURE } from '../../src/preview/protocol/checks-report'
 import { PreviewChecksReports, type LivePreviewChecks } from '../../src/preview/checks-reports'
@@ -982,7 +982,8 @@ export function createPreviewSession(state: WorkbenchState) {
 	}
 
 	/**
-	 * The iframe loaded while a retry is in flight: wait the grace period for a declaration. A
+	 * The iframe loaded while a retry is in flight: wait the grace period for a declaration; one that
+	 * stays silent with the automatic recovery allowance spent is a lost channel (issue #467). A
 	 * readable document the Workbench no longer requests is ignored (its replacement's load follows);
 	 * an unreadable one, such as an error page when the server is down, starts the wait too, so
 	 * Retry Preview always comes back (owner ruling 1 of 2026-10-23).
@@ -993,7 +994,15 @@ export function createPreviewSession(state: WorkbenchState) {
 		retryStalled.value = false
 		retryStallTimer = setTimeout(() => {
 			retryStallTimer = undefined
-			if (retryInFlight.value) retryStalled.value = true
+			if (!retryInFlight.value) return
+			// With the automatic recovery allowance spent the stall is a terminal loss of the channel
+			// (`transport.channel_unavailable`, issue #467); before that, Retry Preview is offered again.
+			const lost = workbenchBridge && deriveRecoveryStallFailure({
+				automaticRecoveryUsed: workbenchBridge.snapshot().session.automaticRecoveryUsed,
+				previewSessionId: previewSessionId.value,
+			})
+			if (lost) failPreview('recovery-stalled', lost)
+			else retryStalled.value = true
 		}, stallGraceMs)
 	}
 
@@ -1251,7 +1260,7 @@ export function createPreviewSession(state: WorkbenchState) {
 	 * flight (if any) has run its course, and the diagnostic shows `failure`. A generation refused
 	 * while recovery is exhausted passes the failure that exhausted it, under the refused generation.
 	 */
-	function failPreview(status: BridgeReceiveResult['status'], failure: PreviewFailureDiagnostic | undefined): void {
+	function failPreview(status: BridgeReceiveResult['status'] | 'recovery-stalled', failure: PreviewFailureDiagnostic | undefined): void {
 		if (failure) {
 			if (status !== 'generation-refused') lastFailure = failure
 			shownFailure.value = failure

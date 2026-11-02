@@ -234,6 +234,9 @@ describe('Inline Preview diagnostic and Retry Preview (issue #111)', () => {
 			await expect.poll(async () => await retry.getAttribute('aria-disabled'), { timeout: 15_000 }).toBeNull()
 			expect(await status.textContent()).toContain('has not answered')
 			expect(await page.locator('[data-session-status]').getAttribute('data-status')).not.toBe('live')
+			// The automatic allowance is unspent after a capability failure, so this stall is no lost
+			// channel: the earlier diagnostic stays (issue #467).
+			expect(await diagnostic.getAttribute('data-reason')).toBe('capability.unsupported_protocol_version')
 
 			// Pressing again reloads; this time the document fails to load at all. The error page cannot
 			// be read, and Retry Preview still comes back.
@@ -389,6 +392,39 @@ describe('Inline Preview diagnostic and Retry Preview (issue #111)', () => {
 			await setHold(page, false)
 			await retry.click()
 			await expect.poll(() => documentParam(page)).toBe(before + 2)
+			expect(await expectLive(page)).not.toBe(live)
+		}
+		finally { await context.close() }
+	}, 90_000)
+
+	it('derives transport.channel_unavailable when the automatic attempt stalls, and a late declaration clears it only at its acknowledgement (issue #467)', async () => {
+		const { context, page } = await open(`/views/${VIEW_ID}?widget=${WIDGET_ID}`, 0, SHORT_GRACE_MS)
+		try {
+			const live = await expectLive(page)
+			const before = await documentParam(page)
+			await setHold(page, true)
+			await declareConflict(page, live)
+			await expect.poll(() => documentParam(page)).toBe(before + 1)
+
+			// The attempt's document loads and never declares, with the allowance spent: the channel is lost.
+			const diagnostic = page.locator('[data-preview-failure]')
+			await expect.poll(async () => await diagnostic.getAttribute('data-reason'), { timeout: 15_000 }).toBe('transport.channel_unavailable')
+			expect(await diagnostic.getAttribute('data-category')).toBe('transport')
+			expect(await diagnostic.locator('[data-preview-failure-body]').textContent()).toContain('closed for good')
+			expect(await page.locator('[data-session-status]').getAttribute('data-status')).toBe('stopped')
+			const retry = diagnostic.getByRole('button', { name: 'Retry Preview' })
+			expect(await retry.getAttribute('aria-disabled')).toBeNull()
+			// Correlated with the session alone: no generation of the stalled document was admitted.
+			await openDetails(diagnostic)
+			expect(await identity(diagnostic, 'previewSessionId')).toBeTruthy()
+			expect(await diagnostic.locator('[data-preview-failure-identity="runtimeGenerationId"]').count()).toBe(0)
+			// Waiting alone never ends it.
+			await page.waitForTimeout(SHORT_GRACE_MS * 3)
+			expect(await diagnostic.getAttribute('data-reason')).toBe('transport.channel_unavailable')
+
+			// The late declaration is still admitted as the pending recovery generation; the diagnostic
+			// goes away when that generation is acknowledged.
+			await release(page)
 			expect(await expectLive(page)).not.toBe(live)
 		}
 		finally { await context.close() }

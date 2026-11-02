@@ -54,6 +54,26 @@ export function retryStallGraceMs(scope: unknown = globalThis): number {
 	return typeof override === 'number' && Number.isFinite(override) && override > 0 ? override : RETRY_STALL_GRACE_MS
 }
 
+export type RecoveryStallObservation = Readonly<{
+	/** The session's automatic recovery allowance is spent (`automaticRecoveryUsed` of its snapshot). */
+	automaticRecoveryUsed: boolean
+	previewSessionId: string
+}>
+
+/**
+ * A recovery document (the automatic attempt's, or one an explicit Retry Preview requested) loaded
+ * and declared nothing within the grace period (issue #467; owner ruling 2026-11-02, Discussion
+ * #379). With the automatic recovery allowance spent, the Workbench judges the channel lost for
+ * good and derives `transport.channel_unavailable`, correlated with the Preview session alone since
+ * no generation of the stalled document was admitted. While the allowance is unspent the stall is
+ * not a failure: Retry Preview is offered again and the earlier diagnostic stays (owner ruling 1 of
+ * 2026-10-23, Discussion #241).
+ */
+export function deriveRecoveryStallFailure(observation: RecoveryStallObservation): PreviewFailureDiagnostic | undefined {
+	if (!observation.automaticRecoveryUsed) return undefined
+	return createPreviewFailure('transport', 'transport.channel_unavailable', observation.previewSessionId)
+}
+
 /** Longest `detail` the Workbench writes; the detail is display-only and never drives control flow. */
 const MAX_DETAIL_LENGTH = 200
 
