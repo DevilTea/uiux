@@ -3,7 +3,7 @@ Feature: A capability failure shows the inline Preview diagnostic
   # Test: code@c15227e `tests/preview-failure-browser.test.ts#L138` "shows a capability failure inline, and Retry Preview recovers through one explicit retry", whose first part forces the capability failure and reads the diagnostic and its details. https://github.com/DevilTea/uiux/blob/c15227ed7777cda6a979a8b5f212b905aac5f255/tests/preview-failure-browser.test.ts#L138
   # Test: code@c15227e `tests/preview-failure-diagnostic.test.ts#L34` "keeps the reason of a capability failure, correlated with the session and the failed generation". https://github.com/DevilTea/uiux/blob/c15227ed7777cda6a979a8b5f212b905aac5f255/tests/preview-failure-diagnostic.test.ts#L34
   # Test: code@c15227e `tests/preview-failure-diagnostic.test.ts#L117` "takes the title from the category and the body from a recognized reason". https://github.com/DevilTea/uiux/blob/c15227ed7777cda6a979a8b5f212b905aac5f255/tests/preview-failure-diagnostic.test.ts#L117
-  # Status: built as of c15227e (issue #111) for the failures the Workbench derives, which this Scenario exercises; `transport.channel_unavailable`, which it does not exercise, is not derived: see the Implementation gaps entry of 01a11687-4114-728a-9d58-d69eaf786e5d in the Preview protocol Contract (issue #467).
+  # Status: built as of c15227e (issue #111) for the failures the Workbench derives, which this Scenario exercises; `transport.channel_unavailable`, which it does not exercise, is derived as of 3ae6357 (issue #467): see Scenario 01a19a12-349c-7475-a381-25a8a7cb3951.
   @spec:id:01a166f7-cde5-76e1-9565-e94c6094f4d7
   @spec:demonstrates:01a11687-375e-7667-b8f1-59389fdd9780
   @spec:demonstrates:01a11687-37a0-77bb-a857-5f7804b7c306

@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
 	createPreviewFailure,
+	deriveRecoveryStallFailure,
 	deriveWorkbenchFailure,
 	previewFailureCopyKeys,
 	recorrelatePreviewFailure,
@@ -100,6 +101,19 @@ describe('Workbench-derived Preview failures', () => {
 		for (const failure of derived) expect(validatePreviewFailureDiagnostic(failure)).toMatchObject({ ok: true })
 		expect(derived[1]!.detail).not.toMatch(/\p{Cc}/u)
 		expect(derived[1]!.detail!.length).toBeLessThanOrEqual(200)
+	})
+})
+
+describe('Recovery document stall (issue #467)', () => {
+	it('derives transport.channel_unavailable, correlated with the session alone, once the automatic allowance is spent', () => {
+		const failure = deriveRecoveryStallFailure({ automaticRecoveryUsed: true, previewSessionId: 'session-a' })
+		expect(failure).toEqual({ category: 'transport', reason: 'transport.channel_unavailable', correlation: { previewSessionId: 'session-a' } })
+		expect(validatePreviewFailureDiagnostic(failure).ok).toBe(true)
+		expect(previewFailureCopyKeys(failure!).recognized).toBe(true)
+	})
+
+	it('derives nothing while the automatic allowance is unspent: an earlier stall only offers Retry Preview again', () => {
+		expect(deriveRecoveryStallFailure({ automaticRecoveryUsed: false, previewSessionId: 'session-a' })).toBeUndefined()
 	})
 })
 
