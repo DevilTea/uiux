@@ -1,8 +1,8 @@
 Feature: View Variants
   # Source: [#241 proposal and owner ruling 2026-11-02 (question tool, recorded by Claude on the owner's behalf): accepted, with these defaults](https://github.com/DevilTea/uiux/discussions/241#discussioncomment-19343472); issue #52 https://github.com/DevilTea/uiux/issues/52.
-  # Test: code@112ddb2 `tests/inspector-base-state-browser.test.ts#L72` "shows the base value the Preview read for a State member the Variant overrides". https://github.com/DevilTea/uiux/blob/112ddb216da8b5624a5a565a00f6d6163ee49029/tests/inspector-base-state-browser.test.ts#L72
-  # Test: code@112ddb2 `tests/base-state-requests.test.ts#L84` "is sent when the Widget is selected, with a fresh non-empty requestId and the open context". https://github.com/DevilTea/uiux/blob/112ddb216da8b5624a5a565a00f6d6163ee49029/tests/base-state-requests.test.ts#L84
-  # Status: built as of 112ddb2.
+  # Test: code@ba8c819 `tests/inspector-base-state-browser.test.ts#L72` "shows the base value the Preview read for a State member the Variant overrides". https://github.com/DevilTea/uiux/blob/ba8c819347d5d521b6594aefd896cc6f1c47f9db/tests/inspector-base-state-browser.test.ts#L72
+  # Test: code@ba8c819 `tests/base-state-requests.test.ts#L84` "is sent when the Widget is selected, with a fresh non-empty requestId and the open context". https://github.com/DevilTea/uiux/blob/ba8c819347d5d521b6594aefd896cc6f1c47f9db/tests/base-state-requests.test.ts#L84
+  # Status: built as of ba8c819.
   @spec:id:01a19a9d-a252-7262-aa4c-04b23ea2f65a
   @spec:demonstrates:01a19a9b-308e-7377-ac04-54b81a96e5ed
   @spec:demonstrates:01a19a9d-9d1b-7db9-a535-96dedc258395
