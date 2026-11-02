@@ -14,6 +14,9 @@ export type EvidenceViewRenderInput = Readonly<{ key: string; revision: string; 
 /** A Flow's current Flow input digest (Clause 01a1814f-81c2-…) and the revision it was read at. */
 export type EvidenceFlowInput = Readonly<{ key: string; revision: string; flowInputDigest: string }>
 
+/** One View's thumbnail state (Clause 01a19b99-cd8b-7a8d-a357-5a55fa9453d7) and whether it is being refreshed. */
+export type ViewThumbnailStatus = Readonly<{ key: string; state: 'fresh' | 'stale' | 'missing'; refreshing: boolean }>
+
 /** The active Adapters' Widget types with their declarations and Catalog entries (`GET /api/preview/catalog`). */
 export type PreviewCatalogResponse =
 	| Readonly<{ state: 'valid'; entries: DescribedWidgetCatalog }>
@@ -143,6 +146,22 @@ export function useUiuxClient() {
 		return `/api/artifacts/${encodeURIComponent(digest)}`
 	}
 
+	/** The state of each named View's thumbnail and whether it is refreshing; every View's without a name (Feature 01a19b99-c9ee-…). */
+	async function listViewThumbnails(keys?: readonly string[]): Promise<readonly ViewThumbnailStatus[]> {
+		const query = keys === undefined ? undefined : { keys: keys.join(',') }
+		return (await $fetch<{ items: ViewThumbnailStatus[] }>('/api/thumbnails', { ...(query ? { query } : {}), cache: 'no-store' })).items
+	}
+
+	/** Asks the server to queue the named Views' missing and stale thumbnails at once (Rule 01a19b99-d42e-7b72-b30b-480057b269d9), and lists them. */
+	async function requestViewThumbnails(keys: readonly string[]): Promise<readonly ViewThumbnailStatus[]> {
+		return (await $fetch<{ items: ViewThumbnailStatus[] }>('/api/thumbnails/request', { method: 'POST', body: { keys } })).items
+	}
+
+	/** A View's thumbnail image; `version` makes the browser ask again after a `thumbnail.changed` (the response is `no-store`). */
+	function viewThumbnailUrl(key: string, version = 0): string {
+		return `/api/views/${encodeURIComponent(key)}/thumbnail?v=${version}`
+	}
+
 	/** An app route as a root-relative URL, for frames and links that open it outside the router. */
 	function routeUrl(path: string): string {
 		return `/${path.startsWith('/') ? path.slice(1) : path}`
@@ -161,6 +180,9 @@ export function useUiuxClient() {
 		previewAssets,
 		assetUrl,
 		artifactUrl,
+		listViewThumbnails,
+		requestViewThumbnails,
+		viewThumbnailUrl,
 		routeUrl,
 	}
 }

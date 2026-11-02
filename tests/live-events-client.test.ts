@@ -241,6 +241,24 @@ describe('useLiveEvents', () => {
 		expect(locks).toBe(0)
 		expect(batches).toEqual([])
 	})
+
+	it('delivers thumbnail.changed to the thumbnail listeners only, one entry per View, and a resync to all of them (Clause 01a19b99-cf3c-7a6b-8a2b-492c36c22cc7)', () => {
+		const thumbnails: Array<{ resync: boolean; keys: readonly string[] }> = []
+		removers.push(live.onThumbnails(batch => thumbnails.push(batch)))
+		live.start()
+		openStream()
+		thumbnails.length = 0
+		current().emit('thumbnail.changed', { key: 'v1' })
+		current().emit('thumbnail.changed', { key: 'v1' })
+		current().emit('thumbnail.changed', { key: 'v2' })
+		current().emit('thumbnail.changed', {})
+		vi.advanceTimersByTime(LIVE_BATCH_MS)
+		expect(thumbnails).toEqual([{ resync: false, keys: ['v1', 'v2'] }])
+		expect(batches).toEqual([])
+		current().emit('hello', { serverInstanceId: 'a' })
+		vi.advanceTimersByTime(LIVE_BATCH_MS)
+		expect(thumbnails.at(-1)).toEqual({ resync: true, keys: [] })
+	})
 })
 
 describe('useLiveEvents liveness (Discussion #241 owner decision 3)', () => {

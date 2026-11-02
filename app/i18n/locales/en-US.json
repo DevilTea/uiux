@@ -1681,6 +1681,15 @@
       "noMatch": "No Views match these filters."
     },
     "viewCount": "No Views | {n} View | {n} Views",
+    "layout": {
+      "label": "Layout",
+      "list": "List",
+      "grid": "Grid"
+    },
+    "thumbnail": {
+      "stale": "Outdated preview",
+      "refreshing": "Updating preview"
+    },
     "reviews": {
       "ready": "{n} ready",
       "open": "{n} open"

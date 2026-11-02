@@ -25,6 +25,9 @@ import { getCurrentScope, onScopeDispose, readonly, shallowRef } from 'vue'
  */
 export type LiveState = 'idle' | 'connecting' | 'open' | 'fallback'
 
+/** The Views whose thumbnail changed, or `resync` when every one should be re-read (Clause 01a19b99-cf3c-7a6b-8a2b-492c36c22cc7). */
+export type ThumbnailBatch = Readonly<{ resync: boolean; keys: readonly string[] }>
+
 export type LiveResourceChange = Readonly<{ kind: string; key: string; revision?: string; removed: boolean }>
 
 /** `resync`: re-read everything shown; otherwise only `changes` (one entry per resource, the latest). */
@@ -47,6 +50,7 @@ const state = shallowRef<LiveState>('idle')
 const resourceListeners = new Set<(batch: LiveBatch) => void>()
 const lockListeners = new Set<() => void>()
 const accessListeners = new Set<() => void>()
+const thumbnailListeners = new Set<(batch: ThumbnailBatch) => void>()
 const restartListeners = new Set<() => void>()
 /**
  * The server instance ID last seen by this page, from any `/api/*` response (the
@@ -61,6 +65,7 @@ let pendingChanges = new Map<string, LiveResourceChange>()
 let pendingResync = false
 let pendingLocks = false
 let pendingAccess = false
+let pendingThumbnails = new Set<string>()
 let flushTimer: ReturnType<typeof setTimeout> | undefined
 let fallbackTimer: ReturnType<typeof setInterval> | undefined
 let retryTimer: ReturnType<typeof setTimeout> | undefined
@@ -99,13 +104,21 @@ function flush(): void {
 	const batch: LiveBatch = { resync: pendingResync, changes: [...pendingChanges.values()] }
 	const locks = pendingLocks || pendingResync
 	const access = pendingAccess || pendingResync
+	const thumbnails: ThumbnailBatch = { resync: batch.resync, keys: [...pendingThumbnails] }
 	pendingChanges = new Map()
+	pendingThumbnails = new Set()
 	pendingResync = false
 	pendingLocks = false
 	pendingAccess = false
 	if (batch.resync || batch.changes.length > 0) {
 		for (const listener of [...resourceListeners]) {
 			try { listener(batch) }
+			catch (error) { console.error(error) }
+		}
+	}
+	if (thumbnails.resync || thumbnails.keys.length > 0) {
+		for (const listener of [...thumbnailListeners]) {
+			try { listener(thumbnails) }
 			catch (error) { console.error(error) }
 		}
 	}
@@ -226,6 +239,13 @@ function connect(): void {
 		pendingLocks = true
 		schedule()
 	})
+	stream.addEventListener('thumbnail.changed', (event) => {
+		alive()
+		const key = parse(event as MessageEvent)?.key
+		if (typeof key !== 'string') return
+		pendingThumbnails.add(key)
+		schedule()
+	})
 	stream.addEventListener('access.changed', () => {
 		alive()
 		pendingAccess = true
@@ -268,6 +288,7 @@ function stop(): void {
 	flushTimer = undefined
 	pendingChanges = new Map()
 	pendingResync = pendingLocks = pendingAccess = false
+	pendingThumbnails = new Set()
 	state.value = 'idle'
 }
 
@@ -292,6 +313,8 @@ export function useLiveEvents() {
 		 * server restarted. Called once, at once (before the resync a `hello` also queues).
 		 */
 		onServerRestart: (listener: () => void) => subscribe(restartListeners, listener),
+		/** Views whose thumbnail changed (`thumbnail.changed`), or `resync` when every one should be re-read. */
+		onThumbnails: (listener: (batch: ThumbnailBatch) => void) => subscribe(thumbnailListeners, listener),
 		/** The roster or the member's keys changed, or a resync is due. */
 		onAccess: (listener: () => void) => subscribe(accessListeners, listener),
 	}
