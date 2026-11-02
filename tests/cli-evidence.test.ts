@@ -346,27 +346,48 @@ describe('uiux evidence capture: output and exit status', () => {
 		expect(parsed.summary).toEqual({ selected: 20, captured: 8, failed: 0, notAttempted: 12 })
 	})
 
-	it('stops after a request the server answers with 422, reporting the rest as not attempted', async () => {
+	it('stops after a request that the server refuses for every context alike, reporting the rest as not attempted', async () => {
 		const { persistence } = await makeWorkspace().then(async workspace => {
 			for (const locale of ['de-DE', 'fr-FR', 'it-IT', 'es-ES']) await workspace.persistence.locales.create(locale, {})
 			return workspace
 		})
-		const notReady = { code: 'capture.kit_build_not_ready', path: '/product-kit/build', message: 'Formal capture waits for the kit build: a build is running.' }
-		const answer: Answer = contexts => jsonResponse(422, {
+		const refuse = (code: string): Answer => contexts => jsonResponse(422, {
 			status: 'failed',
-			results: contexts.map(context => ({ context, status: 'failed', diagnostics: [notReady] })),
+			results: contexts.map(context => ({ context, status: 'failed', diagnostics: [{ code, path: '/x', message: `Refused: ${code}.` }] })),
 			summary: { total: contexts.length, captured: 0, failed: contexts.length },
 		})
-		const result = await run(['--all', '--workspace', persistence.root, '--origin', ORIGIN], { root: persistence.root, answer })
-		expect(result.status).toBe(1)
-		// 20 contexts: one request of 8 answered 422, and the other 12 are never sent.
-		expect(result.sent.map(request => request.contexts.length)).toEqual([CAPTURE_BATCH_SIZE])
-		expect(result.stdout.at(-1)).toBe('Captured 0 of 20 contexts, 8 failed, 12 not attempted.')
-		const errors = result.stderr.join('\n')
-		expect(errors).toContain('capture.kit_build_not_ready')
-		expect(errors).toContain('answered 422')
-		expect(errors).toContain('12 of 20 contexts were not attempted')
-		// A 207 (some contexts captured) does not stop the run.
+		for (const code of ['capture.kit_build_not_ready', 'i18n.missing_default_locale', 'workspace.schema_unsupported', 'workspace.manifest_missing', 'capture.browser_launch_failed']) {
+			const result = await run(['--all', '--workspace', persistence.root, '--origin', ORIGIN], { root: persistence.root, answer: refuse(code) })
+			expect(result.status, code).toBe(1)
+			// 20 contexts: one request of 8 is refused whole, and the other 12 are never sent.
+			expect(result.sent.map(request => request.contexts.length), code).toEqual([CAPTURE_BATCH_SIZE])
+			expect(result.stdout.at(-1), code).toBe('Captured 0 of 20 contexts, 8 failed, 12 not attempted.')
+			const errors = result.stderr.join('\n')
+			expect(errors, code).toContain(code)
+			expect(errors, code).toContain('refused every context of that request alike')
+			expect(errors, code).toContain('12 of 20 contexts were not attempted')
+		}
+	})
+
+	it('goes on after a 422 whose failures belong to single contexts, and after a 207', async () => {
+		const { persistence } = await makeWorkspace().then(async workspace => {
+			for (const locale of ['de-DE', 'fr-FR', 'it-IT', 'es-ES']) await workspace.persistence.locales.create(locale, {})
+			return workspace
+		})
+		// Every context of every request fails on its own (a View that cannot render): a 422, but not a refusal for all alike.
+		const every = await run(['--all', '--workspace', persistence.root, '--origin', ORIGIN], { root: persistence.root, answer: captureAnswer(() => true) })
+		expect(every.sent.map(request => request.contexts.length)).toEqual([CAPTURE_BATCH_SIZE, CAPTURE_BATCH_SIZE, 20 - 2 * CAPTURE_BATCH_SIZE])
+		expect(every.status).toBe(1)
+		expect(every.stdout.at(-1)).toBe('Captured 0 of 20 contexts, 20 failed.')
+		// A request in which only some results carry a server-wide code is not a refusal for all alike.
+		const mixed: Answer = contexts => jsonResponse(422, {
+			status: 'failed',
+			results: contexts.map((context, index) => ({ context, status: 'failed', diagnostics: [{ code: index === 0 ? 'capture.kit_build_not_ready' : 'view.not_found', path: '/x', message: 'x' }] })),
+			summary: { total: contexts.length, captured: 0, failed: contexts.length },
+		})
+		const some = await run(['--all', '--workspace', persistence.root, '--origin', ORIGIN], { root: persistence.root, answer: mixed })
+		expect(some.sent).toHaveLength(3)
+		// A 207 (some contexts captured) does not stop the run either.
 		const partial = await run(['--all', '--workspace', persistence.root, '--origin', ORIGIN], { root: persistence.root, answer: captureAnswer(context => context.themeId === 'dark') })
 		expect(partial.sent).toHaveLength(3)
 		expect(partial.status).toBe(1)

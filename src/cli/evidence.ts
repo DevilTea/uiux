@@ -52,6 +52,20 @@ type ContextResult = Readonly<{
 	diagnostics?: readonly Diagnostic[]
 }>
 
+/**
+ * The diagnostic codes of a refusal that holds for every context of a request alike, which the
+ * capture service gives before it runs a browser (the Workspace schema, the kit build, the default
+ * Locale, the manifest) or when it cannot launch one. A 422 whose every result carries one of them
+ * stops the run; a 422 of per-context failures (a View that cannot render) does not.
+ */
+export const SERVER_WIDE_REFUSAL_CODES: ReadonlySet<string> = new Set([
+	'workspace.schema_unsupported',
+	'workspace.manifest_missing',
+	'capture.kit_build_not_ready',
+	'i18n.missing_default_locale',
+	'capture.browser_launch_failed',
+])
+
 /** A usage error: its message and the usage line are printed and the exit status is 2. */
 class UsageError extends Error {}
 /** A refusal or failure the command reports with exit status 1. */
@@ -280,8 +294,8 @@ async function sendBatch(fetchImpl: typeof fetch, origin: string, token: string,
 				...(Array.isArray(raw.diagnostics) && raw.diagnostics.length ? { diagnostics: raw.diagnostics as Diagnostic[] } : typeof raw.error === 'string' ? { diagnostics: [{ message: raw.error }] } : {}),
 			})
 		}
-		// 422 answers a request in which no context was captured: a refusal before any browser ran (the kit build, the default Locale or the registries) or a batch that failed whole. Either way the run stops.
-		return { ok: true, results, precondition: response.status === 422 }
+		const serverWide = response.status === 422 && results.length > 0 && results.every(result => result.diagnostics?.some(diagnostic => diagnostic.code !== undefined && SERVER_WIDE_REFUSAL_CODES.has(diagnostic.code)))
+		return { ok: true, results, precondition: serverWide }
 	}
 	if (response.status === 401) return { ok: false, message: 'the server did not accept the Token (401).' }
 	const detail = typeof record?.message === 'string' ? record.message : describeDiagnostics(Array.isArray(record?.diagnostics) ? record.diagnostics as Diagnostic[] : undefined)
@@ -326,7 +340,7 @@ async function run(options: EvidenceCommandOptions, out: (line: string) => void,
 		}
 		results.push(...batch.results)
 		if (batch.precondition) {
-			stopped = 'the server answered 422: no context of that request was captured, so the run stops.'
+			stopped = 'the server refused every context of that request alike, before capturing (a kit build that is not ready, a missing default Locale, an unsupported Workspace or no browser), so the run stops.'
 			break
 		}
 	}
