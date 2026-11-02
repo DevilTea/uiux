@@ -9,7 +9,9 @@ Feature: A failed capture keeps the previous thumbnail, now stale, and shows no 
   @spec:demonstrates:01a19bac-eaeb-777f-b498-2e1c75ec706b
   Scenario: A failed capture keeps the previous thumbnail, now stale, and shows no error
     Given a View with a fresh thumbnail, in a Workspace whose capture browser cannot be launched
-    When the View is changed and the quiet period ends
+    When the View is changed
+    When the quiet period ends
     When a member opens Overview's Views tab in the grid layout
     Then the stored thumbnail is unchanged and its state is stale
-    Then the card shows the previous image with a stale indicator and no error
+    Then the card shows the previous image with a stale indicator and no error marker
+    Then the request queues nothing for the View, so its card does not show that it is being refreshed
