@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseThread, parseViewPanel, parseViewRouteContext, sameQuery, viewLocation, viewQuery } from '../app/utils/workbench-routes'
+import { parseThread, parseViewPanel, parseViewRouteContext, sameQuery, viewLocation, viewQuery, VIEWS_LOCATION } from '../app/utils/workbench-routes'
 import { memberInitials } from '../app/utils/member-initials'
 
 describe('Workbench deep-link contract', () => {
@@ -17,6 +17,12 @@ describe('Workbench deep-link contract', () => {
 		expect(parseViewPanel(query)).toBe('readiness')
 		expect(parseViewPanel({ panel: 'nonsense' })).toBeUndefined()
 		expect(parseViewRouteContext({ locale: ['en-US', 'zh-TW'] }).locale).toBe('en-US')
+	})
+
+	// Clause 01a116f0-96ef-700e-8dc6-e6ffbe41d15d: `views` is the default Overview tab and is written as no `tab` at all.
+	it('writes the Views tab address with no tab query', () => {
+		expect(VIEWS_LOCATION).toEqual({ path: '/' })
+		expect(VIEWS_LOCATION).not.toHaveProperty('query')
 	})
 
 	it('compares queries without order or empty values', () => {
