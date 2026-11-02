@@ -110,9 +110,16 @@ export interface PreviewRuntimeBridge {
 	 * the base-state values of a Widget, read from a separate Runtime that is built from the mounted View
 	 * with no Variant and the render context this Preview has applied, never mounted and disposed after
 	 * the read. `undefined` when the request is not for the View and Variant this Preview has mounted,
-	 * or nothing is mounted: the caller drops it.
+	 * or nothing is mounted: the caller drops it, or holds it while nothing is mounted
+	 * (`hasMountedRuntime`, `BaseStateRequestHold`).
 	 */
 	answerBaseStateRequest?(request: BaseStateRequestMessage): BaseStateResponseMessage | undefined
+	/**
+	 * Whether a Runtime is mounted now (Clause 01a19a9b-386b-7598-a0b9-6865cb9fd6e0): false while the
+	 * construction links the Product Kit stylesheet, after it failed or was disposed, and while an
+	 * update that could not build a replacement has left none. A request received then is held.
+	 */
+	hasMountedRuntime?(): boolean
 	dispose(): void
 }
 
@@ -142,6 +149,13 @@ export interface PreviewRuntimeMountOptions {
 	 * passive: no Property is evaluated for it and `t` is never invoked. Without it nothing is observed.
 	 */
 	onChecksObservation?: (observation: ChecksObservation) => void
+	/**
+	 * Called each time a Runtime has been mounted and is the applied one: after the first render, and
+	 * after an update replaced the Runtime. The base-state request held while nothing was mounted is
+	 * answered from it (Clause 01a19a9b-386b-7598-a0b9-6865cb9fd6e0). A construction that renders at
+	 * once calls it before `mountPreviewRuntime` returns.
+	 */
+	onRuntimeMounted?: () => void
 	/**
 	 * The Product Kit stylesheet's URL. The construction links it first, at the end of the document's
 	 * head, and renders only once it has loaded; a load error fails the construction (Rules
@@ -749,6 +763,21 @@ export function createStandalonePreviewMount(input: Readonly<{
 			options.onStatusChange?.({ status: 'invalid', diagnostics: [diagnostic] })
 		}
 
+		/**
+		 * The render context the live controller has applied (`currentContext` may be one it has not
+		 * applied), or `undefined` while nothing is mounted: linking, failed, disposed, or a controller
+		 * disposed by an update that could not build its replacement.
+		 */
+		function appliedContext(): ResolvedRenderContext | undefined {
+			if (disposed || phase !== 'mounted') return undefined
+			try {
+				return activeController.context
+			}
+			catch {
+				return undefined
+			}
+		}
+
 		function firstRender(): void {
 			const failure = installProviders()
 			if (failure) {
@@ -765,6 +794,7 @@ export function createStandalonePreviewMount(input: Readonly<{
 			})
 			eventObserver.attach(activeRuntime.value)
 			checksObserver?.attach(activeRuntime.value)
+			options.onRuntimeMounted?.()
 		}
 
 		// The Product Kit stylesheet is linked first, after UIUX's own stylesheets in the head, and the
@@ -840,6 +870,7 @@ export function createStandalonePreviewMount(input: Readonly<{
 					status: 'ready',
 					supportedTypes: Object.freeze([...supportedTypes]),
 				})
+				if (phase === 'mounted') options.onRuntimeMounted?.()
 			},
 
 			updateContext(nextContext: ResolvedRenderContext) {
@@ -910,6 +941,7 @@ export function createStandalonePreviewMount(input: Readonly<{
 					activeController = nextController
 					mountedSource = { view: currentView, revision: currentViewRevision, assets: currentAssets }
 					showRuntime(activeController.runtime)
+					if (phase === 'mounted') options.onRuntimeMounted?.()
 				}
 			},
 
@@ -934,17 +966,14 @@ export function createStandalonePreviewMount(input: Readonly<{
 				})
 			},
 
+			hasMountedRuntime(): boolean {
+				return appliedContext() !== undefined
+			},
+
 			answerBaseStateRequest(request: BaseStateRequestMessage): BaseStateResponseMessage | undefined {
-				if (disposed || phase !== 'mounted' || mountedSource.revision === undefined) return undefined
-				let context: ResolvedRenderContext
-				try {
-					// What the live controller has applied; `currentContext` may be a context it has not applied.
-					context = activeController.context
-				}
-				catch {
-					// A controller disposed by an update that could not build its replacement: nothing is mounted.
-					return undefined
-				}
+				if (mountedSource.revision === undefined) return undefined
+				const context = appliedContext()
+				if (!context) return undefined
 				return answerBaseState(request, {
 					view: mountedSource.view,
 					adapters: bundle,

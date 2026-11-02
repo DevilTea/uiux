@@ -32,7 +32,8 @@ import type { ChecksObservation } from '../../src/preview/checks-observer'
 import { buildChecksReportBody, ChecksReportPublisher, MaxWaitDebouncer } from '../../src/preview/checks-report-builder'
 import type { WidgetEventArmMessage } from '../../src/preview/protocol/widget-events'
 import type { BaseStateRequestMessage } from '../../src/preview/protocol/base-state'
-import { sendBaseStateAnswer } from '../../src/preview/base-state'
+import { BaseStateRequestHold, sendBaseStateAnswer } from '../../src/preview/base-state'
+import type { BaseStateResponseMessage } from '../../src/preview/protocol/base-state'
 import { diagnostics } from '../../src/logging/diagnostics'
 import type { WidgetEventReport } from '../../src/preview/widget-event-observer'
 import type {
@@ -263,12 +264,24 @@ function receiveWidgetEventArm(message: WidgetEventArmMessage) {
 /**
  * Answers one `inspection.base-state.request` (issue #52; Clause 01a19a9b-386b-7598-a0b9-6865cb9fd6e0)
  * from the mounted Runtime, which drops a request for another View or Variant than the one it has
- * mounted. The answer is a message only: a base Runtime built for it is never mounted, and nothing
- * is ever reported as a failure for a value that cannot be read.
+ * mounted. While nothing is mounted (the stylesheet is linking, or a Runtime was disposed and its
+ * replacement is not mounted yet) the single latest request is held and answered once a mount
+ * completes, and discarded when this generation ends. The answer is a message only: a base Runtime
+ * built for it is never mounted, and nothing is ever reported as a failure for a value that cannot
+ * be read.
  */
+const baseStateHold = new BaseStateRequestHold(() => runtimeBridge?.ended === true)
 function receiveBaseStateRequest(message: BaseStateRequestMessage) {
 	if (harnessMode.value || versionId) return
-	const response = activeBridge?.answerBaseStateRequest?.(message)
+	sendBaseState(baseStateHold.receive(message, activeBridge))
+}
+
+/** A Runtime has been mounted: the request held until now is answered, once, from the Runtime that is mounted. */
+function settleHeldBaseState() {
+	sendBaseState(baseStateHold.settle(activeBridge))
+}
+
+function sendBaseState(response: BaseStateResponseMessage | undefined) {
 	const bridge = runtimeBridge
 	if (!response || !bridge) return
 	// A response the bridge refuses as invalid is answered with every key Unavailable instead.
@@ -672,7 +685,11 @@ async function evaluateRuntimeOnce() {
 			},
 			onWidgetEvent: reportWidgetEvent,
 			...(checksReportsEnabled ? { onChecksObservation: handleChecksObservation } : {}),
+			// A construction that renders at once mounts before `activeBridge` is assigned, so the
+			// settle below covers it; this one covers a mount that completes later.
+			onRuntimeMounted: settleHeldBaseState,
 		})
+		settleHeldBaseState()
 		bumpChecksContext()
 		// An arm that arrived before the bundle mounted applies now, unless it already reported.
 		if (widgetEventArm && !widgetEventArm.spent) activeBridge.armWidgetEvents?.(widgetEventArm.armId, widgetEventArm.triggers)
@@ -905,6 +922,7 @@ onUnmounted(() => {
 	window.removeEventListener('wheel', absorbCanvasZoomWheel)
 	geometrySignals?.dispose()
 	geometryProducer?.dispose()
+	baseStateHold.end()
 	stopBlockedRecheck()
 	checksDebouncer.cancel()
 	disposeCurrentRuntime()

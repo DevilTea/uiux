@@ -462,6 +462,11 @@ export class RuntimePreviewProtocolBridge {
 		this.transport = transport
 	}
 
+	/** Whether the generation has ended: it sent its generation-scoped `failure.report`, and nothing crosses after it. */
+	get ended(): boolean {
+		return this.generationEnded
+	}
+
 	declareCapabilities(): CapabilityDeclareMessage {
 		const message: CapabilityDeclareMessage = Object.freeze({
 			type: 'capability.declare',
