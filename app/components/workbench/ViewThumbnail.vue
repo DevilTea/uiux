@@ -58,7 +58,7 @@ const initial = computed(() => [...props.name.trim()][0]?.toUpperCase() ?? '·')
     >{{ initial }}</span>
     <span
       v-if="stale || refreshing"
-      class="absolute inset-s-1 top-1 flex gap-1"
+      class="absolute inset-s-1 top-1 flex max-w-[calc(100%-0.5rem)] flex-wrap gap-1"
     >
       <template v-if="size === 'card'">
         <KitBadge
