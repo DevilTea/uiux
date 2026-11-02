@@ -61,6 +61,24 @@ Commands:
                            project's uiux-components.json (the project defaults to the
                            current directory's); --check exits 1 when any file is not
                            unchanged
+  evidence capture (--all | --view <id>...) [--variant <name>...] [--locale <tag>...]
+                           [--viewport <id>...] [--theme <id>...] [--workspace <dir>]
+                           [--origin <url>] [--token-file <path|->] [--json]
+                           Capture formal Evidence through a running uiux dev server,
+                           as the member whose Token it reads from --token-file (- is
+                           standard input) or the UIUX_TOKEN environment variable
+                           (never from an option; the member needs evidence.capture).
+                           --all captures every View in every Locale, viewport preset
+                           and theme at its base context; --view captures the named
+                           Views, in the Workspace default Locale, viewport and theme
+                           unless --locale, --viewport or --theme (each repeatable)
+                           name others, and --variant adds the named Variants. The
+                           server is --origin, else the loopback origin of the uiux dev
+                           server running on this host for the Workspace. Prints one
+                           tab-separated line per context (captured|failed, View id,
+                           Variant or -, Locale, viewport, theme, evidence digest) and a
+                           count; --json prints the result as one JSON object. Exits 1
+                           when any context fails or the server refuses or is not found
   artifacts gc [--workspace <dir>] [--dry-run]
                            Delete the blobs of the Workspace's derived-artifact store
                            (artifacts/) that nothing still needs: what a Review
@@ -147,7 +165,7 @@ function parseDevArguments(args) {
 }
 
 /**
- * Initialization, components, artifact cleanup and access administration reuse the TypeScript modules shipped in `src/`. They are
+ * Initialization, components, Evidence capture, artifact cleanup and access administration reuse the TypeScript modules shipped in `src/`. They are
  * bundled on demand with the packaged esbuild dependency into a private temporary module, so the
  * CLI applies exactly the policy the server enforces.
  */
@@ -291,6 +309,14 @@ if (extraArgs.length === 0 && (command === undefined || command === '--help' || 
 	}
 	catch (error) {
 		console.error('uiux: components failed: ' + (error instanceof Error ? error.message : String(error)))
+		process.exitCode = 1
+	}
+} else if (command === 'evidence') {
+	try {
+		await runBundled('src/cli/evidence.ts', ({ runEvidenceCommand }) => runEvidenceCommand({ argv: extraArgs, cwd: process.cwd() }))
+	}
+	catch (error) {
+		console.error('uiux: evidence failed: ' + (error instanceof Error ? error.message : String(error)))
 		process.exitCode = 1
 	}
 } else if (command === 'artifacts') {
