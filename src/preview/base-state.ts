@@ -151,3 +151,73 @@ export function answerBaseStateRequest(
 		readings,
 	})
 }
+
+/** What a held request is answered by: the Preview runtime bridge, or whatever stands in for it. */
+export type BaseStateAnswerer = Readonly<{
+	/** Whether a Runtime is mounted now: not while linking, nor between a disposal and its replacement's mount. */
+	hasMountedRuntime?(): boolean
+	answerBaseStateRequest?(request: BaseStateRequestMessage): BaseStateResponseMessage | undefined
+}>
+
+/**
+ * The single `inspection.base-state.request` of a generation that arrived while nothing was mounted
+ * (Clause 01a19a9b-386b-7598-a0b9-6865cb9fd6e0). The Runtime that mounts the View is built after the
+ * capability ACK and again for every View, Locale or Adapter change, so a request can arrive in a
+ * window where no Runtime is mounted. It is held here rather than dropped: a newer one replaces it, a
+ * mount that completes answers it once (or drops it by the rule `answerBaseStateRequest` applies to
+ * any request), and the end of the generation discards it. The holder belongs to the generation, not
+ * to a mounted runtime: a runtime disposed before it mounts takes nothing with it.
+ */
+export class BaseStateRequestHold {
+	private held: BaseStateRequestMessage | undefined
+	private ended = false
+
+	/**
+	 * @param generationEnded Whether the generation has ended (it sent its last envelope), asked
+	 * whenever a request is received or a mount settles.
+	 */
+	constructor(private readonly generationEnded: () => boolean = () => false) {}
+
+	/**
+	 * One accepted request: answered now when a Runtime is mounted (`undefined` when it is dropped),
+	 * otherwise held in place of any earlier held request, and `undefined`.
+	 */
+	receive(request: BaseStateRequestMessage, runtime: BaseStateAnswerer | undefined): BaseStateResponseMessage | undefined {
+		if (this.isEnded()) return undefined
+		if (runtime?.hasMountedRuntime?.() === true) {
+			// This request is the latest: an older held one is not answered after it.
+			this.held = undefined
+			return runtime.answerBaseStateRequest?.(request)
+		}
+		this.held = request
+		return undefined
+	}
+
+	/**
+	 * A mount completed: answers the held request, if any, exactly once. It stays held when no Runtime
+	 * is mounted after all.
+	 */
+	settle(runtime: BaseStateAnswerer | undefined): BaseStateResponseMessage | undefined {
+		if (this.isEnded()) return undefined
+		const request = this.held
+		if (!request || runtime?.hasMountedRuntime?.() !== true) return undefined
+		this.held = undefined
+		return runtime.answerBaseStateRequest?.(request)
+	}
+
+	/** Whether a request is held. */
+	get pending(): boolean {
+		return this.held !== undefined
+	}
+
+	/** The generation ended: the held request is discarded, and nothing is held or answered after it. */
+	end(): void {
+		this.ended = true
+		this.held = undefined
+	}
+
+	private isEnded(): boolean {
+		if (!this.ended && this.generationEnded()) this.end()
+		return this.ended
+	}
+}

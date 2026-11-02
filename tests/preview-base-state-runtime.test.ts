@@ -2,17 +2,19 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { createServer, type Server, type ServerResponse } from 'node:http'
 import { Window } from 'happy-dom'
 import { createWidgetPlugin, createWidgetSystem, type WidgetSystemRuntime } from '@deviltea/widget-core'
 import { inspectRuntime } from '@deviltea/widget-core/inspection'
 
 import type { PreviewRuntimeBridge, PreviewRuntimeMountOptions } from '../src/preview/browser-runtime'
-import { answerBaseStateRequest, readBaseState, sendBaseStateAnswer, type BaseStateMounted } from '../src/preview/base-state'
+import { answerBaseStateRequest, BaseStateRequestHold, readBaseState, sendBaseStateAnswer, type BaseStateMounted } from '../src/preview/base-state'
 import {
 	BASE_STATE_FEATURE,
 	MAX_BASE_STATE_RESPONSE_LENGTH,
 	validateBaseStateMessage,
 	type BaseStateRequestMessage,
+	type BaseStateResponseMessage,
 } from '../src/preview/protocol/base-state'
 import { RuntimePreviewProtocolBridge, WorkbenchPreviewProtocolBridge, type PreviewWireMessage } from '../src/preview/protocol/bridge'
 import { FAILURE_REPORTS_FEATURE } from '../src/preview/protocol/failure-report'
@@ -340,8 +342,10 @@ describe('answerBaseStateRequest', () => {
 // -------------------------------------------------------------------------------------------------
 
 const temporaryRoots: string[] = []
+const heldServers: Server[] = []
 afterEach(async () => {
 	clearPreviewBundleCache()
+	for (const server of heldServers.splice(0)) server.closeAllConnections()
 	await Promise.all(temporaryRoots.splice(0).map(root => rm(root, { recursive: true, force: true })))
 })
 
@@ -405,11 +409,11 @@ type BundleModule = Readonly<{
 	mountPreviewRuntime: (container: HTMLElement, options: PreviewRuntimeMountOptions) => PreviewRuntimeBridge
 }>
 
-async function loadBundle(root: string): Promise<BundleModule> {
+async function loadBundle(root: string, url?: string): Promise<BundleModule> {
 	const resolution = await resolveSelectedWorkspaceAdapters(root)
 	if (resolution.state !== 'valid') throw new Error(JSON.stringify(resolution.diagnostics))
 	const bundle = await buildWorkspacePreviewBundle({ workspaceRoot: root, set: resolution.set })
-	const win = new Window()
+	const win = new Window(url ? { url } : undefined)
 	globalThis.window = win as unknown as typeof globalThis.window
 	globalThis.document = win.document as unknown as Document
 	globalThis.HTMLElement = win.HTMLElement as unknown as typeof HTMLElement
@@ -427,11 +431,11 @@ function renderContext(overrides: Partial<ResolvedRenderContext> = {}): Resolved
 
 const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
-function askFor(variantId: string | undefined, overrides: { viewId?: string; keys?: readonly string[] } = {}): BaseStateRequestMessage {
+function askFor(variantId: string | undefined, overrides: { viewId?: string; keys?: readonly string[]; requestId?: string } = {}): BaseStateRequestMessage {
 	return {
 		type: 'inspection.base-state.request',
 		context: { previewSessionId: 'session-a', runtimeGenerationId: 'generation-a', viewId: overrides.viewId ?? VIEW_ID, ...(variantId ? { variantId } : {}) },
-		payload: { requestId: 'request-1', widgetId: 'stateful-1', keys: overrides.keys ?? ['count', 'label', 'missing'] },
+		payload: { requestId: overrides.requestId ?? 'request-1', widgetId: 'stateful-1', keys: overrides.keys ?? ['count', 'label', 'missing'] },
 	}
 }
 
@@ -520,6 +524,234 @@ describe('mounted Preview runtime: base state', () => {
 		const answer = bridge.answerBaseStateRequest!({ ...askFor(undefined), payload: { requestId: 'r', widgetId: 'ghost', keys: ['count'] } })!
 		expect(answer.payload.values).toEqual({ count: { unavailable: true } })
 		expect(validateBaseStateMessage(answer).ok).toBe(true)
+		bridge.dispose()
+	})
+})
+
+// -------------------------------------------------------------------------------------------------
+// A request that arrives while nothing is mounted is held, then answered or dropped at mount
+// (Clause 01a19a9b-386b-7598-a0b9-6865cb9fd6e0)
+// -------------------------------------------------------------------------------------------------
+
+/** A Product Kit stylesheet whose responses wait for the test: the construction stays `linking` until `release`. */
+async function heldStylesheet() {
+	const pending: ServerResponse[] = []
+	const server = createServer((_request, response) => { pending.push(response) })
+	heldServers.push(server)
+	await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+	const address = server.address()
+	if (!address || typeof address === 'string') throw new Error('no port')
+	const origin = `http://127.0.0.1:${address.port}`
+	return {
+		origin,
+		href: `${origin}/kit.css`,
+		async release() {
+			await until(() => pending.length > 0, 'the stylesheet to be requested')
+			for (const response of pending.splice(0)) {
+				response.writeHead(200, { 'content-type': 'text/css' })
+				response.end('/* kit */')
+			}
+		},
+	}
+}
+
+async function until(condition: () => boolean, label: string): Promise<void> {
+	const deadline = Date.now() + 5_000
+	while (!condition()) {
+		if (Date.now() > deadline) throw new Error(`Timed out waiting for ${label}.`)
+		await wait(5)
+	}
+}
+
+/** Mounts as `app/pages/preview.vue` does: the settle runs when a mount completes, and once more right after `mount` returns. */
+function mountLikePreview(bundle: BundleModule, hold: BaseStateRequestHold, answers: unknown[], options: PreviewRuntimeMountOptions): PreviewRuntimeBridge {
+	// Like `activeBridge`: unassigned until `mountPreviewRuntime` returns, which a construction that renders at once outlasts.
+	const active: { bridge?: PreviewRuntimeBridge } = {}
+	const settle = () => {
+		const response = hold.settle(active.bridge)
+		if (response) answers.push(response)
+	}
+	const container = document.createElement('div')
+	document.body.appendChild(container)
+	active.bridge = bundle.mountPreviewRuntime(container, { ...options, onRuntimeMounted: settle })
+	settle()
+	return active.bridge
+}
+
+const answeredRequestIds = (answers: unknown[]) => answers.map(answer => (answer as { payload: { requestId: string } }).payload.requestId)
+
+/** An open Workbench and Runtime protocol pair of one generation that declared `inspection.base-state`. */
+function openWire() {
+	const workbenchOutbound: PreviewWireMessage[] = []
+	const runtimeOutbound: PreviewWireMessage[] = []
+	const workbench = new WorkbenchPreviewProtocolBridge('session-a', { send: message => workbenchOutbound.push(message) }, () => ({ ok: true }))
+	const runtime = new RuntimePreviewProtocolBridge('session-a', 'generation-a', { protocolVersion: 1, features: ['geometry', FAILURE_REPORTS_FEATURE, BASE_STATE_FEATURE] }, { send: message => runtimeOutbound.push(message) })
+	workbench.receive(runtime.declareCapabilities())
+	runtime.receive(workbenchOutbound[0])
+	/** The request as the runtime accepts it from the Workbench. */
+	const received = (request: BaseStateRequestMessage): BaseStateRequestMessage => {
+		expect(workbench.sendBaseStateRequest(request)).toEqual({ status: 'sent' })
+		const result = runtime.receive(workbenchOutbound.at(-1))
+		if (result.status !== 'accepted' || result.message.type !== 'inspection.base-state.request') throw new Error('request not accepted')
+		return result.message
+	}
+	return { workbench, runtime, runtimeOutbound, received }
+}
+
+describe('a base-state request received while nothing is mounted', () => {
+	it('is held while the construction links its stylesheet and answered once it has mounted, with the render context the Runtime has applied', async () => {
+		const stylesheet = await heldStylesheet()
+		const bundle = await loadBundle(await statefulWorkspace(), `${stylesheet.origin}/preview`)
+		const hold = new BaseStateRequestHold()
+		const answers: unknown[] = []
+		const bridge = mountLikePreview(bundle, hold, answers, { view: statefulView(), viewRevision: 'revision-1', context: renderContext({ variantName: 'Many' }), stylesheetHref: stylesheet.href })
+		expect(bridge.hasMountedRuntime!()).toBe(false)
+		expect(hold.receive(askFor('Many', { requestId: 'early' }), bridge)).toBeUndefined()
+		expect(hold.pending).toBe(true)
+		bridge.updateContext(renderContext({ variantName: 'Many', locale: 'zh-TW' }))
+		expect(answers).toEqual([])
+
+		await stylesheet.release()
+		await until(() => answers.length > 0, 'the held request to be answered')
+		expect(answers).toEqual([expect.objectContaining({
+			type: 'inspection.base-state.response',
+			payload: expect.objectContaining({
+				requestId: 'early',
+				values: { count: { value: 0 }, label: { value: 'base' }, missing: { unavailable: true } },
+				renderContext: { viewRevision: 'revision-1', locale: 'zh-TW', viewportId: 'desktop', viewport: { width: 1280, height: 800 }, themeId: 'light' },
+			}),
+		})])
+		expect(bridge.hasMountedRuntime!()).toBe(true)
+		// At most once: a later mount of the same construction answers nothing more.
+		expect(hold.pending).toBe(false)
+		bridge.updateView(statefulView(), undefined, 'revision-2')
+		await wait(20)
+		expect(answers).toHaveLength(1)
+		bridge.dispose()
+	})
+
+	it('is held in the remount window after a Runtime was disposed, and answered by the Runtime that mounts next', async () => {
+		const bundle = await loadBundle(await statefulWorkspace())
+		const hold = new BaseStateRequestHold()
+		const answers: unknown[] = []
+		const first = mountLikePreview(bundle, hold, answers, { view: statefulView(), viewRevision: 'revision-1', context: renderContext({ variantName: 'Many' }) })
+		expect(hold.receive(askFor('Many', { requestId: 'mounted' }), first)).toBeDefined()
+		first.dispose()
+		expect(first.hasMountedRuntime!()).toBe(false)
+		// Nothing is mounted now: the disposed Runtime and no Runtime at all hold alike.
+		expect(hold.receive(askFor('Many', { requestId: 'remount' }), first)).toBeUndefined()
+		expect(hold.receive(askFor('Many', { requestId: 'remount-2' }), undefined)).toBeUndefined()
+		expect(answers).toEqual([])
+
+		const second = mountLikePreview(bundle, hold, answers, { view: statefulView(), viewRevision: 'revision-2', context: renderContext({ variantName: 'Many', locale: 'zh-TW', themeId: 'dark' }) })
+		expect(answeredRequestIds(answers)).toEqual(['remount-2'])
+		expect(answers[0]).toMatchObject({ payload: { renderContext: { viewRevision: 'revision-2', locale: 'zh-TW', themeId: 'dark' } } })
+		second.dispose()
+	})
+
+	it('is held while an update that could not build its replacement has left no Runtime, and answered when the next update mounts', async () => {
+		const bundle = await loadBundle(await statefulWorkspace())
+		const hold = new BaseStateRequestHold()
+		const answers: unknown[] = []
+		const bridge = mountLikePreview(bundle, hold, answers, { view: statefulView(), viewRevision: 'revision-1', context: renderContext() })
+		// Two Widgets with one id are not a View that can be built.
+		bridge.updateView(statefulView([{ id: 'stateful-1', type: 'Stateful' }, { id: 'stateful-1', type: 'Stateful' }]), undefined, 'revision-2')
+		expect(bridge.hasMountedRuntime!()).toBe(false)
+		expect(hold.receive(askFor(undefined, { requestId: 'between' }), bridge)).toBeUndefined()
+		expect(answers).toEqual([])
+		bridge.updateView(statefulView(), undefined, 'revision-3')
+		expect(answeredRequestIds(answers)).toEqual(['between'])
+		expect(answers[0]).toMatchObject({ payload: { renderContext: { viewRevision: 'revision-3' } } })
+		bridge.dispose()
+	})
+
+	it('holds only the latest: a newer request replaces the held one, and only the newer is answered', async () => {
+		const stylesheet = await heldStylesheet()
+		const bundle = await loadBundle(await statefulWorkspace(), `${stylesheet.origin}/preview`)
+		const hold = new BaseStateRequestHold()
+		const answers: unknown[] = []
+		const bridge = mountLikePreview(bundle, hold, answers, { view: statefulView(), viewRevision: 'revision-1', context: renderContext(), stylesheetHref: stylesheet.href })
+		hold.receive(askFor(undefined, { requestId: 'older', keys: ['count'] }), bridge)
+		hold.receive(askFor(undefined, { requestId: 'newer', keys: ['label'] }), bridge)
+		await stylesheet.release()
+		await until(() => answers.length > 0, 'the held request to be answered')
+		await wait(20)
+		expect(answeredRequestIds(answers)).toEqual(['newer'])
+		expect(answers[0]).toMatchObject({ payload: { values: { label: { value: 'base' } } } })
+		bridge.dispose()
+	})
+
+	it('is dropped at mount, as any request is, when it is for another View or Variant than the one mounted, and is not held for a later mount', async () => {
+		const stylesheet = await heldStylesheet()
+		const bundle = await loadBundle(await statefulWorkspace(), `${stylesheet.origin}/preview`)
+		for (const request of [askFor('Broken', { requestId: 'other-variant' }), askFor(undefined, { requestId: 'no-variant' }), askFor('Many', { requestId: 'other-view', viewId: OTHER_VIEW_ID })]) {
+			const hold = new BaseStateRequestHold()
+			const answers: unknown[] = []
+			const bridge = mountLikePreview(bundle, hold, answers, { view: statefulView(), viewRevision: 'revision-1', context: renderContext({ variantName: 'Many' }), stylesheetHref: stylesheet.href })
+			hold.receive(request, bridge)
+			expect(hold.pending).toBe(true)
+			await stylesheet.release()
+			await until(() => bridge.hasMountedRuntime!(), 'the construction to mount')
+			expect(answers).toEqual([])
+			expect(hold.pending).toBe(false)
+			// A later mount answers nothing for it either.
+			bridge.updateView(statefulView(), undefined, 'revision-2')
+			expect(answers).toEqual([])
+			bridge.dispose()
+		}
+	})
+
+	it('is discarded when the generation ends: nothing is answered at mount, and nothing is held after', async () => {
+		const stylesheet = await heldStylesheet()
+		const bundle = await loadBundle(await statefulWorkspace(), `${stylesheet.origin}/preview`)
+
+		// The document going away ends the generation.
+		const unmounted = new BaseStateRequestHold()
+		const unmountedAnswers: unknown[] = []
+		const first = mountLikePreview(bundle, unmounted, unmountedAnswers, { view: statefulView(), viewRevision: 'revision-1', context: renderContext(), stylesheetHref: stylesheet.href })
+		unmounted.receive(askFor(undefined, { requestId: 'before-end' }), first)
+		unmounted.end()
+		expect(unmounted.pending).toBe(false)
+		expect(unmounted.receive(askFor(undefined, { requestId: 'after-end' }), first)).toBeUndefined()
+		expect(unmounted.pending).toBe(false)
+		await stylesheet.release()
+		await until(() => first.hasMountedRuntime!(), 'the construction to mount')
+		expect(unmountedAnswers).toEqual([])
+		first.dispose()
+
+		// A generation that sent its generation-scoped failure.report has ended too.
+		const { runtime, runtimeOutbound, received } = openWire()
+		const ended = new BaseStateRequestHold(() => runtime.ended)
+		const endedAnswers: unknown[] = []
+		const second = mountLikePreview(bundle, ended, endedAnswers, { view: statefulView(), viewRevision: 'revision-1', context: renderContext(), stylesheetHref: stylesheet.href })
+		ended.receive(received(askFor(undefined, { requestId: 'live' })), second)
+		expect(ended.pending).toBe(true)
+		expect(runtime.ended).toBe(false)
+		expect(runtime.reportRuntimeUnavailable('geometry producer failed')).toEqual({ status: 'sent' })
+		expect(runtime.ended).toBe(true)
+		await stylesheet.release()
+		await until(() => second.hasMountedRuntime!(), 'the construction to mount')
+		expect(endedAnswers).toEqual([])
+		expect(ended.pending).toBe(false)
+		// The bridge no longer admits traffic of an ended generation; a request that got through is not held either.
+		expect(ended.receive(askFor(undefined, { requestId: 'late' }), second)).toBeUndefined()
+		expect(ended.pending).toBe(false)
+		expect(runtimeOutbound.some(message => message.type === 'inspection.base-state.response')).toBe(false)
+		second.dispose()
+	})
+
+	it('is answered over the wire after mount while its generation is open', async () => {
+		const stylesheet = await heldStylesheet()
+		const bundle = await loadBundle(await statefulWorkspace(), `${stylesheet.origin}/preview`)
+		const { workbench, runtime, runtimeOutbound, received } = openWire()
+		const hold = new BaseStateRequestHold(() => runtime.ended)
+		const answers: BaseStateResponseMessage[] = []
+		const bridge = mountLikePreview(bundle, hold, answers, { view: statefulView(), viewRevision: 'revision-1', context: renderContext(), stylesheetHref: stylesheet.href })
+		expect(hold.receive(received(askFor(undefined, { requestId: 'wire', keys: ['count'] })), bridge)).toBeUndefined()
+		await stylesheet.release()
+		await until(() => answers.length > 0, 'the held request to be answered')
+		sendBaseStateAnswer(answers[0]!, answer => runtime.sendBaseStateResponse(answer), () => { throw new Error('unsendable') })
+		expect(workbench.receive(runtimeOutbound.at(-1))).toMatchObject({ status: 'accepted', message: { type: 'inspection.base-state.response', payload: { requestId: 'wire', values: { count: { value: 0 } } } } })
 		bridge.dispose()
 	})
 })
