@@ -34,6 +34,8 @@ import { evaluateTranslationProperties, type TranslationEvaluation } from './tra
 import { describeWidgetCatalogEntry, type DescribedWidgetCatalog } from './widget-catalog'
 import { WidgetEventObserver, type WidgetEventReport } from './widget-event-observer'
 import { InteractionProbe } from './interaction-probe'
+import { answerBaseStateRequest as answerBaseState } from './base-state'
+import type { BaseStateRequestMessage, BaseStateResponseMessage } from './protocol/base-state'
 import type { WidgetEventTrigger } from './protocol/widget-events'
 
 export type StandaloneAdapterDescriptor = Readonly<{
@@ -72,8 +74,11 @@ export type PreviewRuntimeStatus =
 	}>
 
 export interface PreviewRuntimeBridge {
-	/** A new View; `assets`, when given, replaces the resolution of the Assets it binds. */
-	updateView(view: ViewResource, assets?: AssetResolutionTable): void
+	/**
+	 * A new View; `assets`, when given, replaces the resolution of the Assets it binds, and
+	 * `viewRevision` is the revision of the View read (absent: unknown, so no base state is answered).
+	 */
+	updateView(view: ViewResource, assets?: AssetResolutionTable, viewRevision?: string): void
 	updateContext(context: ResolvedRenderContext): void
 	updateLocales?(locales: ReadonlyMap<string, I18nResource> | Record<string, I18nResource>): void
 	/**
@@ -100,11 +105,25 @@ export interface PreviewRuntimeBridge {
 	 * It throws while the Runtime is not mounted. Only the formal capture harness calls it.
 	 */
 	interactionProbe?(): InteractionProbe
+	/**
+	 * Answers one `inspection.base-state.request` (issue #52; Clause 01a19a9b-386b-7598-a0b9-6865cb9fd6e0):
+	 * the base-state values of a Widget, read from a separate Runtime that is built from the mounted View
+	 * with no Variant and the render context this Preview has applied, never mounted and disposed after
+	 * the read. `undefined` when the request is not for the View and Variant this Preview has mounted,
+	 * or nothing is mounted: the caller drops it.
+	 */
+	answerBaseStateRequest?(request: BaseStateRequestMessage): BaseStateResponseMessage | undefined
 	dispose(): void
 }
 
 export interface PreviewRuntimeMountOptions {
 	view: ViewResource
+	/**
+	 * The revision of the View read that `view` is, echoed in the `renderContext` of an
+	 * `inspection.base-state.response` (Clause 01a19ab9-cc7c-749c-98fc-ebf18dd27743). Without it no
+	 * base state is answered.
+	 */
+	viewRevision?: string
 	context: ResolvedRenderContext
 	onStatusChange?: (status: PreviewRuntimeStatus) => void
 	locales?: ReadonlyMap<string, I18nResource> | Record<string, I18nResource>
@@ -553,6 +572,7 @@ export function createStandalonePreviewMount(input: Readonly<{
 
 		const supportedTypes = new Set(bundle.pluginsByType.keys())
 		let currentView = options.view
+		let currentViewRevision = options.viewRevision
 		let currentContext = options.context
 		let currentAssets: AssetResolutionTable = options.assets ?? {}
 
@@ -593,6 +613,12 @@ export function createStandalonePreviewMount(input: Readonly<{
 		}
 
 		let activeController: LiveViewRuntimeController = controllerResult
+		/**
+		 * What the active controller was built from: the View, its revision and its Assets. Unlike
+		 * `currentView` it moves only when a Runtime was built, so a View an update refused never reads
+		 * as mounted.
+		 */
+		let mountedSource = { view: currentView, revision: currentViewRevision, assets: currentAssets }
 		let probe: InteractionProbe | undefined
 		const activeRuntime = shallowRef(activeController.runtime)
 		let disposed = false
@@ -767,10 +793,11 @@ export function createStandalonePreviewMount(input: Readonly<{
 		}
 
 		return {
-			updateView(newView: ViewResource, assets?: AssetResolutionTable) {
+			updateView(newView: ViewResource, assets?: AssetResolutionTable, viewRevision?: string) {
 				if (disposed || phase === 'failed') return
 				if (newView.id !== currentView.id) eventObserver.clearArm()
 				currentView = newView
+				currentViewRevision = viewRevision
 				if (assets) currentAssets = assets
 				const nextUnsupported = checkViewSupport(currentView)
 				if (nextUnsupported.length > 0) {
@@ -807,6 +834,7 @@ export function createStandalonePreviewMount(input: Readonly<{
 				}
 
 				activeController = nextController
+				mountedSource = { view: currentView, revision: currentViewRevision, assets: currentAssets }
 				showRuntime(activeController.runtime)
 				reportStatus({
 					status: 'ready',
@@ -880,6 +908,7 @@ export function createStandalonePreviewMount(input: Readonly<{
 				})
 				if (nextController instanceof LiveViewRuntimeController) {
 					activeController = nextController
+					mountedSource = { view: currentView, revision: currentViewRevision, assets: currentAssets }
 					showRuntime(activeController.runtime)
 				}
 			},
@@ -902,6 +931,26 @@ export function createStandalonePreviewMount(input: Readonly<{
 					runtime: activeController.runtime,
 					catalogByType: bundle.catalogByType,
 					variantName: activeController.context.variantName,
+				})
+			},
+
+			answerBaseStateRequest(request: BaseStateRequestMessage): BaseStateResponseMessage | undefined {
+				if (disposed || phase !== 'mounted' || mountedSource.revision === undefined) return undefined
+				let context: ResolvedRenderContext
+				try {
+					// What the live controller has applied; `currentContext` may be a context it has not applied.
+					context = activeController.context
+				}
+				catch {
+					// A controller disposed by an update that could not build its replacement: nothing is mounted.
+					return undefined
+				}
+				return answerBaseState(request, {
+					view: mountedSource.view,
+					adapters: bundle,
+					assets: mountedSource.assets,
+					context,
+					viewRevision: mountedSource.revision,
 				})
 			},
 

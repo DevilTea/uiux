@@ -45,6 +45,7 @@ import {
 import type { TargetingContext, TargetingRuntimeMessage } from '../../src/preview/protocol/targeting'
 import type { ChecksReportMessage } from '../../src/preview/protocol/checks-report'
 import { WIDGET_EVENTS_FEATURE } from '../../src/preview/protocol/widget-events'
+import { BASE_STATE_FEATURE, type BaseStateRequestMessage, type BaseStateResponseMessage } from '../../src/preview/protocol/base-state'
 import { WidgetEventArming } from '../../src/preview/widget-event-arming'
 import type { Point } from '../../src/preview/protocol/schema'
 import { useUiuxClient } from './useUiuxClient'
@@ -61,7 +62,12 @@ export type CanvasTool = 'select' | 'comment' | 'interact'
  * A committed comment-range target (Part 3): the hit-tested Widget and the transient click point
  * in inner content-viewport CSS px. Keyboard paths (tree, Inspector) have no point.
  */
-export type CommentTarget = Readonly<{ widgetId: string; point?: Point }>
+/** An inbound `inspection.base-state` event the session hands its subscribers (see `onBaseState`). */
+export type BaseStateInbound =
+	| Readonly<{ kind: 'response'; message: BaseStateResponseMessage }>
+	| Readonly<{ kind: 'rejected'; requestId?: string }>
+
+export type CommentTarget =Readonly<{ widgetId: string; point?: Point }>
 
 /** What the session chip shows (brief b, section 6). */
 export type SessionStatusKind = 'idle' | 'connecting' | 'live' | 'reconnecting' | 'stopped'
@@ -285,6 +291,28 @@ export function createPreviewSession(state: WorkbenchState) {
 	/** Whether the open generation declared `widget.events`; undefined until its handshake opens. */
 	const widgetEventsSupported = computed<boolean | undefined>(() =>
 		handshakePhase.value === 'open' ? runtimeFeatures.value.includes(WIDGET_EVENTS_FEATURE) : undefined)
+
+	/** Whether the open generation declared `inspection.base-state`; undefined until its handshake opens. */
+	const baseStateSupported = computed<boolean | undefined>(() =>
+		handshakePhase.value === 'open' ? runtimeFeatures.value.includes(BASE_STATE_FEATURE) : undefined)
+	/**
+	 * What the Workbench receives for `inspection.base-state` (issue #52): a response that passed the
+	 * bridge's gates for the open generation, or one rejected whole (Clause
+	 * 01a19ab9-d028-7bb9-a370-4736992852f5), which is never a protocol failure. Whether a response is
+	 * the pending one, current, and answers its request is the subscriber's.
+	 */
+	const baseStateListeners = new Set<(event: BaseStateInbound) => void>()
+	function onBaseState(listener: (event: BaseStateInbound) => void): () => void {
+		baseStateListeners.add(listener)
+		return () => { baseStateListeners.delete(listener) }
+	}
+	function emitBaseState(event: BaseStateInbound): void {
+		for (const listener of [...baseStateListeners]) listener(event)
+	}
+	/** Sends one `inspection.base-state.request` when the bridge permits it (its generation declared the feature). */
+	function sendBaseStateRequest(message: BaseStateRequestMessage) {
+		return workbenchBridge?.sendBaseStateRequest(message) ?? { status: 'gated' as const }
+	}
 
 	/** Every geometry stream of this session (Part 2, 2026-10-05 multi-target decision group). */
 	const geometryStreams = new GeometryStreamCoordinator({
@@ -1221,10 +1249,16 @@ export function createPreviewSession(state: WorkbenchState) {
 			else if (message.type === 'targeting.hover' || message.type === 'targeting.select' || message.type === 'targeting.escape') receiveTargeting(message)
 			else if (message.type === 'widget.event.occurrence') widgetEvents.receive(message)
 			else if (message.type === 'checks.report') receiveChecksReport(message)
+			else if (message.type === 'inspection.base-state.response') emitBaseState({ kind: 'response', message })
 			else if (message.type === 'contour.full.response' || message.type === 'contour.partial.response') refinement.receiveResponse(message)
 			// A work-scoped failure report ends one contour work as a non-recoverable refinement failure and
 			// leaves its stream and generation alone (Clause 01a11a59-def9-797a-8d08-5e4b02ecd900).
 			else if (message.type === 'failure.report') refinement.receiveFailureReport(message)
+		}
+		else if (result.status === 'rejected') {
+			// An `inspection.base-state.response` that did not decode: its request ends with its keys
+			// Unavailable, and the generation is untouched.
+			emitBaseState({ kind: 'rejected', ...(result.requestId !== undefined ? { requestId: result.requestId } : {}) })
 		}
 		else if (result.status === 'generation-failed') {
 			// The runtime reported its generation's failure: the session ended and retired it. A `protocol`
@@ -1407,6 +1441,9 @@ export function createPreviewSession(state: WorkbenchState) {
 		replaceGeneration,
 		widgetEvents,
 		widgetEventsSupported,
+		baseStateSupported,
+		onBaseState,
+		sendBaseStateRequest,
 		liveChecks,
 		mount,
 		unmount,

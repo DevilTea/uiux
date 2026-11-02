@@ -31,6 +31,7 @@ import { declaredRuntimeFeatures } from '../../src/preview/declared-features'
 import type { ChecksObservation } from '../../src/preview/checks-observer'
 import { buildChecksReportBody, ChecksReportPublisher, MaxWaitDebouncer } from '../../src/preview/checks-report-builder'
 import type { WidgetEventArmMessage } from '../../src/preview/protocol/widget-events'
+import type { BaseStateRequestMessage } from '../../src/preview/protocol/base-state'
 import type { WidgetEventReport } from '../../src/preview/widget-event-observer'
 import type {
 	PreviewMaterializationResult,
@@ -255,6 +256,18 @@ function receiveWidgetEventArm(message: WidgetEventArmMessage) {
 	if (message.context.viewId !== viewId.value || (message.context.variantId ?? '') !== (variantName.value ?? '')) return
 	widgetEventArm = { armId: message.payload.armId, triggers: message.payload.triggers, spent: false }
 	activeBridge?.armWidgetEvents?.(message.payload.armId, message.payload.triggers)
+}
+
+/**
+ * Answers one `inspection.base-state.request` (issue #52; Clause 01a19a9b-386b-7598-a0b9-6865cb9fd6e0)
+ * from the mounted Runtime, which drops a request for another View or Variant than the one it has
+ * mounted. The answer is a message only: a base Runtime built for it is never mounted, and nothing
+ * is ever reported as a failure for a value that cannot be read.
+ */
+function receiveBaseStateRequest(message: BaseStateRequestMessage) {
+	if (harnessMode.value || versionId) return
+	const response = activeBridge?.answerBaseStateRequest?.(message)
+	if (response) runtimeBridge?.sendBaseStateResponse(response)
 }
 
 /**
@@ -614,6 +627,8 @@ async function evaluateRuntimeOnce() {
 		// The server resolves the Assets the View binds: the current ones, or the version's in a version
 		// frame (Rule 01a167f4-472f-7ae9-8ebb-3075216ad94c). A bound Asset it blocks keeps the View from rendering.
 		const view = viewData.value.resource
+		// Read with `view`, so the revision is that of the View the Runtime is built from.
+		const viewRevision = viewData.value.revision
 		let assets: AssetResolutionTable
 		try {
 			assets = await uiux.previewAssets(collectBoundAssetIds(view.ir), versionId)
@@ -630,6 +645,8 @@ async function evaluateRuntimeOnce() {
 
 		activeBridge = mount(previewHostElement.value, {
 			view,
+			// The revision of the View read, which an `inspection.base-state.response` echoes.
+			viewRevision,
 			context: activeContext.value,
 			locales: localesMap,
 			assets,
@@ -733,6 +750,7 @@ function receiveWire(input: unknown) {
 		hoverCandidateWidgetId = undefined
 	}
 	else if (message.type === 'widget.event.arm') receiveWidgetEventArm(message)
+	else if (message.type === 'inspection.base-state.request') receiveBaseStateRequest(message)
 }
 
 function onWindowMessage(event: MessageEvent) {
