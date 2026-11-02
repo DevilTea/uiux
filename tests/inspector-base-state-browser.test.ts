@@ -18,12 +18,13 @@ const VARIANT = 'error-state'
 let server: WorkbenchServer
 let browser: Browser
 
-type ViewRead = { revision: string; resource: { ir: unknown; variants: Record<string, unknown> } }
+type ViewRead = { revision: string; resource: { ir: unknown; variants: Record<string, unknown>; spec: Record<string, unknown> } }
+const readView = async () => await (await fetch(`${server.origin}/api/resources/view/${VIEW_ID}`, { headers: server.headers })).json() as ViewRead
 
 beforeAll(async () => {
 	server = await startWorkbenchServer()
 	browser = await chromium.launch({ headless: true })
-	const read = await (await fetch(`${server.origin}/api/resources/view/${VIEW_ID}`, { headers: server.headers })).json() as ViewRead
+	const read = await readView()
 	// The Button's `disabled` State member defaults to false; the Variant overrides it to true.
 	const response = await fetch(`${server.origin}/api/views/${VIEW_ID}/structure`, {
 		method: 'PUT',
@@ -105,6 +106,46 @@ describe('Inspector Base cell (issue #52)', () => {
 			await page.locator('[data-context="variant"]').click()
 			await page.getByRole('option', { name: VARIANT }).click()
 			await expect.poll(() => baseCell(page).first().getAttribute('data-base-state'), { timeout: 30_000 }).toBe('value')
+			expect((await baseCell(page).first().textContent())?.trim()).toBe('false')
+		}
+		finally { await context.close() }
+	}, 90_000)
+
+	it('reads again when the viewport and the theme change while the Widget stays selected', async () => {
+		const { context, page } = await open(`/views/${VIEW_ID}?variant=${VARIANT}&widget=${WIDGET_ID}&panel=inspect`)
+		try {
+			await expect.poll(() => baseCell(page).first().getAttribute('data-base-state'), { timeout: 30_000 }).toBe('value')
+			await page.locator('[data-context="viewport"]').click()
+			await page.getByRole('option', { name: /Mobile/ }).click()
+			await page.locator('[data-context="theme"]').click()
+			await page.getByRole('option', { name: /dark/i }).click()
+			await expect.poll(async () => (await wire(page)).filter(message => message.type === 'inspection.base-state.response').at(-1)?.payload.renderContext, { timeout: 30_000 })
+				.toMatchObject({ viewportId: 'mobile', viewport: { width: 390, height: 844 }, themeId: 'dark' })
+			await expect.poll(() => baseCell(page).first().getAttribute('data-base-state'), { timeout: 30_000 }).toBe('value')
+			expect((await baseCell(page).first().textContent())?.trim()).toBe('false')
+		}
+		finally { await context.close() }
+	}, 90_000)
+
+	it('keeps the base value after a Spec-only edit, which changes the View revision but not what the Preview renders', async () => {
+		const { context, page } = await open(`/views/${VIEW_ID}?variant=${VARIANT}&widget=${WIDGET_ID}&panel=inspect`)
+		try {
+			await expect.poll(() => baseCell(page).first().getAttribute('data-base-state'), { timeout: 30_000 }).toBe('value')
+			const before = await readView()
+			const content = Object.fromEntries(Object.entries(before.resource.spec).filter(([key]) => key !== 'decisions'))
+			const response = await fetch(`${server.origin}/api/views/${VIEW_ID}/spec`, {
+				method: 'PUT',
+				headers: { ...server.headers, 'content-type': 'application/json' },
+				body: JSON.stringify({ expectedRevision: before.revision, spec: { ...content, intent: 'An intent edited while the Inspector is open.' } }),
+			})
+			expect(response.ok).toBe(true)
+			// The Workbench reads the new revision (the Details revision follows it) and the cell still shows the base value.
+			await page.locator('[data-inspector-details-toggle]').click()
+			const revision = (await readView()).revision
+			expect(revision).not.toBe(before.revision)
+			await expect.poll(() => page.locator(`[data-inspector-details] [title="${revision}"]`).count(), { timeout: 30_000 }).toBe(1)
+			await page.waitForTimeout(1500)
+			expect(await baseCell(page).first().getAttribute('data-base-state')).toBe('value')
 			expect((await baseCell(page).first().textContent())?.trim()).toBe('false')
 		}
 		finally { await context.close() }

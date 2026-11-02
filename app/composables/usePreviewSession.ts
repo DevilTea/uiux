@@ -168,6 +168,12 @@ export function createPreviewSession(state: WorkbenchState) {
 	 */
 	const runtimeGenerationId = ref<string>()
 	/**
+	 * The revision of the View when the admitted generation appeared: the one its document was built
+	 * from. A Spec-only edit changes the View's revision without a new generation, so this stays what
+	 * the Runtime reads and echoes (`inspection.base-state`, Clause 01a19ab9-d028-7bb9-a370-4736992852f5).
+	 */
+	const generationViewRevision = ref<string>()
+	/**
 	 * Bumps for every Preview document the Workbench requests, and is part of the document URL, so a
 	 * request for the same View still loads a new document. It never names the generation.
 	 */
@@ -915,6 +921,7 @@ export function createPreviewSession(state: WorkbenchState) {
 	function endGeneration(): void {
 		const previousGeneration = runtimeGenerationId.value
 		runtimeGenerationId.value = undefined
+		generationViewRevision.value = undefined
 		generationIframe = undefined
 		runtimeFeatures.value = []
 		widgetEvents.onGenerationBoundary()
@@ -952,6 +959,7 @@ export function createPreviewSession(state: WorkbenchState) {
 	function onGenerationAdmitted(generationId: string): void {
 		if (runtimeGenerationId.value) endGeneration()
 		runtimeGenerationId.value = generationId
+		generationViewRevision.value = state.selectedView.value?.revision
 		generationIframe = previewIframe.value
 		syncGeometryContext()
 		handshakePhase.value = 'initiating'
@@ -1409,6 +1417,7 @@ export function createPreviewSession(state: WorkbenchState) {
 		previewIframeSrc,
 		previewSessionId,
 		runtimeGenerationId,
+		generationViewRevision,
 		documentSequence,
 		sessionPhase,
 		sessionStatus,

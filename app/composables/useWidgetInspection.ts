@@ -101,7 +101,8 @@ export function useWidgetInspection(workbench: Workbench) {
 		const options = contextOptions.value
 		const viewId = selectedViewId.value
 		const generation = preview.runtimeGenerationId.value
-		const revision = selectedView.value?.revision
+		// The revision of the View the Preview document was built from, not the Workbench's latest.
+		const revision = preview.generationViewRevision.value
 		const dimensions = options.viewports.selectedDimensions
 		const variantId = variantName.value
 		return {
