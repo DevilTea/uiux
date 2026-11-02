@@ -30,9 +30,10 @@ clauses:
     statement: A thumbnail's state is `fresh`, `stale` or `missing`, and a View is
       `refreshing` while its thumbnail is queued or in flight.
   - id: 01a19b99-ce21-7b2c-b039-f9afa8f95a97
-    statement: The quiet period is 10 seconds, at most 1 thumbnail capture is in
-      flight, and a request does not queue a View whose thumbnail capture failed
-      less than 60 seconds ago.
+    statement: The quiet period is 10 seconds, a capture pass starts at the latest
+      60 seconds after the first change that no pass has yet covered, at most 1
+      thumbnail capture is in flight, and a request does not queue a View whose
+      thumbnail capture failed less than 60 seconds ago.
   - id: 01a19b99-ceaf-72dc-aa2e-3df1a71c5ca9
     statement: Reading a View's thumbnail, listing the thumbnail states and
       requesting thumbnails each need the permission key `workspace.read` and no
@@ -60,7 +61,7 @@ constrains:
 | 01a19b99-cc6d-7bf7-9f15-5250944e198f | [#480 proposal and owner ruling 2026-11-02 (question tool, recorded by Claude on the owner's behalf): accepted, decisions 1-4 and the design](https://github.com/DevilTea/uiux/discussions/480): the design's "Image": PNG because the dependencies hold no WebP encoder (`package.json`, no `sharp`) and Playwright encodes only PNG and JPEG ([code@be419253 `src/application/services/capture-harness.ts#L207-L209`](https://github.com/DevilTea/uiux/blob/be419253f49a8d069386404acccddca3057f4208/src/application/services/capture-harness.ts#L207-L209), viewport only) |
 | 01a19b99-ccfa-74bb-9671-08ab5d4e2656 | [#480 proposal and owner ruling 2026-11-02 (question tool, recorded by Claude on the owner's behalf): accepted, decisions 1-4 and the design](https://github.com/DevilTea/uiux/discussions/480): the design's "Cache location and key"; the encoding is that of [code@be419253 `src/domain/evidence/render-input-digest.ts#L15`](https://github.com/DevilTea/uiux/blob/be419253f49a8d069386404acccddca3057f4208/src/domain/evidence/render-input-digest.ts#L15) and the provenance those of formal capture records (Clauses 01a11bb1-8fc4-7b7d-87da-d3fc5d457d98 and 01a1161c-008a-746d-8d53-a8301b23588f) |
 | 01a19b99-cd8b-7a8d-a357-5a55fa9453d7 | [#480 proposal and owner ruling 2026-11-02 (question tool, recorded by Claude on the owner's behalf): accepted, decisions 1-4 and the design](https://github.com/DevilTea/uiux/discussions/480): the design's "Cache location and key" (fresh, stale, missing) and "Reading" (refreshing) |
-| 01a19b99-ce21-7b2c-b039-f9afa8f95a97 | [#480 proposal and owner ruling 2026-11-02 (question tool, recorded by Claude on the owner's behalf): accepted, decisions 1-4 and the design](https://github.com/DevilTea/uiux/discussions/480): decision 2 (about 10 s of quiet, at most one capture in flight) and the design's "Trigger, debounce, queue" (60 seconds before a request queues a failed View again) |
+| 01a19b99-ce21-7b2c-b039-f9afa8f95a97 | [#480 proposal and owner ruling 2026-11-02 (question tool, recorded by Claude on the owner's behalf): accepted, decisions 1-4 and the design](https://github.com/DevilTea/uiux/discussions/480): decision 2 (about 10 s of quiet, at most one capture in flight) and the design's "Trigger, debounce, queue" (60 seconds before a request queues a failed View again); amended by [#480 owner answers 2026-11-02 (question tool, recorded by Claude on the owner's behalf): accepted, the three answers](https://github.com/DevilTea/uiux/discussions/480#discussioncomment-19347706): the 60 s ceiling (answer 1) |
 | 01a19b99-ceaf-72dc-aa2e-3df1a71c5ca9 | [#480 proposal and owner ruling 2026-11-02 (question tool, recorded by Claude on the owner's behalf): accepted, decisions 1-4 and the design](https://github.com/DevilTea/uiux/discussions/480): the design's "Reading": reading a thumbnail needs `workspace.read` and capture is server-internal; the key table is Clause 01a11485-fa00-72da-bc46-98302a3c106e, the system credential allowlist Clause 01a11c09-a3bb-7ad4-a889-d50b124d3679 |
 | 01a19b99-cf3c-7a6b-8a2b-492c36c22cc7 | [#480 proposal and owner ruling 2026-11-02 (question tool, recorded by Claude on the owner's behalf): accepted, decisions 1-4 and the design](https://github.com/DevilTea/uiux/discussions/480): the design's "Event"; the stream and its other events are Clause 01a114ec-e839-7b11-957c-41c88b692e12 ([code@be419253 `src/application/services/change-events.ts#L17-L21`](https://github.com/DevilTea/uiux/blob/be419253f49a8d069386404acccddca3057f4208/src/application/services/change-events.ts#L17-L21) `ChangeEvent`) |
 
