@@ -27,6 +27,8 @@ Never run `uiux dev`, `uiux artifacts gc` or any authoring against the owner's c
 
 4. Author through MCP (`/mcp`, `Authorization: Bearer <Token>`) with the domain-specific operations of AGENTS.md. Do not edit canonical files by hand. The `.uiux/kit/` sources are code and may be edited directly.
 
+   Formal Evidence can be recaptured through MCP (`capture_formal_evidence`) or, with the same Token, from a shell against the running server: `UIUX_TOKEN=<Token> node bin/uiux.mjs evidence capture --all --workspace "$PWD/.uiux"` captures the base context of every View x Locale x viewport x theme, which are the contexts `pnpm dogfood:check` requires (it names a View's Variants only when you pass `--variant`). The command prints one line per context and exits 1 when any context fails; the Token is never an argument.
+
 5. Stop the server (`uiux artifacts gc` refuses a Workspace a server serves), then select what to commit (`pnpm dogfood:worktree select`). It prints the exact `git add -- ...` list; add `--stage` to run it. It selects:
 
    - every changed canonical resource under `.uiux/` (a deleted one is staged as a deletion), and

@@ -211,6 +211,21 @@ It keeps the Evidence that a Review submission references, the blobs that a Chec
 
 The cleanup sees only this checkout and this host's history. When `artifacts/` is committed, as in a shared Workspace, the deletions reach every other clone with the commit that records them, including blobs that another host's history still names. A host copies the blobs its versions need into its own history when it records a version or starts, so only versions recorded before that copy are at risk; review the `--dry-run` list before you commit the result.
 
+### Capturing formal Evidence from the command line
+
+`uiux evidence capture` captures formal Evidence through a running `uiux dev` server, the way an Agent does through the `capture_formal_evidence` tool or the Workbench does through `POST /api/evidence/capture`: the server stays the one writer, and the same capture service runs. It signs in as the member whose Token you give it, which needs `evidence.capture` (the Editor preset has it). The Token is read from the `UIUX_TOKEN` environment variable, or from `--token-file <path>` (`-` reads standard input); there is no option that takes the Token itself, so it never appears in a process list or shell history, and the command never prints it.
+
+```sh
+export UIUX_TOKEN=...                                           # from `uiux token create --member <nick>`
+uiux evidence capture --all --workspace ./.uiux                  # every View x Locale x viewport x theme, base context
+uiux evidence capture --view <id> --viewport mobile --theme dark --workspace ./.uiux
+uiux evidence capture --view <id> --variant empty --json --workspace ./.uiux
+```
+
+`--all` captures every View in every Locale, viewport preset and theme at its base context, the contexts that `pnpm dogfood:check` requires fresh Evidence for; it never includes a Variant and cannot be combined with the other selection options. `--view <id>` (repeatable) captures the named Views, in the Workspace's default Locale, viewport and theme unless `--locale`, `--viewport` or `--theme` (each repeatable) name others; `--variant <name>` (repeatable) adds that Variant next to each base context. The command resolves the selection into an explicit list of render contexts from the selected Workspace on disk and sends it in requests of at most eight; naming a View, Locale, viewport, theme or Variant the Workspace lacks is refused before anything is sent. The server is `--origin <url>`, else the loopback origin that the `uiux dev` server running on this host for the Workspace records in its hold; with neither, the command exits 1.
+
+It prints one tab-separated line per context (`captured` or `failed`, View id, Variant or `-`, Locale, viewport id, theme id, evidence digest) and a count; failures and refusals go to standard error. `--json` prints one object instead, `{ status: "ok" | "incomplete" | "failed", results: [{ context, status, evidenceDigest?, screenshotDigest?, diagnostics? }], summary: { total, captured, failed } }`. Exit status: 0 when every context was captured, 1 when the server refuses (a Token it does not accept, a member without `evidence.capture`, a kit build that is not ready), none is found or answers, or any context fails (`incomplete` included), and 2 for invalid usage, no Token, or an unusable Workspace root. A Token sent to an `http` origin other than loopback travels in clear text.
+
 ### Copying components into a product project
 
 `uiux components` copies registry components of the Product Kit out of the Workspace's `kit/src/` into a product project. It reads the Workspace directly and needs no credential:
