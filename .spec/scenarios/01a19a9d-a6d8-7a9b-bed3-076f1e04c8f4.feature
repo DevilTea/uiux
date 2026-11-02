@@ -6,6 +6,7 @@ Feature: View Variants
   @spec:demonstrates:01a19a9d-a01a-72bd-9ea0-cad4e90ae7fc
   Scenario: The Base cell reads Unavailable when the runtime does not answer in time
     Given a Workbench Preview generation that declared `inspection.base-state` whose runtime never answers an `inspection.base-state.request`
-    When the user selects a Widget that the open Variant overrides and 5000 ms pass
+    When the user selects a Widget that the open Variant overrides
+    When 5000 ms pass without a response
     Then the Base cell of each overridden State member reads Unavailable
     Then a response of that request arriving later changes no Base cell
