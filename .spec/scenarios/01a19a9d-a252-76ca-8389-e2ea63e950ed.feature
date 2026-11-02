@@ -1,6 +1,8 @@
 Feature: View Variants
   # Source: [#241 proposal and owner ruling 2026-11-02 (question tool, recorded by Claude on the owner's behalf): accepted, with these defaults](https://github.com/DevilTea/uiux/discussions/241#discussioncomment-19343472); issue #52 https://github.com/DevilTea/uiux/issues/52.
-  # Status: Not built as of 4e0209e (issue #52).
+  # Test: code@22da069 `tests/inspector-base-state-browser.test.ts#L71` "shows the base value the Preview read for a State member the Variant overrides". https://github.com/DevilTea/uiux/blob/22da069374f746dd3c4d2827dc54bea1f73deffa/tests/inspector-base-state-browser.test.ts#L71
+  # Test: code@22da069 `tests/base-state-requests.test.ts#L84` "is sent when the Widget is selected, with a fresh non-empty requestId and the open context". https://github.com/DevilTea/uiux/blob/22da069374f746dd3c4d2827dc54bea1f73deffa/tests/base-state-requests.test.ts#L84
+  # Status: built as of 22da069.
   @spec:id:01a19a9d-a252-7262-aa4c-04b23ea2f65a
   @spec:demonstrates:01a19a9b-308e-7377-ac04-54b81a96e5ed
   @spec:demonstrates:01a19a9d-9d1b-7db9-a535-96dedc258395
