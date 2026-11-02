@@ -305,21 +305,48 @@ describe('a feature that is not declared', () => {
 		expect(read(h)).toEqual({ status: 'unavailable' })
 	})
 
-	it('reads Unavailable and sends nothing until the handshake opens, then asks', () => {
+	it('reads pending and sends nothing while the generation is still opening, then asks', () => {
 		const h = harness()
 		h.controller.retarget(target({ supported: undefined }))
 		expect(h.sent).toHaveLength(0)
-		expect(read(h)).toEqual({ status: 'unavailable' })
+		expect(read(h)).toEqual({ status: 'pending' })
 		h.controller.retarget(target({ supported: true }))
 		expect(h.sent).toHaveLength(1)
 		expect(read(h)).toEqual({ status: 'pending' })
 	})
 
-	it('abandons the pending request when the generation stops being open', () => {
+	it('reads Unavailable once an opening generation turns out not to declare the feature or the session failed', () => {
+		const h = harness()
+		h.controller.retarget(target({ supported: undefined }))
+		expect(read(h)).toEqual({ status: 'pending' })
+		h.controller.retarget(target({ supported: false }))
+		expect(read(h)).toEqual({ status: 'unavailable' })
+		expect(h.sent).toHaveLength(0)
+		expect(h.changes).toBeGreaterThan(0)
+	})
+
+	it('reads pending until the View revision of the generation is known, then asks', () => {
+		const h = harness()
+		h.controller.retarget(target({ renderContext: undefined }))
+		expect(h.sent).toHaveLength(0)
+		expect(read(h)).toEqual({ status: 'pending' })
+		h.controller.retarget(target())
+		expect(h.sent).toHaveLength(1)
+	})
+
+	it('abandons the pending request when the generation stops being open, and reads pending while the next one opens', () => {
 		const h = harness()
 		h.controller.retarget(target())
 		h.controller.retarget(target({ supported: undefined }))
 		h.respond(h.sent[0])
+		expect(read(h)).toEqual({ status: 'pending' })
+		h.controller.retarget(target({ supported: false }))
+		expect(read(h)).toEqual({ status: 'unavailable' })
+	})
+
+	it('reads Unavailable, not pending, for a Widget with nothing to ask while the generation opens', () => {
+		const h = harness()
+		h.controller.retarget(target({ supported: undefined, keys: [] }))
 		expect(read(h)).toEqual({ status: 'unavailable' })
 	})
 

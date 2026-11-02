@@ -34,15 +34,21 @@ export type BaseStateCell =
 
 /**
  * What the Inspector wants read now. Any change of its identity abandons the pending request and
- * discards the unsent ones: the generation, View, View revision, Variant, Locale, viewport, theme,
- * the selected Widget and its overridden keys.
+ * discards the unsent ones: the generation, View, the View revision the generation renders, Variant,
+ * Locale, viewport, theme, the selected Widget and its overridden keys.
  */
 export type BaseStateTarget = Readonly<{
 	/** The Preview session, the open generation, the View and the open Variant; `undefined` while there is no generation. */
 	context?: BaseStateContext
-	/** Whether the open generation declared `inspection.base-state`; `undefined` until its handshake opens. */
+	/**
+	 * Whether the open generation declared `inspection.base-state`: `undefined` while a generation is
+	 * still opening (its cells read pending), `false` when it did not declare it or failed (Unavailable).
+	 */
 	supported: boolean | undefined
-	/** The Workbench's current View revision, Locale, viewport and theme, which a response must echo. */
+	/**
+	 * The revision of the View the open generation renders and the Workbench's current Locale, viewport
+	 * and theme, which a response must echo. `undefined` while the generation's revision is not known yet.
+	 */
 	renderContext?: BaseStateRenderContext
 	/** The selected Widget, `undefined` when none is. */
 	widgetId?: string
@@ -131,6 +137,8 @@ export function createBaseStateRequests(host: BaseStateRequestsHost): BaseStateR
 	const clearTimer = host.clearTimer ?? (handle => clearTimeout(handle as ReturnType<typeof setTimeout>))
 
 	let identity: string | undefined
+	/** Nothing can be asked yet, but will be once the generation opens: the cells read pending, not Unavailable. */
+	let waiting = false
 	let target: BaseStateTarget | undefined
 	/** Settled keys of the current target. A key absent here and in `target.keys` is pending. */
 	let settled = new Map<string, BaseStateCell>()
@@ -205,7 +213,14 @@ export function createBaseStateRequests(host: BaseStateRequestsHost): BaseStateR
 		retarget(next) {
 			if (disposed) return
 			const nextIdentity = targetIdentity(next)
-			if (nextIdentity === identity) return
+			const nextWaiting = !nextIdentity && next.keys.length > 0 && !!next.widgetId
+				&& (next.supported === undefined || (next.supported === true && (!next.context || !next.renderContext)))
+			if (nextIdentity === identity && nextWaiting === waiting) return
+			waiting = nextWaiting
+			if (nextIdentity === identity) {
+				host.changed()
+				return
+			}
 			abandon()
 			identity = nextIdentity
 			target = next
@@ -258,8 +273,8 @@ export function createBaseStateRequests(host: BaseStateRequestsHost): BaseStateR
 		},
 
 		read(key) {
-			// Not asked: the feature is not declared, the handshake is not open, or there is nothing to ask.
-			if (!identity) return UNAVAILABLE
+			// Not asked: the generation is still opening (pending), or it did not declare the feature, failed, or there is nothing to ask.
+			if (!identity) return waiting ? PENDING : UNAVAILABLE
 			return settled.get(key) ?? PENDING
 		},
 
@@ -267,6 +282,7 @@ export function createBaseStateRequests(host: BaseStateRequestsHost): BaseStateR
 			disposed = true
 			abandon()
 			identity = undefined
+			waiting = false
 			target = undefined
 		},
 	}

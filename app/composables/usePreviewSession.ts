@@ -51,6 +51,7 @@ import type { Point } from '../../src/preview/protocol/schema'
 import { useUiuxClient } from './useUiuxClient'
 import type { WorkbenchState } from './useWorkbenchState'
 import type { SessionPhase } from './workbench-types'
+import { anchorGenerationView, anchorOnViewLoad, type GenerationViewAnchor } from '../utils/generation-view-revision'
 
 /**
  * The canvas tool. Select holds an `inspection` targeting interaction, Comment a `comment-range`
@@ -172,7 +173,8 @@ export function createPreviewSession(state: WorkbenchState) {
 	 * from. A Spec-only edit changes the View's revision without a new generation, so this stays what
 	 * the Runtime reads and echoes (`inspection.base-state`, Clause 01a19ab9-d028-7bb9-a370-4736992852f5).
 	 */
-	const generationViewRevision = ref<string>()
+	const generationView = ref<GenerationViewAnchor>()
+	const generationViewRevision = computed(() => generationView.value?.revision)
 	/**
 	 * Bumps for every Preview document the Workbench requests, and is part of the document URL, so a
 	 * request for the same View still loads a new document. It never names the generation.
@@ -303,9 +305,14 @@ export function createPreviewSession(state: WorkbenchState) {
 	const widgetEventsSupported = computed<boolean | undefined>(() =>
 		handshakePhase.value === 'open' ? runtimeFeatures.value.includes(WIDGET_EVENTS_FEATURE) : undefined)
 
-	/** Whether the open generation declared `inspection.base-state`; undefined until its handshake opens. */
-	const baseStateSupported = computed<boolean | undefined>(() =>
-		handshakePhase.value === 'open' ? runtimeFeatures.value.includes(BASE_STATE_FEATURE) : undefined)
+	/**
+	 * Whether the open generation declared `inspection.base-state`: undefined while a generation is still
+	 * opening (its handshake has not completed and the session has not failed), false once the session failed.
+	 */
+	const baseStateSupported = computed<boolean | undefined>(() => {
+		if (handshakePhase.value === 'open') return runtimeFeatures.value.includes(BASE_STATE_FEATURE)
+		return handshakePhase.value === 'failed' ? false : undefined
+	})
 	/**
 	 * What the Workbench receives for `inspection.base-state` (issue #52): a response that passed the
 	 * bridge's gates for the open generation, or one rejected whole (Clause
@@ -921,7 +928,7 @@ export function createPreviewSession(state: WorkbenchState) {
 	function endGeneration(): void {
 		const previousGeneration = runtimeGenerationId.value
 		runtimeGenerationId.value = undefined
-		generationViewRevision.value = undefined
+		generationView.value = undefined
 		generationIframe = undefined
 		runtimeFeatures.value = []
 		widgetEvents.onGenerationBoundary()
@@ -959,7 +966,7 @@ export function createPreviewSession(state: WorkbenchState) {
 	function onGenerationAdmitted(generationId: string): void {
 		if (runtimeGenerationId.value) endGeneration()
 		runtimeGenerationId.value = generationId
-		generationViewRevision.value = state.selectedView.value?.revision
+		generationView.value = anchorGenerationView(state.selectedViewId.value, state.selectedView.value)
 		generationIframe = previewIframe.value
 		syncGeometryContext()
 		handshakePhase.value = 'initiating'
@@ -1337,6 +1344,11 @@ export function createPreviewSession(state: WorkbenchState) {
 		window.removeEventListener('keydown', onWindowKeydown)
 		clearRetryStallTimer()
 	}
+
+	// A View that loads after its generation was admitted is the one that generation renders.
+	watch(() => state.selectedView.value, (view) => {
+		generationView.value = anchorOnViewLoad(generationView.value, view)
+	})
 
 	// Comment mode is meaningless without a mounted View.
 	watch(() => state.selectedView.value, (view) => {

@@ -63,11 +63,11 @@ const size = computed(() => {
 })
 
 type DiffRow = { property: string; value: string; base: BaseStateCell }
-const PENDING_BASE: BaseStateCell = { status: 'pending' }
+const UNAVAILABLE_BASE: BaseStateCell = { status: 'unavailable' }
 const diffRows = computed<DiffRow[]>(() => overrides.value.map(item => ({
 	property: item.property,
 	value: formatStateValue(item.value),
-	base: baseCells.value.get(item.property) ?? PENDING_BASE,
+	base: baseCells.value.get(item.property) ?? UNAVAILABLE_BASE,
 })))
 const diffColumns = computed<TableColumn<DiffRow>[]>(() => [
 	{ accessorKey: 'property', header: t('inspect.property'), meta: { class: { td: 'text-default' } } },
