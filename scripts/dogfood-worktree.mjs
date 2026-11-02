@@ -21,6 +21,13 @@
  *
  * After a recapture it also lists the deletions of tracked blobs that the same gc dry-run would
  * collect (the Evidence the recapture superseded) as `git rm` lines; `--stage` runs them too.
+ *
+ * gc keeps every capture of a View's current revision, so a Kit, Adapter, Locale or Workspace
+ * recapture leaves the old generation reachable. `select` therefore also lists, in a separate
+ * "superseded by a fresh capture" section, the tracked formal captures that the Workbench's own
+ * freshness judgement (`dogfood:check`'s, which needs the packaged server built) calls stale while a
+ * fresh capture of the same render context stays, and the blobs that become unreferenced with them
+ * (scripts/dogfood-superseded.mjs). `--no-superseded` skips that part (no server is started).
  */
 
 import { execFileSync, spawnSync } from 'node:child_process'
@@ -30,7 +37,8 @@ import { dirname, join, relative, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
 import { fileURLToPath } from 'node:url'
 
-import { BLOB_DIR, DOGFOOD_DIR, GuardError, HISTORY_DIR, KIT_NODE_MODULES, exportCommitted, git, isKitNodeModules, listGarbageBlobs, makeScratch } from './dogfood-guard.mjs'
+import { BLOB_DIR, DOGFOOD_DIR, GuardError, HISTORY_DIR, KIT_NODE_MODULES, blobPath, exportCommitted, git, isKitNodeModules, listGarbageBlobs, makeScratch } from './dogfood-guard.mjs'
+import { planSupersededCaptures } from './dogfood-superseded.mjs'
 
 const BLOB_PATH = /^\.uiux\/artifacts\/sha256\/[0-9a-f]{2}\/([0-9a-f]{64})$/
 // The CLI that runs this script: in a worktree, the worktree's own bin/uiux.mjs.
@@ -133,10 +141,12 @@ function buildCommittable(repo, destRoot, entries) {
  * the skipped `.uiux/kit/node_modules` paths, `collectable`
  * the skipped unreferenced new blobs, `damaged` the tracked blobs that were modified or deleted, and
  * `remove` the tracked blobs gc would collect from the as-committed tree (deletions to stage; a blob
- * whose deletion is already staged is left out, and a working-tree deletion of one is not damage).
+ * whose deletion is already staged is left out, and a working-tree deletion of one is not damage), and
+ * `superseded` the tracked captures a fresh capture of the same render context supersedes plus the blobs
+ * that become unreferenced with them (`{ records, dependents, bytes }`, same deletion rules as `remove`).
  */
-/** @param {string} repo @param {{ uiuxBin?: string }} [options] */
-export function select(repo, { uiuxBin } = {}) {
+/** @param {string} repo @param {{ uiuxBin?: string, readFreshness?: (root: string) => Promise<readonly { digest: string, contextKey: string, state: string }[]>, superseded?: boolean }} [options] */
+export async function select(repo, { uiuxBin, readFreshness = defaultReadFreshness, superseded: findSuperseded = true } = {}) {
 	const status = dogfoodStatus(repo)
 	// `.uiux/kit/node_modules` (a directory, a symlink or a file) is never selected, and never reaches gc's scratch tree.
 	const kitNodeModules = status.filter(({ path }) => isKitNodeModules(path)).map(({ path }) => path)
@@ -159,23 +169,59 @@ export function select(repo, { uiuxBin } = {}) {
 	let collectable = []
 	let blobs = newBlobs
 	let remove = []
+	let supersededPaths = { records: [], dependents: [], bytes: { records: 0, dependents: 0 } }
 	if (newBlobs.length > 0 || trackedBlobs.size > 0) {
 		const scratch = makeScratch()
 		try {
 			buildCommittable(repo, scratch.workspaceRoot, entries)
-			const garbage = listGarbageBlobs({ workspaceRoot: scratch.workspaceRoot, home: scratch.home, ...(uiuxBin ? { uiuxBin } : {}) })
+			const gcGarbage = listGarbageBlobs({ workspaceRoot: scratch.workspaceRoot, home: scratch.home, ...(uiuxBin ? { uiuxBin } : {}) })
+			let garbage = gcGarbage
+			const hexOf = path => BLOB_PATH.exec(path)[1]
+			if (findSuperseded && trackedBlobs.size > 0) {
+				const plan = await planSupersededCaptures({
+					workspaceRoot: scratch.workspaceRoot,
+					tracked: new Set([...trackedBlobs].map(hexOf)),
+					garbage: gcGarbage,
+					readFreshness,
+					home: scratch.home,
+					...(uiuxBin ? { uiuxBin } : {}),
+				})
+				garbage = plan.garbage
+				const sum = hexes => hexes.reduce((total, hex) => total + (plan.sizes.get(hex) ?? 0), 0)
+				supersededPaths = { records: plan.records.map(blobPath), dependents: plan.dependents.map(blobPath), bytes: { records: sum(plan.records), dependents: sum(plan.dependents) }, contexts: plan.contexts }
+			}
 			collectable = newBlobs.filter(blob => garbage.has(blob.hex)).map(blob => blob.path)
 			blobs = newBlobs.filter(blob => !garbage.has(blob.hex))
-			remove = [...trackedBlobs].filter(path => garbage.has(BLOB_PATH.exec(path)[1])).sort()
+			remove = [...trackedBlobs].filter(path => gcGarbage.has(hexOf(path)) && garbage.has(hexOf(path))).sort()
 		}
 		finally {
 			scratch.remove()
 		}
 	}
-	// A deleted tracked blob that gc would not collect is damage; one it would collect is a wanted deletion.
-	for (const path of deleted.keys()) if (!remove.includes(path)) damaged.push(path)
-	remove = remove.filter(path => deleted.get(path)?.[0] !== 'D')
-	return { add: [...add, ...blobs.map(blob => blob.path)].sort(), resources: add.length, blobs: blobs.length, history, kitNodeModules, collectable, damaged, remove }
+	// A deleted tracked blob that gc would not collect, and no fresh capture supersedes, is damage; one it would collect is a wanted deletion.
+	const wanted = new Set([...remove, ...supersededPaths.records, ...supersededPaths.dependents])
+	for (const path of deleted.keys()) if (!wanted.has(path)) damaged.push(path)
+	const notStaged = path => deleted.get(path)?.[0] !== 'D'
+	remove = remove.filter(notStaged)
+	const superseded = {
+		records: supersededPaths.records.filter(notStaged),
+		dependents: supersededPaths.dependents.filter(notStaged),
+		bytes: supersededPaths.bytes,
+		contexts: supersededPaths.contexts ?? 0,
+	}
+	return { add: [...add, ...blobs.map(blob => blob.path)].sort(), resources: add.length, blobs: blobs.length, history, kitNodeModules, collectable, damaged, remove, superseded }
+}
+
+/** The freshness of the formal captures of the Workspace at `root`, by the same judgement as `dogfood:check` (it serves a copy; the packaged server must be built). */
+async function defaultReadFreshness(root) {
+	const { CheckError, readFormalCaptureFreshness } = await import('./dogfood-check.mjs')
+	try {
+		return await readFormalCaptureFreshness({ workspaceRoot: root })
+	}
+	catch (error) {
+		if (error instanceof CheckError) throw new GuardError(`could not judge Evidence freshness for the superseded captures (pass --no-superseded to skip): ${error.message}`)
+		throw error
+	}
 }
 
 const shellQuote = path => `'${path.replaceAll('\'', '\'\\\'\'')}'`
@@ -198,7 +244,33 @@ export function formatSelection(result) {
 		lines.push('git rm -q -- \\')
 		result.remove.forEach((path, index) => lines.push(`  ${shellQuote(path)}${index < result.remove.length - 1 ? ' \\' : ''}`))
 	}
+	const superseded = result.superseded
+	const count = superseded.records.length + superseded.dependents.length
+	if (count > 0) {
+		lines.push('', `superseded by a fresh capture: ${superseded.records.length} tracked formal capture(s) (${formatBytes(superseded.bytes.records)}) that the Workbench's freshness judgement calls stale while a fresh capture of the same render context stays, and ${superseded.dependents.length} blob(s) (${formatBytes(superseded.bytes.dependents)}) that become unreferenced with them. gc keeps these (their View revision is current), nothing else reaches them, and Git history keeps the old blobs; delete them in this PR:`)
+		lines.push('git rm -q -- \\')
+		const paths = [...superseded.records, ...superseded.dependents]
+		paths.forEach((path, index) => lines.push(`  ${shellQuote(path)}${index < paths.length - 1 ? ' \\' : ''}`))
+	}
 	lines.push('', 'Then commit, and run pnpm dogfood:guard before opening the PR.')
+	return lines
+}
+
+function formatBytes(bytes) {
+	return bytes >= 1024 * 1024 ? `${(bytes / (1024 * 1024)).toFixed(1)} MiB` : `${Math.ceil(bytes / 1024)} KiB`
+}
+
+/** Runs {@link select} and, with `stage`, stages its additions and deletions; returns the lines to print. */
+/** @param {string} repo @param {{ stage?: boolean } & NonNullable<Parameters<typeof select>[1]>} [options] */
+export async function runSelect(repo, { stage: doStage = false, ...options } = {}) {
+	const result = await select(repo, options)
+	const lines = formatSelection(result)
+	const deletions = [...result.remove, ...result.superseded.records, ...result.superseded.dependents]
+	if (doStage && (result.add.length > 0 || deletions.length > 0)) {
+		stage(repo, result.add)
+		stage(repo, deletions, ['rm', '-q', '--ignore-unmatch'])
+		lines.push('', `Staged ${result.add.length} path(s) and ${deletions.length} deletion(s).`)
+	}
 	return lines
 }
 
@@ -209,7 +281,7 @@ function stage(repo, paths, subcommand = ['add']) {
 
 async function main() {
 	const [command, ...rest] = process.argv.slice(2)
-	const usage = 'Usage: node scripts/dogfood-worktree.mjs prepare [--home <dir>] [--no-build] | select [--stage]'
+	const usage = 'Usage: node scripts/dogfood-worktree.mjs prepare [--home <dir>] [--no-build] | select [--stage] [--no-superseded]'
 	try {
 		const repo = toplevel(process.cwd())
 		if (command === 'prepare') {
@@ -218,15 +290,9 @@ async function main() {
 			return 0
 		}
 		if (command === 'select') {
-			const { values } = parseArgs({ args: rest, options: { stage: { type: 'boolean' } }, allowPositionals: false, strict: true })
+			const { values } = parseArgs({ args: rest, options: { 'stage': { type: 'boolean' }, 'no-superseded': { type: 'boolean' } }, allowPositionals: false, strict: true })
 			if (!isLinkedWorktree(repo)) throw new GuardError(`${repo} is the primary checkout; select runs in the authoring worktree.`)
-			const result = select(repo)
-			console.log(formatSelection(result).join('\n'))
-			if (values.stage && (result.add.length > 0 || result.remove.length > 0)) {
-				stage(repo, result.add)
-				stage(repo, result.remove, ['rm', '-q', '--ignore-unmatch'])
-				console.log(`\nStaged ${result.add.length} path(s) and ${result.remove.length} deletion(s).`)
-			}
+			console.log((await runSelect(repo, { stage: values.stage === true, superseded: !values['no-superseded'] })).join('\n'))
 			return 0
 		}
 		console.error(`dogfood worktree: ${command === undefined ? 'a command is required' : `unknown command ${command}`}.\n${usage}`)

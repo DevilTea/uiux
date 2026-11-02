@@ -106,7 +106,16 @@ describe('assessEvidence', () => {
 		expect(result.fresh).toHaveLength(2)
 		expect(result.stale).toEqual([])
 		expect(result.missing).toEqual([])
-		expect(result.ignored).toEqual({ outsideRequired: 0, supersededNotFresh: 1 })
+		expect(result.ignored).toEqual({ outsideRequired: 0, supersededNotFresh: 1, supersededByFresh: 1 })
+	})
+
+	it('counts as superseded only the non-fresh captures of a context that also has a fresh one (what select lists for deletion)', () => {
+		const result = assessEvidence({
+			required: contexts,
+			entries: [entry('a', enUS, stale('adapterChanged')), entry('b', enUS, fresh), entry('c', enUS, unknown('adaptersUnavailable')), entry('d', zhTW, stale('adapterChanged')), entry('e', zhTW, stale('viewChanged'))],
+		})
+		expect(result.ignored).toEqual({ outsideRequired: 0, supersededNotFresh: 4, supersededByFresh: 2 })
+		expect(result.stale).toHaveLength(1)
 	})
 
 	it('reports a context whose captures are all stale, with the reason closest to fresh', () => {

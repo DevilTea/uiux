@@ -32,7 +32,8 @@
  * one formal capture of it is fresh by the Workbench's own judgement: `evidenceFreshness`
  * (`app/utils/readiness.ts`), bundled from the repository source so this script holds no copy of it.
  * Older captures of a context that a fresh one supersedes are counted and ignored (`uiux artifacts gc`
- * collects them; records carry no capture time, so "latest" is not decidable here).
+ * collects those of an older View revision only; `pnpm dogfood:worktree select` lists the rest for deletion;
+ * records carry no capture time, so "latest" is not decidable here).
  *
  * Usage: node scripts/dogfood-check.mjs [--source <dir>] [--base <ref>] [--keep]
  *   --source <dir>  the Workspace to check: a `.uiux/` directory or the directory that holds one
@@ -205,7 +206,9 @@ function mostRelevant(captures) {
  * A context is `fresh` when any of its captures is fresh, `stale` when it has captures and none is
  * (a definite stale outranks an unknown one in the reason), and `missing` when it has none.
  * Returns `{ fresh, stale, missing, ignored }`; `ignored` counts the captures that satisfy no
- * required context, with how many of them are not fresh.
+ * required context, how many captures of a required context are not fresh, and how many of those
+ * are superseded by a fresh capture of the same context (`supersededByFresh`: the ones
+ * `pnpm dogfood:worktree select` lists for deletion).
  */
 export function assessEvidence({ required, entries }) {
 	const byContext = new Map()
@@ -226,11 +229,13 @@ export function assessEvidence({ required, entries }) {
 	const requiredKeys = new Set(required.map(context => context.key))
 	const unmatched = entries.filter(entry => !entry.context || !requiredKeys.has(contextKey(entry.context)))
 	const superseded = entries.filter(entry => entry.context && requiredKeys.has(contextKey(entry.context)) && entry.freshness.state !== 'fresh')
+	const freshKeys = new Set(fresh.map(context => context.key))
+	const supersededByFresh = superseded.filter(entry => freshKeys.has(contextKey(entry.context)))
 	return {
 		fresh,
 		stale,
 		missing,
-		ignored: { outsideRequired: unmatched.length, supersededNotFresh: superseded.length },
+		ignored: { outsideRequired: unmatched.length, supersededNotFresh: superseded.length, supersededByFresh: supersededByFresh.length },
 	}
 }
 
@@ -353,7 +358,7 @@ export function locateWorkspace(input) {
 }
 
 /** Bundles the repository modules the check judges with (the Workbench's freshness, the Kit registry check) and imports them. */
-async function loadRepositoryModules(scratch) {
+export async function loadRepositoryModules(scratch) {
 	const { default: esbuild } = await import('esbuild')
 	const directory = join(scratch, 'lib')
 	mkdirSync(directory)
@@ -390,7 +395,7 @@ const liveProcessGroups = new Set()
 const liveDirectories = new Set()
 
 /** The packaged server started with `uiux dev` for one Workspace, and what is needed to stop it again. */
-async function startServer({ workspaceRoot, home, cwd }) {
+export async function startServer({ workspaceRoot, home, cwd }) {
 	const port = await selectPort()
 	const env = { ...process.env, UIUX_HOME: home, PORT: String(port) }
 	for (const name of ['HOST', 'NITRO_HOST', 'NITRO_PORT', 'NITRO_UNIX_SOCKET', 'NITRO_SSL_CERT', 'NITRO_SSL_KEY']) delete env[name]
@@ -435,7 +440,7 @@ async function startServer({ workspaceRoot, home, cwd }) {
 }
 
 /** An authenticated JSON request to the served copy. */
-function client(origin, token) {
+export function client(origin, token) {
 	const request = async (method, path, body) => {
 		const response = await fetch(`${origin}${path}`, {
 			method,
@@ -472,7 +477,7 @@ function client(origin, token) {
 	}
 }
 
-async function waitForKitBuild(api) {
+export async function waitForKitBuild(api) {
 	const deadline = Date.now() + KIT_BUILD_TIMEOUT_MS
 	let build
 	// `ready` is the only success; `failed` ends the wait early, anything else (building) is waited out.
@@ -583,6 +588,79 @@ function checkRouteCoverage({ report, copiedRoot }) {
 	report.add('route-coverage', 'Route coverage of app/pages/ (Views, exemptions, todos)', result.status, result.lines)
 }
 
+/**
+ * The formal captures of the served Workspace with the Workbench's own freshness judgement
+ * (`evidenceFreshness` of `app/utils/readiness.ts`, judged against what `useReadiness` judges against):
+ * `{ digest, record, context?, freshness }` per capture. `evidence` is `GET /api/evidence/list`, `workspace`
+ * the Workspace resource read and `localeItems` the Locale list.
+ */
+export function freshnessEntries({ evidence, workspace, localeItems, modules }) {
+	const stalenessContext = {
+		allViews: (evidence.views ?? []).map(view => ({ key: view.key, renderInputDigest: view.renderInputDigest })),
+		workspace,
+		discoveredLocales: localeItems.map(item => item.key),
+		localeRevisions: Object.fromEntries(localeItems.map(item => [item.key, item.revision])),
+		...(evidence.productKit ? { productKit: evidence.productKit } : {}),
+		...(evidence.productKitUnavailable === true ? { productKitUnavailable: true } : {}),
+		...(evidence.adapters ? { adapters: evidence.adapters } : {}),
+		...(evidence.adaptersUnavailable === true ? { adaptersUnavailable: true } : {}),
+	}
+	return (evidence.items ?? [])
+		.filter(item => item?.record?.kind === 'formal_capture')
+		.map((item) => {
+			const context = modules.contextFromRecord(item.record)
+			return { digest: item.digest, record: item.record, ...(context ? { context } : {}), freshness: modules.evidenceFreshness(item.record, stalenessContext) }
+		})
+}
+
+/**
+ * Serves a copy of the Workspace and returns the freshness of every formal capture in it, as
+ * `[{ digest, contextKey, state: 'fresh' | 'stale' | 'unknown', reason? }]` (a capture with no
+ * render context is left out). The same judgement as the `evidence` check of `dogfood:check`, for
+ * `pnpm dogfood:worktree select`. `workspaceRoot` is a directory that holds a `.uiux/`; it is only read:
+ * the server runs on a copy of it (as in `dogfood:check`) with a temporary `UIUX_HOME`, and both are
+ * removed afterwards.
+ */
+export async function readFormalCaptureFreshness({ workspaceRoot: sourceRoot }) {
+	const scratch = makeScratch('uiux-dogfood-fresh-')
+	liveDirectories.add(scratch.base)
+	try {
+		const workspaceRoot = scratch.workspaceRoot
+		copyWorkspace(join(sourceRoot, '.uiux'), join(workspaceRoot, '.uiux'))
+		const modules = await loadRepositoryModules(scratch.base)
+		if (!existsSync(join(REPOSITORY, '.output', 'server', 'index.mjs')))
+			throw new CheckError('The packaged server is not built (.output/server/index.mjs): run pnpm build in the worktree.')
+		// The kit build resolves esbuild and vue from node_modules; the copy lives outside the repository, so link them.
+		if (existsSync(join(workspaceRoot, '.uiux', 'kit', 'package.json')) && !existsSync(join(workspaceRoot, '.uiux', 'kit', 'node_modules')))
+			symlinkSync(join(REPOSITORY, 'node_modules'), join(workspaceRoot, '.uiux', 'kit', 'node_modules'))
+		const cli = (...args) => run(process.execPath, [join(REPOSITORY, 'bin', 'uiux.mjs'), ...args, '--workspace', workspaceRoot], { cwd: scratch.base, env: { ...process.env, UIUX_HOME: scratch.home } })
+		const added = cli('member', 'add', CI_NICKNAME, '--preset', 'viewer', '--kind', 'agent')
+		if (added.status !== 0) throw new CheckError(`uiux member add failed:\n${tail(added.stderr || added.stdout).join('\n')}`)
+		const created = cli('token', 'create', '--member', CI_NICKNAME, '--label', 'dogfood:select', '--expires', '1')
+		const token = /uiux_t_\S+/u.exec(created.stdout)?.[0]
+		if (created.status !== 0 || !token) throw new CheckError(`uiux token create failed:\n${tail(created.stderr || created.stdout).join('\n')}`)
+		const server = await startServer({ workspaceRoot, home: scratch.home, cwd: scratch.base })
+		try {
+			const api = client(server.origin, token)
+			await waitForKitBuild(api)
+			const workspace = await api.get('/api/resources/workspace/workspace')
+			if (workspace.inspection?.state !== 'current') throw new CheckError(`the Workspace is not at the current schema (${workspace.inspection?.state ?? 'unknown'})`)
+			const localeItems = await api.list('locale')
+			const evidence = await api.get('/api/evidence/list')
+			return freshnessEntries({ evidence, workspace, localeItems, modules }).flatMap(entry => entry.context
+				? [{ digest: entry.digest, contextKey: contextKey(entry.context), state: entry.freshness.state, ...(entry.freshness.reason ? { reason: entry.freshness.reason } : {}) }]
+				: [])
+		}
+		finally {
+			await server.stop()
+		}
+	}
+	finally {
+		liveDirectories.delete(scratch.base)
+		scratch.remove()
+	}
+}
+
 /** Steps 2 and 3: serve the copy, read Evidence freshness and readiness, stop the server. Returns the check results. */
 async function checkServedCopy({ report, scratch, copiedRoot, modules, header, served }) {
 	const cli = (...args) => run(process.execPath, [join(REPOSITORY, 'bin', 'uiux.mjs'), ...args, '--workspace', copiedRoot], { cwd: scratch.base, env: { ...process.env, UIUX_HOME: scratch.home } })
@@ -614,29 +692,14 @@ async function checkServedCopy({ report, scratch, copiedRoot, modules, header, s
 		header.push(`Adapter contentDigest: ${(evidence.adapters ?? []).map(adapter => adapter.contentDigest).join(', ') || 'unavailable'}`)
 		header.push(`Product Kit outputDigest: ${evidence.productKit?.outputDigest ?? 'unavailable'}`)
 
-		// What the Workbench judges freshness against (`useReadiness`), read the same way.
-		const stalenessContext = {
-			allViews: (evidence.views ?? []).map(view => ({ key: view.key, renderInputDigest: view.renderInputDigest })),
-			workspace,
-			discoveredLocales: localeItems.map(item => item.key),
-			localeRevisions: Object.fromEntries(localeItems.map(item => [item.key, item.revision])),
-			...(evidence.productKit ? { productKit: evidence.productKit } : {}),
-			...(evidence.productKitUnavailable === true ? { productKitUnavailable: true } : {}),
-			...(evidence.adapters ? { adapters: evidence.adapters } : {}),
-			...(evidence.adaptersUnavailable === true ? { adaptersUnavailable: true } : {}),
-		}
-		const entries = (evidence.items ?? [])
-			.filter(item => item?.record?.kind === 'formal_capture')
-			.map((item) => {
-				const context = modules.contextFromRecord(item.record)
-				return { digest: item.digest, record: item.record, ...(context ? { context } : {}), freshness: modules.evidenceFreshness(item.record, stalenessContext) }
-			})
+		const entries = freshnessEntries({ evidence, workspace, localeItems, modules })
 		const { contexts, dimensions } = requiredContexts({ views, workspace: workspace.resource, locales: localeItems.map(item => item.key) })
 		const assessed = assessEvidence({ required: contexts, entries })
 		const total = contexts.length
 		const lines = [
 			`${assessed.fresh.length}/${total} required render contexts have a fresh formal capture (${dimensions.views} Views x ${dimensions.locales} Locales x ${dimensions.viewports} viewports x ${dimensions.themes} themes, no Variants); ${assessed.stale.length} stale, ${assessed.missing.length} missing.`,
-			`${entries.length} formal captures read; ${assessed.ignored.supersededNotFresh} non-fresh capture(s) of required contexts and ${assessed.ignored.outsideRequired} capture(s) of other contexts are not listed (a context passes with one fresh capture; nothing is recaptured; uiux artifacts gc collects the rest).`,
+			`${entries.length} formal captures read; ${assessed.ignored.supersededNotFresh} non-fresh capture(s) of required contexts and ${assessed.ignored.outsideRequired} capture(s) of other contexts are not listed (a context passes with one fresh capture; nothing is recaptured).`,
+			`${assessed.ignored.supersededByFresh} of the non-fresh captures are superseded by a fresh capture of the same context: uiux artifacts gc keeps them while their View revision is current, and pnpm dogfood:worktree select lists their deletion (report only; this check never fails on them).`,
 		]
 		const findings = [
 			...assessed.stale.map(item => `STALE    ${contextLabel(item.context)}: ${item.freshness.state === 'unknown' ? 'freshness unknown' : 'stale'}, ${item.freshness.reason ?? 'no reason'}${item.freshness.subject ? ` (${item.freshness.subject})` : ''}`),
