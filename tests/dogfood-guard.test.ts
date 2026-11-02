@@ -7,15 +7,17 @@ import { fileURLToPath } from 'node:url'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { createChecksRunEvidenceService } from '../src/application/services/checks-run-evidence'
-import { FileNativePersistence } from '../src/persistence/file-native'
+import { canonicalJsonBytes, FileNativePersistence, revisionForResourceFiles } from '../src/persistence/file-native'
+import { reviewRelativePath, viewRelativePath } from '../src/persistence/paths'
 import { CheckpointStore } from '../src/persistence/history/checkpoint-store'
 import type { CheckpointRecord } from '../src/domain/history/schema'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION } from '../src/product/workspace-schema'
 import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { HEAVY_SERVER_SUITE_TIMEOUT_MS } from './support/timeouts'
+import { interactionReplayRecord } from './support/evidence-record'
 import { createCurrentWorkspace } from './support/workspace-layout'
 import { GuardError, addedBlobs, blobPath, checkBlobs, checkHistory, checkKitNodeModules, collectableTrackedBlobs, isKitNodeModules, resolveBase, runGuard } from '../scripts/dogfood-guard.mjs'
-import { dogfoodStatus, formatSelection, isLinkedWorktree, prepare, select } from '../scripts/dogfood-worktree.mjs'
+import { dogfoodStatus, formatSelection, isLinkedWorktree, prepare, runSelect, select } from '../scripts/dogfood-worktree.mjs'
 
 /**
  * The dogfood CI guards and the worktree authoring helper (issue #381, Discussion #379 owner ruling 1:
@@ -356,7 +358,7 @@ describe('dogfood worktree', () => {
 		writeFileSync(join(worktree, '.uiux', 'history', 'checkpoints', 'baseline.json'), '{}\n')
 		writeFileSync(join(worktree, ownerCheckpoint), `${readFileSync(join(worktree, ownerCheckpoint), 'utf8')}\n`)
 
-		const result = select(worktree)
+		const result = await select(worktree)
 		expect(result.add).toEqual(['.uiux/workspace.json', blobPath(kept)].sort())
 		expect(result.collectable).toEqual([blobPath(garbage)])
 		expect(result.history.sort()).toEqual(['.uiux/history/checkpoints/baseline.json', ownerCheckpoint].sort())
@@ -378,7 +380,7 @@ describe('dogfood worktree', () => {
 		symlinkSync(join(worktree, 'node_modules'), join(worktree, '.uiux', 'kit', 'node_modules'))
 		expect(dogfoodStatus(worktree).map(entry => entry.path)).toContain('.uiux/kit/node_modules')
 
-		const result = select(worktree)
+		const result = await select(worktree)
 		expect(result.kitNodeModules).toEqual(['.uiux/kit/node_modules'])
 		expect(result.add).toEqual(['.uiux/workspace.json', blobPath(kept)].sort())
 		const text = formatSelection(result).join('\n')
@@ -394,8 +396,8 @@ describe('dogfood worktree', () => {
 		// A plain file in its place is skipped as well.
 		rmSync(join(worktree, '.uiux', 'kit', 'node_modules'))
 		writeFileSync(join(worktree, '.uiux', 'kit', 'node_modules'), 'a file\n')
-		expect(select(worktree).kitNodeModules).toEqual(['.uiux/kit/node_modules'])
-		expect(select(worktree).add).not.toContain('.uiux/kit/node_modules')
+		expect((await select(worktree)).kitNodeModules).toEqual(['.uiux/kit/node_modules'])
+		expect((await select(worktree)).add).not.toContain('.uiux/kit/node_modules')
 	}, HEAVY_SERVER_SUITE_TIMEOUT_MS)
 
 	it('stages exactly the selected paths with --stage, and flags a tracked blob that changed', async () => {
@@ -429,7 +431,7 @@ describe('dogfood worktree: superseded tracked Evidence', () => {
 
 	it('lists the tracked blobs gc would collect as git rm lines, and not the reached ones', async () => {
 		const { worktree, superseded, kept } = await supersededRepository()
-		const result = select(worktree)
+		const result = await select(worktree)
 		expect(result.remove).toEqual([superseded])
 		expect(result.add).toEqual([])
 		expect(result.damaged).toEqual([])
@@ -451,12 +453,158 @@ describe('dogfood worktree: superseded tracked Evidence', () => {
 		expect(staged).toEqual([`A\t${added}`, `D\t${superseded}`].sort())
 		expect(existsSync(join(worktree, kept))).toBe(true)
 		// Nothing is left to delete once the deletion is staged.
-		expect(select(worktree).remove).toEqual([])
+		expect((await select(worktree)).remove).toEqual([])
 	}, HEAVY_SERVER_SUITE_TIMEOUT_MS)
 
 	it('reports the count of collectable tracked blobs of a ref (dogfood:check line)', async () => {
 		const { repo, superseded } = await supersededRepository()
 		expect(collectableTrackedBlobs(repo, 'main')).toEqual([superseded])
+	}, HEAVY_SERVER_SUITE_TIMEOUT_MS)
+})
+
+describe('dogfood worktree: captures superseded by a fresh capture', () => {
+	const VIEW = randomUUID()
+	const ctx = (locale: string) => `${VIEW}|${locale}`
+
+	function capture(locale: string, viewRevision: string, artifactRefs: readonly string[]): Record<string, unknown> {
+		return {
+			schemaVersion: 1,
+			kind: 'formal_capture',
+			executionContext: { viewId: VIEW, locale, viewportId: 'desktop', viewport: { width: 1280, height: 800 }, themeId: 'light' },
+			coverage: { complete: true },
+			provenance: { workspaceSchemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION, resources: [{ identity: { type: 'view', id: VIEW }, revision: viewRevision }], versions: { uiux: '0.1.0' } },
+			artifactRefs,
+			data: { format: 'png' },
+		}
+	}
+
+	function reviewThread(evidence: string): Record<string, unknown> {
+		const at = '2026-10-18T12:00:00Z'
+		const submissionId = randomUUID()
+		return {
+			id: randomUUID(),
+			anchor: { scope: 'workspace' },
+			variantNames: [],
+			status: 'ready-for-review',
+			messages: [],
+			submissions: [{ id: submissionId, actor: { type: 'agent', id: 'member:agent' }, at, changeDomains: ['ir'], resources: [{ identity: { type: 'view', id: randomUUID() }, revision: 'r_reviewed' }], scope: {}, evidenceRefs: [{ kind: 'formal_capture', evidence }] }],
+			history: [{ id: randomUUID(), kind: 'lifecycle', from: 'open', to: 'ready-for-review', actor: { type: 'agent', id: 'member:agent' }, at, submissionId }],
+		}
+	}
+
+	/**
+	 * A committed Workspace whose one View has the current revision, and captures of that revision in four render
+	 * contexts (Locales), every one of them kept by gc because their View revision is current:
+	 * - en-US: an old (stale) and a new (fresh) capture; both name `shared`, each its own screenshot;
+	 * - zh-TW: two stale captures and no fresh one;
+	 * - fr-FR: an old (stale) capture a Review submission names, and a new (fresh) one;
+	 * - de-DE: an old (stale) capture an `interaction_replay` names, and a new (fresh) one.
+	 */
+	async function supersededWorld() {
+		const hexes: Record<string, string> = {}
+		const states = new Map<string, { contextKey: string; state: 'fresh' | 'stale' }>()
+		const context = await repositoryWithBase(async ({ repo, persistence }) => {
+			const bytes = encoder.encode('{"view":"current"}\n')
+			mkdirSync(join(repo, '.uiux', 'views'), { recursive: true })
+			writeFileSync(join(repo, '.uiux', viewRelativePath(VIEW)), bytes)
+			const revision = revisionForResourceFiles('view', new Map([[viewRelativePath(VIEW), bytes]]))!
+			const png = async (name: string) => (hexes[name] = await garbageBlob(persistence, `png: ${name}`))
+			const put = async (name: string, locale: string, state: 'fresh' | 'stale', refs: readonly string[]) => {
+				hexes[name] = hexOf((await persistence.artifacts.put(canonicalJsonBytes(capture(locale, revision, refs.map(ref => `sha256:${hexes[ref]!}`))))).identity)
+				states.set(name, { contextKey: ctx(locale), state })
+			}
+			for (const name of ['shared', 'old', 'new', 'zh1', 'zh2', 'fr-old', 'fr-new', 'de-old', 'de-new']) await png(name)
+			await put('A-old', 'en-US', 'stale', ['shared', 'old'])
+			await put('A-new', 'en-US', 'fresh', ['shared', 'new'])
+			await put('B1', 'zh-TW', 'stale', ['zh1'])
+			await put('B2', 'zh-TW', 'stale', ['zh2'])
+			await put('C-old', 'fr-FR', 'stale', ['fr-old'])
+			await put('C-new', 'fr-FR', 'fresh', ['fr-new'])
+			await put('D-old', 'de-DE', 'stale', ['de-old'])
+			await put('D-new', 'de-DE', 'fresh', ['de-new'])
+			const thread = reviewThread(`sha256:${hexes['C-old']!}`)
+			mkdirSync(join(repo, '.uiux', 'reviews'), { recursive: true })
+			writeFileSync(join(repo, '.uiux', reviewRelativePath(thread.id as string)), `${JSON.stringify(thread)}\n`)
+			const replay = interactionReplayRecord(VIEW, 'pass', `sha256:${hexes['D-old']!}`)
+			await persistence.artifacts.put(canonicalJsonBytes(replay))
+		})
+		git(context.repo, 'switch', '-q', 'main')
+		const worktree = join(scratch(), 'author')
+		git(context.repo, 'worktree', 'add', '-q', '-b', 'author', worktree, 'main')
+		const calls: string[] = []
+		const readFreshness = async (root: string) => {
+			calls.push(root)
+			return [...states].map(([name, { contextKey, state }]) => ({ digest: `sha256:${hexes[name]!}`, contextKey, state }))
+		}
+		return { ...context, worktree, hexes, readFreshness, calls, path: (name: string) => blobPath(hexes[name]!) }
+	}
+
+	it('lists the stale capture of a context that has a fresh one, and the screenshot only it names, but not the shared screenshot', async () => {
+		const { worktree, readFreshness, path, calls } = await supersededWorld()
+		const result = await select(worktree, { readFreshness })
+		// gc keeps every one of these (their View revision is current): nothing is listed as plain garbage but the unreferenced test screenshots.
+		expect(result.superseded.records).toContain(path('A-old'))
+		expect(result.superseded.dependents).toContain(path('old'))
+		expect(result.superseded.dependents).not.toContain(path('shared'))
+		expect(result.superseded.records).not.toContain(path('A-new'))
+		expect(result.superseded.dependents).not.toContain(path('new'))
+		expect(calls).toHaveLength(1)
+		const text = formatSelection(result).join('\n')
+		expect(text).toContain('superseded by a fresh capture:')
+		expect(text).toContain(`'${path('A-old')}'`)
+		expect(text).not.toContain(`'${path('A-new')}'`)
+		expect(result.superseded.bytes.records).toBeGreaterThan(0)
+		expect(result.superseded.bytes.dependents).toBeGreaterThan(0)
+	}, HEAVY_SERVER_SUITE_TIMEOUT_MS)
+
+	it('never lists a capture of a context that has no fresh capture', async () => {
+		const { worktree, readFreshness, path } = await supersededWorld()
+		const { superseded } = await select(worktree, { readFreshness })
+		for (const name of ['B1', 'B2', 'zh1', 'zh2']) expect([...superseded.records, ...superseded.dependents], name).not.toContain(path(name))
+	}, HEAVY_SERVER_SUITE_TIMEOUT_MS)
+
+	it('keeps a stale capture that a Review submission names, and one that another kept record names', async () => {
+		const { worktree, readFreshness, path } = await supersededWorld()
+		const { superseded } = await select(worktree, { readFreshness })
+		const listed = [...superseded.records, ...superseded.dependents]
+		for (const name of ['C-old', 'fr-old', 'D-old', 'de-old']) expect(listed, name).not.toContain(path(name))
+	}, HEAVY_SERVER_SUITE_TIMEOUT_MS)
+
+	it('lists exactly the superseded capture and its screenshot among the captures of this Workspace', async () => {
+		const { worktree, readFreshness, path } = await supersededWorld()
+		const { superseded, remove } = await select(worktree, { readFreshness })
+		expect(superseded.records).toEqual([path('A-old')])
+		expect(superseded.dependents).toEqual([path('old')])
+		// What gc itself lists is not repeated in the superseded section.
+		for (const name of ['A-old', 'old']) expect(remove).not.toContain(path(name))
+	}, HEAVY_SERVER_SUITE_TIMEOUT_MS)
+
+	it('skips the freshness judgement and the section with superseded: false', async () => {
+		const { worktree, readFreshness, calls } = await supersededWorld()
+		const skipped = await select(worktree, { readFreshness, superseded: false })
+		expect(skipped.superseded.records).toEqual([])
+		expect(calls).toEqual([])
+		expect(formatSelection(skipped).join('\n')).not.toContain('superseded by a fresh capture')
+	}, HEAVY_SERVER_SUITE_TIMEOUT_MS)
+
+	it('stages the deletions next to the additions, and not again once they are staged', async () => {
+		const { worktree, readFreshness, path } = await supersededWorld()
+		const lines = await runSelect(worktree, { readFreshness, stage: true })
+		expect(lines.join('\n')).toContain('Staged 0 path(s) and')
+		expect(git(worktree, 'diff', '--cached', '--name-status').trim().split('\n').sort()).toEqual(expect.arrayContaining([`D\t${path('A-old')}`, `D\t${path('old')}`]))
+		expect(existsSync(join(worktree, path('A-new')))).toBe(true)
+		expect(existsSync(join(worktree, path('shared')))).toBe(true)
+		// Staged deletions are not listed a second time, and are not damage.
+		const again = await select(worktree, { readFreshness })
+		expect(again.superseded.records).toEqual([])
+		expect(again.damaged).toEqual([])
+	}, HEAVY_SERVER_SUITE_TIMEOUT_MS)
+
+	it('flags a deleted tracked capture as damage when nothing supersedes it', async () => {
+		const { worktree, readFreshness, path } = await supersededWorld()
+		rmSync(join(worktree, path('B1')))
+		const result = await select(worktree, { readFreshness })
+		expect(result.damaged).toEqual([path('B1')])
 	}, HEAVY_SERVER_SUITE_TIMEOUT_MS)
 })
 
