@@ -15,7 +15,8 @@
  * canonical resource under `.uiux/`, and only the Evidence blobs that survive `uiux artifacts gc
  * --dry-run` with an empty `UIUX_HOME` against the worktree's `.uiux/` as it would be committed (its
  * `history/` replaced by the one in HEAD). It never selects `.uiux/history/**` (the worktree's
- * Baseline Checkpoint and host history) or an unreferenced blob, prints the exact `git add` list
+ * Baseline Checkpoint and host history), an unreferenced blob or `.uiux/kit/node_modules` (a symlink
+ * to the repository's, which the `kit/node_modules/` ignore rule does not match), prints the exact `git add` list
  * (and runs it with `--stage`), and changes nothing else.
  *
  * After a recapture it also lists the deletions of tracked blobs that the same gc dry-run would
@@ -29,7 +30,7 @@ import { dirname, join, relative, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
 import { fileURLToPath } from 'node:url'
 
-import { BLOB_DIR, DOGFOOD_DIR, GuardError, HISTORY_DIR, exportCommitted, git, listGarbageBlobs, makeScratch } from './dogfood-guard.mjs'
+import { BLOB_DIR, DOGFOOD_DIR, GuardError, HISTORY_DIR, KIT_NODE_MODULES, exportCommitted, git, isKitNodeModules, listGarbageBlobs, makeScratch } from './dogfood-guard.mjs'
 
 const BLOB_PATH = /^\.uiux\/artifacts\/sha256\/[0-9a-f]{2}\/([0-9a-f]{64})$/
 // The CLI that runs this script: in a worktree, the worktree's own bin/uiux.mjs.
@@ -91,8 +92,10 @@ export function prepare(repo, { home, build = true } = {}) {
 		'3. Stop the server, then: node scripts/dogfood-worktree.mjs select [--stage]',
 		`4. Clean up when done: rm -rf ${directory}; git worktree remove <this worktree>`,
 	]
-	if (existsSync(join(repo, DOGFOOD_DIR, 'kit', 'package.json')) && !existsSync(join(repo, DOGFOOD_DIR, 'kit', 'node_modules')))
-		lines.push('', 'Note: .uiux/kit/package.json declares a kit project but .uiux/kit/node_modules is missing; install its dependencies before uiux dev runs the declared build.')
+	// The kit build resolves esbuild and vue by walking up from .uiux/kit/ to the worktree's own node_modules, so no
+	// .uiux/kit/node_modules link is needed (dogfood:check links one only because its copy lives outside the repository).
+	if (existsSync(join(repo, DOGFOOD_DIR, 'kit', 'package.json')) && !existsSync(join(repo, 'node_modules')))
+		lines.push('', `Note: ${DOGFOOD_DIR}/kit/package.json declares a kit project but the worktree has no node_modules; run pnpm install --frozen-lockfile in it before uiux dev runs the declared build (the build finds esbuild and vue there). Do not link ${KIT_NODE_MODULES}: select skips it and dogfood:guard refuses it.`)
 	return lines
 }
 
@@ -125,15 +128,19 @@ function buildCommittable(repo, destRoot, entries) {
 }
 
 /**
- * Classifies the changes under `.uiux/` for committing. Returns `{ add, history, collectable, damaged }`:
- * `add` the paths to stage (deletions included), `history` the skipped history paths, `collectable`
+ * Classifies the changes under `.uiux/` for committing. Returns `{ add, history, kitNodeModules, collectable, damaged }`:
+ * `add` the paths to stage (deletions included), `history` the skipped history paths, `kitNodeModules`
+ * the skipped `.uiux/kit/node_modules` paths, `collectable`
  * the skipped unreferenced new blobs, `damaged` the tracked blobs that were modified or deleted, and
  * `remove` the tracked blobs gc would collect from the as-committed tree (deletions to stage; a blob
  * whose deletion is already staged is left out, and a working-tree deletion of one is not damage).
  */
 /** @param {string} repo @param {{ uiuxBin?: string }} [options] */
 export function select(repo, { uiuxBin } = {}) {
-	const entries = dogfoodStatus(repo)
+	const status = dogfoodStatus(repo)
+	// `.uiux/kit/node_modules` (a directory, a symlink or a file) is never selected, and never reaches gc's scratch tree.
+	const kitNodeModules = status.filter(({ path }) => isKitNodeModules(path)).map(({ path }) => path)
+	const entries = status.filter(({ path }) => !isKitNodeModules(path))
 	const add = []
 	const history = []
 	const damaged = []
@@ -168,7 +175,7 @@ export function select(repo, { uiuxBin } = {}) {
 	// A deleted tracked blob that gc would not collect is damage; one it would collect is a wanted deletion.
 	for (const path of deleted.keys()) if (!remove.includes(path)) damaged.push(path)
 	remove = remove.filter(path => deleted.get(path)?.[0] !== 'D')
-	return { add: [...add, ...blobs.map(blob => blob.path)].sort(), resources: add.length, blobs: blobs.length, history, collectable, damaged, remove }
+	return { add: [...add, ...blobs.map(blob => blob.path)].sort(), resources: add.length, blobs: blobs.length, history, kitNodeModules, collectable, damaged, remove }
 }
 
 const shellQuote = path => `'${path.replaceAll('\'', '\'\\\'\'')}'`
@@ -176,6 +183,7 @@ const shellQuote = path => `'${path.replaceAll('\'', '\'\\\'\'')}'`
 export function formatSelection(result) {
 	const lines = [`${result.add.length} path(s) to commit: ${result.resources} canonical resource change(s), ${result.blobs} Evidence blob(s) they reach.`]
 	if (result.history.length > 0) lines.push(`Skipped ${result.history.length} ${HISTORY_DIR}/ path(s): history and the Baseline Checkpoint are never committed.`)
+	if (result.kitNodeModules.length > 0) lines.push(`Skipped ${result.kitNodeModules.length} ${KIT_NODE_MODULES} path(s): a local link or install of the kit's dependencies is never committed (a symlink is not covered by the kit/node_modules/ ignore rule).`)
 	if (result.collectable.length > 0) lines.push(`Skipped ${result.collectable.length} new blob(s) that gc --dry-run (empty UIUX_HOME) would delete: no committed resource reaches them.`)
 	if (result.damaged.length > 0) {
 		lines.push(`WARNING: ${result.damaged.length} tracked blob(s) changed or vanished; blobs are content-addressed, so restore them:`)

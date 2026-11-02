@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { execFileSync, spawnSync } from 'node:child_process'
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -14,7 +14,7 @@ import { CURRENT_WORKSPACE_SCHEMA_VERSION } from '../src/product/workspace-schem
 import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { HEAVY_SERVER_SUITE_TIMEOUT_MS } from './support/timeouts'
 import { createCurrentWorkspace } from './support/workspace-layout'
-import { GuardError, addedBlobs, blobPath, checkBlobs, checkHistory, collectableTrackedBlobs, resolveBase, runGuard } from '../scripts/dogfood-guard.mjs'
+import { GuardError, addedBlobs, blobPath, checkBlobs, checkHistory, checkKitNodeModules, collectableTrackedBlobs, isKitNodeModules, resolveBase, runGuard } from '../scripts/dogfood-guard.mjs'
 import { dogfoodStatus, formatSelection, isLinkedWorktree, prepare, select } from '../scripts/dogfood-worktree.mjs'
 
 /**
@@ -219,6 +219,69 @@ describe('dogfood guard: blobs', () => {
 	})
 })
 
+describe('dogfood guard: kit node_modules (issue #471)', () => {
+	/** What a worktree has after linking the kit's dependencies to the repository's: a symlink, which Git treats as a file. */
+	function linkKitNodeModules(repo: string): void {
+		mkdirSync(join(repo, '.uiux', 'kit'), { recursive: true })
+		mkdirSync(join(repo, 'node_modules'), { recursive: true })
+		symlinkSync(join(repo, 'node_modules'), join(repo, '.uiux', 'kit', 'node_modules'))
+	}
+
+	it('matches kit/node_modules and what is under it, not a look-alike', () => {
+		expect(isKitNodeModules('.uiux/kit/node_modules')).toBe(true)
+		expect(isKitNodeModules('.uiux/kit/node_modules/vue/package.json')).toBe(true)
+		expect(isKitNodeModules('.uiux/kit/node_modules-copy')).toBe(false)
+		expect(isKitNodeModules('.uiux/kit/src/node_modules')).toBe(false)
+		expect(isKitNodeModules('app/node_modules')).toBe(false)
+	})
+
+	it('fails a PR that commits the kit/node_modules symlink, even with allowHistory, and says how to remove it', async () => {
+		const { repo } = await repositoryWithBase()
+		linkKitNodeModules(repo)
+		// The ignore rule `kit/node_modules/` has a trailing slash: a plain `git add -A` takes the symlink.
+		commitAll(repo, 'commits the symlink')
+		expect(git(repo, 'ls-tree', '-r', '--name-only', 'HEAD', '--', '.uiux/kit').trim()).toBe('.uiux/kit/node_modules')
+		expect(checkKitNodeModules(repo, { from: 'main', to: 'HEAD' })).toEqual(['.uiux/kit/node_modules'])
+		for (const allowHistory of [false, true]) {
+			const run = runGuard(repo, { base: 'main', allowHistory })
+			expect(run.ok).toBe(false)
+			expect(run.lines.join('\n')).toContain('FAIL  kit')
+			expect(run.lines.join('\n')).toContain('git rm --cached -- .uiux/kit/node_modules')
+		}
+		const cli = guardCli(repo, '--base', 'main', '--allow-history')
+		expect(cli.status, cli.stdout + cli.stderr).toBe(1)
+		expect(cli.stdout).toContain('.uiux/kit/node_modules')
+	})
+
+	it('fails a PR that force-adds a file under a kit/node_modules directory', async () => {
+		const { repo } = await repositoryWithBase()
+		mkdirSync(join(repo, '.uiux', 'kit', 'node_modules', 'vue'), { recursive: true })
+		writeFileSync(join(repo, '.uiux', 'kit', 'node_modules', 'vue', 'package.json'), '{}\n')
+		git(repo, 'add', '-f', '--', '.uiux/kit/node_modules/vue/package.json')
+		git(repo, 'commit', '-q', '-m', 'force-adds an install')
+		expect(checkKitNodeModules(repo, { from: 'main', to: 'HEAD' })).toEqual(['.uiux/kit/node_modules/vue/package.json'])
+		expect(runGuard(repo, { base: 'main' }).ok).toBe(false)
+	})
+
+	it('passes a PR without it, and one that deletes what the base holds', async () => {
+		const clean = await repositoryWithBase()
+		mkdirSync(join(clean.repo, '.uiux', 'kit', 'src'), { recursive: true })
+		writeFileSync(join(clean.repo, '.uiux', 'kit', 'src', 'note.txt'), 'kit source\n')
+		commitAll(clean.repo, 'kit source only')
+		const pass = runGuard(clean.repo, { base: 'main' })
+		expect(pass.ok, pass.lines.join('\n')).toBe(true)
+		expect(pass.lines.join('\n')).toContain('ok    kit')
+
+		const { repo } = await repositoryWithBase(async ({ repo: root }) => {
+			linkKitNodeModules(root)
+		})
+		git(repo, 'rm', '-q', '--', '.uiux/kit/node_modules')
+		git(repo, 'commit', '-q', '-m', 'removes the symlink')
+		expect(checkKitNodeModules(repo, { from: 'main', to: 'HEAD' })).toEqual([])
+		expect(runGuard(repo, { base: 'main' }).ok).toBe(true)
+	})
+})
+
 describe('dogfood guard: base resolution', () => {
 	it('prefers the CI base ref, then origin/main, then main', async () => {
 		const { repo } = await repositoryWithBase()
@@ -271,6 +334,15 @@ describe('dogfood worktree', () => {
 		expect(text).toContain(`UIUX_HOME=${home} node bin/uiux.mjs dev --workspace ${join(worktree, '.uiux')}`)
 		expect(existsSync(home)).toBe(true)
 		expect(() => prepare(worktree, { home: join(worktree, 'inside'), build: false })).toThrow(/outside the worktree/)
+		// prepare never creates a kit/node_modules link (the build resolves from the worktree's node_modules); it only warns.
+		mkdirSync(join(worktree, '.uiux', 'kit'), { recursive: true })
+		writeFileSync(join(worktree, '.uiux', 'kit', 'package.json'), '{}\n')
+		const noted = prepare(worktree, { home: join(scratch(), 'home2'), build: false }).join('\n')
+		expect(noted).toContain('the worktree has no node_modules')
+		expect(noted).toContain('Do not link .uiux/kit/node_modules')
+		expect(existsSync(join(worktree, '.uiux', 'kit', 'node_modules'))).toBe(false)
+		mkdirSync(join(worktree, 'node_modules'))
+		expect(prepare(worktree, { home: join(scratch(), 'home3'), build: false }).join('\n')).not.toContain('no node_modules')
 	}, HEAVY_SERVER_SUITE_TIMEOUT_MS)
 
 	it('selects the resources and the reached blobs, and never history or unreferenced blobs', async () => {
@@ -294,6 +366,36 @@ describe('dogfood worktree', () => {
 		expect(text).toContain(`'${blobPath(kept)}'`)
 		expect(text).not.toContain(garbage)
 		expect(text).not.toContain('history/checkpoints/baseline.json\'')
+	}, HEAVY_SERVER_SUITE_TIMEOUT_MS)
+
+	it('never lists or stages .uiux/kit/node_modules: a symlink, a file, or anything under it (issue #471)', async () => {
+		const { worktree, persistence } = await worktreeRepository()
+		const kept = await keptBlob(persistence, 3)
+		addTheme(join(worktree, '.uiux', 'workspace.json'))
+		mkdirSync(join(worktree, '.uiux', 'kit'), { recursive: true })
+		mkdirSync(join(worktree, 'node_modules'), { recursive: true })
+		// A symlink is a file to Git, so the `kit/node_modules/` ignore rule does not match it.
+		symlinkSync(join(worktree, 'node_modules'), join(worktree, '.uiux', 'kit', 'node_modules'))
+		expect(dogfoodStatus(worktree).map(entry => entry.path)).toContain('.uiux/kit/node_modules')
+
+		const result = select(worktree)
+		expect(result.kitNodeModules).toEqual(['.uiux/kit/node_modules'])
+		expect(result.add).toEqual(['.uiux/workspace.json', blobPath(kept)].sort())
+		const text = formatSelection(result).join('\n')
+		expect(text).toContain('Skipped 1 .uiux/kit/node_modules path(s)')
+		expect(text).not.toContain("'.uiux/kit/node_modules'")
+
+		const cli = spawnSync(process.execPath, [WORKTREE_SCRIPT, 'select', '--stage'], { cwd: worktree, env: GIT_ENV, encoding: 'utf8' })
+		expect(cli.status, cli.stderr).toBe(0)
+		expect(cli.stdout).toContain('Skipped 1 .uiux/kit/node_modules path(s)')
+		expect(git(worktree, 'diff', '--cached', '--name-only').trim().split('\n').sort()).toEqual(['.uiux/workspace.json', blobPath(kept)].sort())
+		expect(dogfoodStatus(worktree).filter(entry => entry.path.startsWith('.uiux/kit/node_modules')).map(entry => entry.status)).toEqual(['??'])
+
+		// A plain file in its place is skipped as well.
+		rmSync(join(worktree, '.uiux', 'kit', 'node_modules'))
+		writeFileSync(join(worktree, '.uiux', 'kit', 'node_modules'), 'a file\n')
+		expect(select(worktree).kitNodeModules).toEqual(['.uiux/kit/node_modules'])
+		expect(select(worktree).add).not.toContain('.uiux/kit/node_modules')
 	}, HEAVY_SERVER_SUITE_TIMEOUT_MS)
 
 	it('stages exactly the selected paths with --stage, and flags a tracked blob that changed', async () => {
