@@ -12,14 +12,17 @@
  * 2. Blob guard: `uiux artifacts gc --dry-run`, run against an export of the PR head's committed
  *    `.uiux/` with an empty `UIUX_HOME`, lists none of the blobs the PR adds (an added blob that
  *    gc would collect is unreferenced, so nothing in the PR needs it).
+ * 3. Kit guard: the PR adds or changes nothing at `.uiux/kit/node_modules` (a directory, a symlink or
+ *    a file). A worktree that links it to the repository's `node_modules` for the kit build has a
+ *    symlink there, which Git treats as a file and the `kit/node_modules/` ignore rule does not match.
  *
  * Usage: node scripts/dogfood-guard.mjs [--base <ref>] [--head <ref>] [--allow-history]
  * `--allow-history` skips the history guard only (the owner's host legitimately commits Baseline
  * Checkpoints and history; CI passes it for a PR labeled `dogfood-history`, which only the owner applies).
- * The blob guard has no escape hatch.
+ * The blob guard and the kit guard have no escape hatch.
  * `--head` defaults to HEAD. `--base` defaults to `origin/$GITHUB_BASE_REF` in a CI pull request,
- * else `origin/main`, else `main`. The PR's changes are `merge-base(base, head)..head`. Both guards
- * read the committed state of the head, so commit before running them locally. Exit 0 when both
+ * else `origin/main`, else `main`. The PR's changes are `merge-base(base, head)..head`. The guards
+ * read the committed state of the head, so commit before running them locally. Exit 0 when all
  * pass, 1 when one fails, 2 on a usage or environment error.
  */
 
@@ -33,6 +36,7 @@ import { fileURLToPath } from 'node:url'
 export const DOGFOOD_DIR = '.uiux'
 export const HISTORY_DIR = `${DOGFOOD_DIR}/history`
 export const BLOB_DIR = `${DOGFOOD_DIR}/artifacts/sha256`
+export const KIT_NODE_MODULES = `${DOGFOOD_DIR}/kit/node_modules`
 const BLOB_PATH = /^\.uiux\/artifacts\/sha256\/[0-9a-f]{2}\/([0-9a-f]{64})$/
 const BLOB_IDENTITY = /^sha256:([0-9a-f]{64})$/
 const DEFAULT_UIUX_BIN = join(dirname(fileURLToPath(import.meta.url)), '..', 'bin', 'uiux.mjs')
@@ -86,6 +90,16 @@ export function changedPaths(repo, from, to, filter, pathspec) {
 /** Guard 1: the history paths the PR adds or changes (deleting one is not a violation). */
 export function checkHistory(repo, { from, to }) {
 	return changedPaths(repo, from, to, 'AMT', HISTORY_DIR)
+}
+
+/** True for `.uiux/kit/node_modules` and anything under it. */
+export function isKitNodeModules(path) {
+	return path === KIT_NODE_MODULES || path.startsWith(`${KIT_NODE_MODULES}/`)
+}
+
+/** Guard 3: the `.uiux/kit/node_modules` paths the PR adds or changes, a symlink included (deleting one is not a violation). */
+export function checkKitNodeModules(repo, { from, to }) {
+	return changedPaths(repo, from, to, 'AMT', KIT_NODE_MODULES)
 }
 
 /** The blobs the PR adds, as `{ hex, path }`. */
@@ -184,7 +198,7 @@ export function collectableTrackedBlobs(repo, ref = 'HEAD', { uiuxBin } = {}) {
 	}
 }
 
-/** Runs both guards; returns `{ ok, lines }` for the caller to print. */
+/** Runs the guards; returns `{ ok, lines }` for the caller to print. */
 /** @param {string} repo @param {{ base?: string, head?: string, env?: Record<string, string | undefined>, uiuxBin?: string, allowHistory?: boolean }} [options] */
 export function runGuard(repo, { base, head = 'HEAD', env, uiuxBin, allowHistory = false } = {}) {
 	const baseRef = resolveBase(repo, { base, env })
@@ -204,6 +218,17 @@ export function runGuard(repo, { base, head = 'HEAD', env, uiuxBin, allowHistory
 		lines.push(`FAIL  history: the PR adds or changes ${history.length} ${HISTORY_DIR}/ file(s); history and the worktree's Baseline Checkpoint are never committed:`)
 		for (const path of history) lines.push(`        ${path}`)
 		lines.push(`      Remove them from the PR, for example: git rm --cached -- <path> (an added file) or git checkout ${from.slice(0, 9)} -- <path> (a changed one).`)
+	}
+
+	const kitModules = checkKitNodeModules(repo, { from, to: head })
+	if (kitModules.length === 0) {
+		lines.push(`ok    kit: the PR adds or changes nothing at ${KIT_NODE_MODULES}`)
+	}
+	else {
+		ok = false
+		lines.push(`FAIL  kit: the PR adds or changes ${kitModules.length} path(s) at ${KIT_NODE_MODULES}; it is a local install or link of the kit's dependencies and is never committed (a symlink is a file to Git, so the kit/node_modules/ ignore rule does not cover it). No label skips this check:`)
+		for (const path of kitModules) lines.push(`        ${path}`)
+		lines.push(`      Remove it from the PR, for example: git rm --cached -- ${KIT_NODE_MODULES}`)
 	}
 
 	const blobs = checkBlobs(repo, { from, to: head, head, uiuxBin })
