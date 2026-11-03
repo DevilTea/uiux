@@ -42,17 +42,15 @@ jobs:
   # and the route map of app/pages/, and asserts it changed nothing under the checked-out .uiux/.
   # It recaptures nothing and writes its report to the step summary.
   #
-  # REPORT-ONLY until 2026-11-11 (two weeks after it landed on 2026-10-28, owner ruling 8 of
-  # https://github.com/DevilTea/uiux/discussions/379#discussioncomment-19234465): `continue-on-error`
-  # keeps a failure from failing the workflow, and the cross-OS risk (the Evidence was captured on macOS,
-  # this runs on Linux, and the kit build output feeds the Adapter digest) is read off the report during
-  # that time. On 2026-11-11 remove `continue-on-error` and make `dogfood-check` a required check.
+  # A finding fails the workflow. It was report-only from 2026-10-28 (owner ruling 8 of
+  # https://github.com/DevilTea/uiux/discussions/379#discussioncomment-19234465) while the cross-OS risk
+  # (Evidence captured on macOS, checked on Linux) was read off the report; every run since was green, and
+  # the owner made it failing on 2026-11-03. main has no branch protection, so it is not a required check.
   # It runs beside `check`, not after it: it needs nothing from `pnpm check` (it builds for itself).
   dogfood-check:
     # A label change reruns only the dogfood guard.
     if: github.event_name != 'pull_request' || (github.event.action != 'labeled' && github.event.action != 'unlabeled')
     runs-on: ubuntu-latest
-    continue-on-error: true
     timeout-minutes: 20
     steps:
       # Full history: the requirement coverage ratchet compares with the merge base's own .uiux/ and .spec/.
@@ -69,7 +67,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Build the packaged server
         run: pnpm build
-      - name: "Dogfood check (report-only until 2026-11-11)"
+      - name: Dogfood check
         run: pnpm dogfood:check
 
   check:
