@@ -101,7 +101,7 @@ export function useWidgetInspection(workbench: Workbench) {
 		const options = contextOptions.value
 		const viewId = selectedViewId.value
 		const generation = preview.runtimeGenerationId.value
-		// The revision of the View the Preview document was built from, not the Workbench's latest.
+		// The revision of the View the open generation renders: the Preview reports it as `inspection.base-state.mounted`, and until it does Base cells read pending.
 		const revision = preview.generationViewRevision.value
 		const dimensions = options.viewports.selectedDimensions
 		const variantId = variantName.value

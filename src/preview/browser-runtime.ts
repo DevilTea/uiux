@@ -151,11 +151,13 @@ export interface PreviewRuntimeMountOptions {
 	onChecksObservation?: (observation: ChecksObservation) => void
 	/**
 	 * Called each time a Runtime has been mounted and is the applied one: after the first render, and
-	 * after an update replaced the Runtime. The base-state request held while nothing was mounted is
-	 * answered from it (Clause 01a19a9b-386b-7598-a0b9-6865cb9fd6e0). A construction that renders at
-	 * once calls it before `mountPreviewRuntime` returns.
+	 * after an update replaced the Runtime. It is told the revision of the View read that Runtime was
+	 * built from, which the Preview reports as `inspection.base-state.mounted` (Clause
+	 * 01a19ab9-d028-7bb9-a370-4736992852f5), and the base-state request held while nothing was mounted
+	 * is answered from it (Clause 01a19a9b-386b-7598-a0b9-6865cb9fd6e0). A construction that renders
+	 * at once calls it before `mountPreviewRuntime` returns.
 	 */
-	onRuntimeMounted?: () => void
+	onRuntimeMounted?: (mounted: Readonly<{ viewRevision?: string }>) => void
 	/**
 	 * The Product Kit stylesheet's URL. The construction links it first, at the end of the document's
 	 * head, and renders only once it has loaded; a load error fails the construction (Rules
@@ -794,7 +796,7 @@ export function createStandalonePreviewMount(input: Readonly<{
 			})
 			eventObserver.attach(activeRuntime.value)
 			checksObserver?.attach(activeRuntime.value)
-			options.onRuntimeMounted?.()
+			options.onRuntimeMounted?.({ ...(mountedSource.revision !== undefined ? { viewRevision: mountedSource.revision } : {}) })
 		}
 
 		// The Product Kit stylesheet is linked first, after UIUX's own stylesheets in the head, and the
@@ -870,7 +872,7 @@ export function createStandalonePreviewMount(input: Readonly<{
 					status: 'ready',
 					supportedTypes: Object.freeze([...supportedTypes]),
 				})
-				if (phase === 'mounted') options.onRuntimeMounted?.()
+				if (phase === 'mounted') options.onRuntimeMounted?.({ ...(mountedSource.revision !== undefined ? { viewRevision: mountedSource.revision } : {}) })
 			},
 
 			updateContext(nextContext: ResolvedRenderContext) {
@@ -941,7 +943,7 @@ export function createStandalonePreviewMount(input: Readonly<{
 					activeController = nextController
 					mountedSource = { view: currentView, revision: currentViewRevision, assets: currentAssets }
 					showRuntime(activeController.runtime)
-					if (phase === 'mounted') options.onRuntimeMounted?.()
+					if (phase === 'mounted') options.onRuntimeMounted?.({ ...(mountedSource.revision !== undefined ? { viewRevision: mountedSource.revision } : {}) })
 				}
 			},
 
