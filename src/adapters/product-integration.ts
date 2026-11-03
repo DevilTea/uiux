@@ -197,7 +197,7 @@ export const productAdapterApiCompatibility: AdapterApiCompatibilityPolicy = {
 	},
 	memberMinorViolations(manifest: AdapterManifest) {
 		if (manifest.apiVersion === 'test') return []
-		const declared = declaredMinor(manifest.apiVersion) ?? 0n
+		const declared = declaredMinor(manifest.apiVersion) ?? BigInt(0)
 		const used: { member: string; minor: number }[] = []
 		if (manifest.providers.length > 0) used.push({ member: 'providers', minor: ADAPTER_API_MEMBER_MINORS.providers })
 		if (Object.hasOwn(manifest, 'themeSupport')) used.push({ member: 'themeSupport', minor: ADAPTER_API_MEMBER_MINORS.themeSupport })
