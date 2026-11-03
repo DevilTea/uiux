@@ -95,6 +95,8 @@ export function useWidgetInspection(workbench: Workbench) {
 		send: request => preview.sendBaseStateRequest(request),
 		mintRequestId: mintBaseStateRequestId,
 		changed: () => { baseStateVersion.value++ },
+		// A mount report retargets at once, before the watcher below runs.
+		currentTarget: () => baseStateTarget.value,
 	})
 	const stopBaseState = preview.onBaseState(event => baseState.receive(event))
 	const baseStateTarget = computed<BaseStateTarget>(() => {

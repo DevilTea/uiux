@@ -279,7 +279,7 @@ function receiveBaseStateRequest(message: BaseStateRequestMessage) {
  * A Runtime has been mounted (the first render, or an update that replaced it): the View revision it
  * was built from is reported with `inspection.base-state.mounted` (Discussion #241, owner ruling
  * 2026-11-03; Clause 01a19ab9-d028-7bb9-a370-4736992852f5), and then the request held until now is
- * answered, so the Workbench knows the revision before it reads the response's. The bridge sends
+ * answered, so the revision reaches the Workbench, which takes it on arrival, ahead of an answer sent in the same batch. The bridge sends
  * nothing before the capability ACK, nothing for a generation that did not declare the feature (a
  * capture or a version frame) and nothing once it ended.
  */

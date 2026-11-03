@@ -554,6 +554,21 @@ describe('inspection.base-state.mounted decoder', () => {
 		expect(issues(mounted({ viewRevision: 'a\u0000b' }))).toContain('protocol.unsafe_text')
 	})
 
+	it('applies the checks every inspection.base-state context shares: no inapplicable identity, no payload identity, no null member', () => {
+		expect(issues(mounted({}, { navigationRequestId: 'n' }))).toContain('protocol.inapplicable_context_identity')
+		expect(issues(mounted({}, { geometryRevision: 1 }))).toContain('protocol.inapplicable_context_identity')
+		expect(issues(mounted({}, { requestId: 'r' }))).toContain('protocol.identity_in_wrong_envelope')
+		expect(issues(mounted({}, { renderContext: {} }))).toContain('protocol.identity_in_wrong_envelope')
+		expect(issues(mounted({}, { variantId: null }))).toContain('protocol.null_optional_field')
+	})
+
+	it('names itself among the types the decoder accepts, and refuses another', () => {
+		const result = validateBaseStateMessage({ ...mounted(), type: 'inspection.base-state.nope' })
+		expect(result.ok ? [] : result.diagnostics.filter(d => d.code === 'protocol.unknown_message_type').map(d => d.message)).toEqual([
+			'This decoder accepts only inspection.base-state.request, inspection.base-state.response and inspection.base-state.mounted.',
+		])
+	})
+
 	it('is built from a mount that carries a revision, and from none without one', () => {
 		const identity = { previewSessionId: 'session-a', runtimeGenerationId: 'generation-a' }
 		expect(baseStateMountedMessage(identity, { viewRevision: 'revision-1' })).toEqual(mounted())

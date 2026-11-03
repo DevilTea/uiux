@@ -149,7 +149,7 @@ export function validateBaseStateMessage(input: unknown): ValidationResult<BaseS
 	const context = v.object(envelope.context, '/context')
 	const payload = v.object(envelope.payload, '/payload')
 	if (type !== undefined && !isBaseStateMessageType(type))
-		v.issue('protocol.unknown_message_type', '/type', 'This decoder accepts only inspection.base-state.request and inspection.base-state.response.')
+		v.issue('protocol.unknown_message_type', '/type', 'This decoder accepts only inspection.base-state.request, inspection.base-state.response and inspection.base-state.mounted.')
 	if (!context || !payload || !isBaseStateMessageType(type)) return v.finish<BaseStateMessage>(input)
 	if (type === 'inspection.base-state.mounted') return decodeMounted(input, context, payload, v)
 	const response = type === 'inspection.base-state.response'
@@ -161,15 +161,7 @@ export function validateBaseStateMessage(input: unknown): ValidationResult<BaseS
 	}
 	if (Object.hasOwn(context, 'viewId')) validateUuid(context.viewId, '/context/viewId', v, 'View identity')
 	if (Object.hasOwn(context, 'variantId')) boundedText(context.variantId, '/context/variantId', true, v)
-	for (const key of INAPPLICABLE_CONTEXT_KEYS) {
-		if (Object.hasOwn(context, key)) v.issue('protocol.inapplicable_context_identity', `/context/${key}`, `${type} carries no ${key}.`)
-	}
-	for (const key of PAYLOAD_ONLY_IDENTITIES) {
-		if (Object.hasOwn(context, key)) v.issue('protocol.identity_in_wrong_envelope', `/context/${key}`, `${key} belongs in the message payload, not in shared context.`)
-	}
-	for (const [key, value] of Object.entries(context)) {
-		if (value === null) v.issue('protocol.null_optional_field', `/context/${key}`, 'Optional protocol fields are omitted instead of encoded as null.')
-	}
+	checkSharedContext(type, context, v)
 
 	// Only `requestId` must be non-empty; a Widget identity and a State member name are display-safe text (Clause 01a19a9b-347f-782c-bd9a-22dc52096603).
 	const requestId = requiredText(payload, 'requestId', true, v)
@@ -227,13 +219,33 @@ function decodeMounted(
 		if (!Object.hasOwn(context, key)) v.issue('protocol.missing_context_identity', `/context/${key}`, `inspection.base-state.mounted requires context.${key}.`)
 		else boundedText(context[key], `/context/${key}`, true, v)
 	}
+	checkSharedContext('inspection.base-state.mounted', context, v)
 	const viewRevision = requiredText(payload, 'viewRevision', true, v)
 	if (v.diagnostics.length) return v.finish<BaseStateMessage>(input)
-	return v.finish<BaseStateMessage>(Object.freeze({
+	const message = Object.freeze({
 		type: 'inspection.base-state.mounted' as const,
 		context: Object.freeze({ previewSessionId: context.previewSessionId as string, runtimeGenerationId: context.runtimeGenerationId as string }),
 		payload: Object.freeze({ viewRevision: viewRevision! }),
-	}))
+	})
+	// The bound on the whole envelope that every `inspection.base-state` message has.
+	if (jsonLength(message) > MAX_BASE_STATE_RESPONSE_LENGTH) {
+		v.issue('protocol.base_state_too_large', '', `An inspection.base-state.mounted holds at most ${MAX_BASE_STATE_RESPONSE_LENGTH} characters of JSON.`)
+		return v.finish<BaseStateMessage>(input)
+	}
+	return v.finish<BaseStateMessage>(message)
+}
+
+/** The checks every `inspection.base-state` context shares: no identity of other work, none of a payload, no null member. */
+function checkSharedContext(type: string, context: Record<string, unknown>, v: Validator): void {
+	for (const key of INAPPLICABLE_CONTEXT_KEYS) {
+		if (Object.hasOwn(context, key)) v.issue('protocol.inapplicable_context_identity', `/context/${key}`, `${type} carries no ${key}.`)
+	}
+	for (const key of PAYLOAD_ONLY_IDENTITIES) {
+		if (Object.hasOwn(context, key)) v.issue('protocol.identity_in_wrong_envelope', `/context/${key}`, `${key} belongs in the message payload, not in shared context.`)
+	}
+	for (const [key, value] of Object.entries(context)) {
+		if (value === null) v.issue('protocol.null_optional_field', `/context/${key}`, 'Optional protocol fields are omitted instead of encoded as null.')
+	}
 }
 
 function decodeKeys(value: unknown, path: string, v: Validator): readonly string[] | undefined {

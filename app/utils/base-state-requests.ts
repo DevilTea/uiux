@@ -62,6 +62,13 @@ export type BaseStateSendStatus = Readonly<{ status: string }>
 export type BaseStateEvent =
 	| Readonly<{ kind: 'response'; message: BaseStateResponseMessage }>
 	| Readonly<{ kind: 'rejected'; requestId?: string }>
+	/**
+	 * The open generation reported the View revision it mounted (`inspection.base-state.mounted`, Clause
+	 * 01a19ab9-d028-7bb9-a370-4736992852f5). The session already holds it: the controller reads the host's
+	 * current target at once instead of waiting for the host's own watcher, so a response that follows in
+	 * the same task is compared with the revision just reported.
+	 */
+	| Readonly<{ kind: 'mounted' }>
 
 export type BaseStateRequestsHost = Readonly<{
 	/** Sends one request; anything but `sent` means it did not leave and its keys read Unavailable. */
@@ -70,6 +77,8 @@ export type BaseStateRequestsHost = Readonly<{
 	mintRequestId: () => string
 	/** Called whenever a cell may read differently. */
 	changed: () => void
+	/** What the Inspector wants read right now, asked on a `mounted` event. */
+	currentTarget?: () => BaseStateTarget
 	setTimer?: (callback: () => void, ms: number) => unknown
 	clearTimer?: (handle: unknown) => void
 }>
@@ -146,6 +155,39 @@ export function createBaseStateRequests(host: BaseStateRequestsHost): BaseStateR
 	let nextBatch = 0
 	let pending: Pending | undefined
 	let disposed = false
+	/**
+	 * The wait of one generation for its first `inspection.base-state.mounted` (Clauses
+	 * 01a19a9b-3c4d-74cb-9695-ce20087e2188 and 01a19ab9-d028-7bb9-a370-4736992852f5): started when the
+	 * generation is open but has reported no View revision, ended by a report or by another generation.
+	 */
+	let revisionWait: { key: string; timer: unknown; expired: boolean } | undefined
+
+	function endRevisionWait(): void {
+		if (revisionWait) clearTimer(revisionWait.timer)
+		revisionWait = undefined
+	}
+
+	/** Tracks that wait for `next`; true once it has run for the whole of `BASE_STATE_RESPONSE_TIMEOUT_MS`. */
+	function revisionWaitExpired(next: BaseStateTarget): boolean {
+		if (next.supported !== true || !next.context || next.renderContext) {
+			endRevisionWait()
+			return false
+		}
+		const key = `${next.context.previewSessionId}\u0000${next.context.runtimeGenerationId}`
+		if (revisionWait?.key !== key) {
+			endRevisionWait()
+			const entry: { key: string; timer: unknown; expired: boolean } = { key, timer: undefined, expired: false }
+			entry.timer = setTimer(() => {
+				if (revisionWait !== entry || disposed) return
+				entry.expired = true
+				// Nothing was asked in this state, so the cells read Unavailable from now on, until a revision is reported.
+				waiting = false
+				host.changed()
+			}, BASE_STATE_RESPONSE_TIMEOUT_MS)
+			revisionWait = entry
+		}
+		return revisionWait.expired
+	}
 
 	function abandon(): void {
 		if (pending) clearTimer(pending.timer)
@@ -209,26 +251,33 @@ export function createBaseStateRequests(host: BaseStateRequestsHost): BaseStateR
 		sendNext()
 	}
 
-	return {
-		retarget(next) {
-			if (disposed) return
-			const nextIdentity = targetIdentity(next)
-			const nextWaiting = !nextIdentity && next.keys.length > 0 && !!next.widgetId
-				&& (next.supported === undefined || (next.supported === true && (!next.context || !next.renderContext)))
-			if (nextIdentity === identity && nextWaiting === waiting) return
-			waiting = nextWaiting
-			if (nextIdentity === identity) {
-				host.changed()
-				return
-			}
-			abandon()
-			identity = nextIdentity
-			target = next
-			if (nextIdentity) start(next)
+	function retarget(next: BaseStateTarget): void {
+		if (disposed) return
+		const nextIdentity = targetIdentity(next)
+		const expired = revisionWaitExpired(next)
+		const nextWaiting = !nextIdentity && next.keys.length > 0 && !!next.widgetId
+			&& (next.supported === undefined || (next.supported === true && (!next.context || (!next.renderContext && !expired))))
+		if (nextIdentity === identity && nextWaiting === waiting) return
+		waiting = nextWaiting
+		if (nextIdentity === identity) {
 			host.changed()
-		},
+			return
+		}
+		abandon()
+		identity = nextIdentity
+		target = next
+		if (nextIdentity) start(next)
+		host.changed()
+	}
+
+	return {
+		retarget,
 
 		receive(event) {
+			if (event.kind === 'mounted') {
+				if (host.currentTarget) retarget(host.currentTarget())
+				return
+			}
 			if (disposed || !pending || !target || !identity) return
 			const current = pending
 			if (event.kind === 'rejected') {
@@ -281,6 +330,7 @@ export function createBaseStateRequests(host: BaseStateRequestsHost): BaseStateR
 		dispose() {
 			disposed = true
 			abandon()
+			endRevisionWait()
 			identity = undefined
 			waiting = false
 			target = undefined

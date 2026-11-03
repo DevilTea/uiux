@@ -67,6 +67,8 @@ export type CanvasTool = 'select' | 'comment' | 'interact'
 export type BaseStateInbound =
 	| Readonly<{ kind: 'response'; message: BaseStateResponseMessage }>
 	| Readonly<{ kind: 'rejected'; requestId?: string }>
+	/** The generation reported the View revision it mounted; `generationViewRevision` already holds it. */
+	| Readonly<{ kind: 'mounted' }>
 
 /**
  * A committed comment-range target (Part 3): the hit-tested Widget and the transient click point
@@ -1268,7 +1270,11 @@ export function createPreviewSession(state: WorkbenchState) {
 			else if (message.type === 'widget.event.occurrence') widgetEvents.receive(message)
 			else if (message.type === 'checks.report') receiveChecksReport(message)
 			else if (message.type === 'inspection.base-state.response') emitBaseState({ kind: 'response', message })
-			else if (message.type === 'inspection.base-state.mounted') generationViewRevision.value = message.payload.viewRevision
+			else if (message.type === 'inspection.base-state.mounted') {
+				generationViewRevision.value = message.payload.viewRevision
+				// Synchronously, so a response that follows in the same batch is compared with this revision.
+				emitBaseState({ kind: 'mounted' })
+			}
 			else if (message.type === 'contour.full.response' || message.type === 'contour.partial.response') refinement.receiveResponse(message)
 			// A work-scoped failure report ends one contour work as a non-recoverable refinement failure and
 			// leaves its stream and generation alone (Clause 01a11a59-def9-797a-8d08-5e4b02ecd900).
