@@ -20,7 +20,8 @@ export type JsonValue = string | number | boolean | null | JsonValue[] | { [key:
  * the Adapter relies on. The server's grammar (Clause 01a115cd-d095-790b-bc0b-95297733fed4) is
  * authoritative: TypeScript cannot express it, so this type also admits strings the server refuses, such
  * as `1.01`, `1.-1` or `1.1e3`. The entry deliberately exports no value naming the API version a host
- * implements.
+ * implements. A host refuses a minor above its own, and some manifest members need a minimum minor (Clause
+ * 01a11a5a-41f3-7474-ba83-128fec22a1f7).
  */
 export type AdapterApiVersion = '1' | `1.${number}`
 
