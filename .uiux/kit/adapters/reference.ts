@@ -7335,7 +7335,8 @@ const catalogWidgets: Readonly<Record<string, AdapterWidgetCatalogEntry>> = {
 
 export const manifest: AdapterManifest = {
 	id: 'uiux-reference-adapter',
-	apiVersion: '1',
+	// The lowest minor whose members it uses: `themeSupport` is Adapter API 1.2 (no `providers` entries, no `sources`).
+	apiVersion: '1.2',
 	widgetPlugins: [
 		stackPlugin,
 		panelPlugin,

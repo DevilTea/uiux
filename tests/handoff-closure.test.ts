@@ -1076,7 +1076,7 @@ describe('Handoff closure export and readiness evaluation', { timeout: HEAVY_SER
 
 	// Scenario 01a11a5b-1c07-79b5-89fc-dc04afdde464 and Rules 01a115cd-cbcc-…, 01a11a5a-58c6-… and 01a11add-f389-… (issue #93).
 	describe('Adapter-mapped implementation sources', () => {
-		const counterWithSources = (sources: string) => makeCounterAdapterSource().replace('providers: [],\n};', `providers: [],\n  sources: ${sources},\n};`)
+		const counterWithSources = (sources: string) => makeCounterAdapterSource().replace("apiVersion: '1'", "apiVersion: '1.3'").replace('providers: [],\n};', `providers: [],\n  sources: ${sources},\n};`)
 
 		async function exportCounterView(root: string, persistence: FileNativePersistence, adapterSource: string) {
 			await mkdir(join(root, 'kit', 'adapters'), { recursive: true })

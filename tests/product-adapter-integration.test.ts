@@ -4,6 +4,8 @@ import { WidgetInspectionError } from '@deviltea/widget-core/inspection'
 import { defineComponent, h } from 'vue'
 
 import {
+	ADAPTER_API_HOST_MINOR,
+	ADAPTER_API_MEMBER_MINORS,
 	extractProductAdapterManifest,
 	productAdapterApiCompatibility,
 	productAdapterRegistryInspector,
@@ -115,18 +117,45 @@ describe('product adapter integration', () => {
 	})
 
 	describe('productAdapterApiCompatibility', () => {
-		it('accepts `1` and `1.<minor>` with a minor without leading zeros', () => {
-			for (const version of ['1', '1.0', '1.1', '1.12'])
-				expect(productAdapterApiCompatibility.isCompatible(version), version).toBe(true)
+		it('accepts `1` and `1.<minor>` up to the host ceiling', () => {
+			for (const version of ['1', '1.0', '1.1', `1.${ADAPTER_API_HOST_MINOR}`])
+				expect(productAdapterApiCompatibility.refusal(version), version).toBeUndefined()
 		})
 
 		it('keeps the non-normative `test` hook', () => {
-			expect(productAdapterApiCompatibility.isCompatible('test')).toBe(true)
+			expect(productAdapterApiCompatibility.refusal('test')).toBeUndefined()
+			expect(productAdapterApiCompatibility.memberMinorViolations(makeManifest('hook', { apiVersion: 'test', providers: [() => {}], themeSupport: { supports: () => true } }))).toEqual([])
 		})
 
-		it('refuses API versions outside the `1` / `1.<minor>` grammar', () => {
+		it('refuses API versions outside the `1` / `1.<minor>` grammar as malformed', () => {
 			for (const version of ['1.foo', '1.01', '01', '2', '', '1.', '.1', '1.0.0', '1.1.0', ' 1', '1 ', '1.-1', '1.1e2', '0.1.0', '2.0.0', '2.0'])
-				expect(productAdapterApiCompatibility.isCompatible(version), JSON.stringify(version)).toBe(false)
+				expect(productAdapterApiCompatibility.refusal(version), JSON.stringify(version)).toBe('malformed')
+		})
+
+		it('refuses a minor above the host ceiling as a newer minor', () => {
+			// Rule 01a11a5a-4aa0-7537-bbfc-600ea0ea61c5.
+			for (const version of [`1.${ADAPTER_API_HOST_MINOR + 1}`, '1.12', '1.99999999999999999999'])
+				expect(productAdapterApiCompatibility.refusal(version), version).toBe('newer_minor')
+		})
+
+		it('has a host ceiling equal to the highest minor that introduces a member', () => {
+			// Clause 01a11a5a-41f3-7474-ba83-128fec22a1f7: providers 1.1, themeSupport 1.2, sources 1.3.
+			expect(ADAPTER_API_MEMBER_MINORS).toEqual({ providers: 1, themeSupport: 2, sources: 3 })
+			expect(ADAPTER_API_HOST_MINOR).toBe(Math.max(...Object.values(ADAPTER_API_MEMBER_MINORS)))
+		})
+
+		it('lists each member used under a lower declared minor, and none at or above its minor', () => {
+			// Rule 01a11a5a-4ba0-745f-a297-bd8d33babded.
+			const used = { providers: [() => {}], themeSupport: { supports: () => true }, sources: {} }
+			const violations = (apiVersion: string, overrides: Partial<AdapterManifest> = used) =>
+				productAdapterApiCompatibility.memberMinorViolations(makeManifest('bound', { apiVersion, ...overrides })).map(item => item.member)
+			expect(violations('1')).toEqual(['providers', 'themeSupport', 'sources'])
+			expect(violations('1.0')).toEqual(['providers', 'themeSupport', 'sources'])
+			expect(violations('1.1')).toEqual(['themeSupport', 'sources'])
+			expect(violations('1.2')).toEqual(['sources'])
+			expect(violations('1.3')).toEqual([])
+			// An empty `providers` has no entries, so it needs no minor; absent members need none.
+			expect(violations('1', { providers: [] })).toEqual([])
 		})
 	})
 
@@ -155,10 +184,55 @@ describe('product adapter integration', () => {
 			})])
 		})
 
-		it('accepts an Adapter whose apiVersion is `1.12`', async () => {
-			const result = await resolveWithApiVersion('1.12')
+		it('accepts an Adapter whose apiVersion is the host ceiling', async () => {
+			const result = await resolveWithApiVersion(`1.${ADAPTER_API_HOST_MINOR}`)
 			expect(result.diagnostics).toEqual([])
 			expect(result.state).not.toBe('invalid')
+		})
+
+		it('refuses an Adapter that needs a newer API minor than UIUX implements, with upgrade guidance', async () => {
+			// Scenario 01a11a5b-19e5-7a18-9809-5a036bd0047f; Rules 01a11a5a-4aa0-7537-bbfc-600ea0ea61c5 and 01a11a5a-4b1f-7ebf-bd9f-e9156ae438d0.
+			const result = await resolveWithApiVersion(`1.${ADAPTER_API_HOST_MINOR + 1}`)
+			expect(result.state).toBe('invalid')
+			expect(result.diagnostics).toEqual([expect.objectContaining({
+				code: 'adapter.api_minor_unsupported',
+				path: '/adapters/0/manifest/apiVersion',
+				message: expect.stringContaining('upgrade UIUX'),
+			})])
+		})
+
+		async function resolveManifest(overrides: Partial<AdapterManifest>) {
+			return resolveWorkspaceAdapterSet({
+				workspaceRoot: '/virtual/workspace',
+				adapters: [{ moduleSpecifier: 'fixture-adapter' }],
+				resolver: {
+					async resolve(_root: string, moduleSpecifier: string) {
+						return { moduleSpecifier, resolvedPath: `/virtual/${moduleSpecifier}.mjs`, moduleIdentity: `file:///virtual/${moduleSpecifier}.mjs` }
+					},
+				},
+				loader: { async loadManifest() { return makeManifest('fixture', overrides) } },
+				apiCompatibility: productAdapterApiCompatibility,
+				registryInspector: productAdapterRegistryInspector,
+			})
+		}
+
+		it('refuses an Adapter that declares apiVersion `1` and a themeSupport member', async () => {
+			// Scenario 01a11a5b-1a71-7912-a88e-16a0c5fb7824; Clause 01a11a5a-41f3-7474-ba83-128fec22a1f7, Rule 01a11a5a-4ba0-745f-a297-bd8d33babded.
+			const result = await resolveManifest({ apiVersion: '1', themeSupport: { supports: () => true } })
+			expect(result.state).toBe('invalid')
+			expect(result.diagnostics).toEqual([expect.objectContaining({
+				code: 'adapter.api_member_minor_unmet',
+				path: '/adapters/0/manifest/themeSupport',
+				message: expect.stringContaining('1.2'),
+			})])
+		})
+
+		it('refuses providers entries under `1.0` and `sources` under `1.2`, and accepts them at their minors', async () => {
+			expect((await resolveManifest({ apiVersion: '1.0', providers: [() => {}] })).diagnostics).toEqual([expect.objectContaining({ code: 'adapter.api_member_minor_unmet', path: '/adapters/0/manifest/providers' })])
+			expect((await resolveManifest({ apiVersion: '1.2', sources: {} })).diagnostics).toEqual([expect.objectContaining({ code: 'adapter.api_member_minor_unmet', path: '/adapters/0/manifest/sources' })])
+			expect((await resolveManifest({ apiVersion: '1.1', providers: [() => {}] })).diagnostics).toEqual([])
+			expect((await resolveManifest({ apiVersion: '1.2', themeSupport: { supports: () => true } })).diagnostics).toEqual([])
+			expect((await resolveManifest({ apiVersion: '1.3', sources: {} })).diagnostics).toEqual([])
 		})
 	})
 })

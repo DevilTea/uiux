@@ -2464,6 +2464,8 @@
       "schema_unsupported": "This version of UIUX does not support this Workspace’s format."
     },
     "adapter": {
+      "api_member_minor_unmet": "This Adapter uses a member that needs a later API minor than its apiVersion declares. Raise the Adapter’s apiVersion to that minor.",
+      "api_minor_unsupported": "This Adapter needs a newer Adapter API minor than this UIUX implements. Upgrade UIUX to a release that implements it.",
       "api_version_incompatible": "This Adapter was built for a different API version.",
       "asset_capability_unbounded": "An Asset field must say which media types it accepts.",
       "bundle_invalid": "The preview bundle is not valid. Rebuild the Workbench.",

@@ -719,7 +719,7 @@ function fixtureInput(
 		adapters: selections,
 		resolver,
 		loader,
-		apiCompatibility: overrides.apiCompatibility ?? { isCompatible: version => version === 'compatible' },
+		apiCompatibility: overrides.apiCompatibility ?? { refusal: version => version === 'compatible' ? undefined : 'malformed', memberMinorViolations: () => [] },
 		registryInspector: overrides.registryInspector ?? ownershipInspector({}),
 	}
 }
