@@ -12,9 +12,11 @@ import {
 import {
 	BASE_STATE_FEATURE,
 	isBaseStateMessageType,
+	isBaseStateMountedMessage,
 	isBaseStateRequestMessage,
 	validateBaseStateMessage,
 	type BaseStateMessage,
+	type BaseStateMountedMessage,
 	type BaseStateRequestMessage,
 	type BaseStateResponseMessage,
 } from './base-state'
@@ -194,7 +196,7 @@ export class WorkbenchPreviewProtocolBridge {
 		}
 		if (isFailureReportMessageType(type)) return this.receiveFailureReport(input)
 		if (isChecksReportMessageType(type)) return this.receiveChecksReport(input)
-		if (isBaseStateMessageType(type)) return this.receiveBaseStateResponse(input, type)
+		if (isBaseStateMessageType(type)) return this.receiveBaseStateRuntimeTraffic(input, type)
 		if (isWidgetEventMessageType(type)) {
 			// Workbench accepts only occurrences inbound; the decoded copy carries known members only.
 			const decoded = validateWidgetEventMessage(input)
@@ -369,14 +371,14 @@ export class WorkbenchPreviewProtocolBridge {
 	}
 
 	/**
-	 * A runtime's `inspection.base-state.response`. Like any runtime traffic it is accepted only for the
+	 * A runtime's `inspection.base-state.response` or `inspection.base-state.mounted`. Like any runtime traffic it is accepted only for the
 	 * current generation after its capability ACK was dispatched, and only when that generation declared
 	 * `inspection.base-state`; the correlation check before the decode already dropped a response of
-	 * another session or generation. A response that does not decode or exceeds its bound is `rejected`,
+	 * another session or generation. A message that does not decode or exceeds its bound is `rejected`,
 	 * never `invalid`: it is no protocol failure (Clause 01a19ab9-d028-7bb9-a370-4736992852f5). Whether
-	 * it answers the pending request, and is current for the View and Variant, is the caller's.
+	 * a response answers the pending request, and is current for the View and Variant, is the caller's.
 	 */
-	private receiveBaseStateResponse(input: unknown, type: BaseStateMessage['type']): BridgeReceiveResult {
+	private receiveBaseStateRuntimeTraffic(input: unknown, type: BaseStateMessage['type']): BridgeReceiveResult {
 		if (type === 'inspection.base-state.request') return { status: 'wrong-direction' }
 		// The gates come before the decode, by the identities the envelope names: traffic of a generation
 		// that is not open, or did not declare the feature, is dropped and is never `rejected`.
@@ -388,7 +390,7 @@ export class WorkbenchPreviewProtocolBridge {
 		}
 		const decoded = validateBaseStateMessage(input)
 		if (!decoded.ok) {
-			const requestId = rawRequestId(input)
+			const requestId = type === 'inspection.base-state.response' ? rawRequestId(input) : undefined
 			return { status: 'rejected', diagnostics: decoded.diagnostics, ...(requestId !== undefined ? { requestId } : {}) }
 		}
 		if (isBaseStateRequestMessage(decoded.value)) return { status: 'wrong-direction' }
@@ -444,6 +446,8 @@ export class RuntimePreviewProtocolBridge {
 	private generationEnded = false
 	/** A generation-scoped report decided before the acknowledgement, sent when it arrives. */
 	private heldReport?: FailureReportMessage
+	/** The latest `inspection.base-state.mounted` of a mount that completed before the acknowledgement, sent when it arrives. */
+	private heldMounted?: BaseStateMountedMessage
 	private readonly reportedWorkSequences = new Set<number>()
 	/** The highest `checks.report` `sequence` sent: each report of a generation carries a higher one. */
 	private lastChecksSequence?: number
@@ -557,6 +561,29 @@ export class RuntimePreviewProtocolBridge {
 		const gate = this.runtimeGate(decoded.value)
 		if (gate) return { status: gate }
 		if (!this.declaration.features.includes(BASE_STATE_FEATURE)) return { status: 'not-permitted' }
+		this.transport.send(decoded.value)
+		return { status: 'sent' }
+	}
+
+	/**
+	 * Sends one `inspection.base-state.mounted` (Discussion #241, owner ruling 2026-11-03): nothing
+	 * crosses before the capability ACK, and only a generation that declared `inspection.base-state`
+	 * may send one. A mount that completes before the ACK is held, a later one replacing it, and sent
+	 * once the ACK arrives, so the Workbench learns the latest revision. A generation that ended
+	 * sends nothing.
+	 */
+	sendBaseStateMounted(message: BaseStateMountedMessage): BridgeSendResult {
+		const decoded = validateBaseStateMessage(message)
+		if (!decoded.ok) return { status: 'invalid', diagnostics: decoded.diagnostics }
+		if (!isBaseStateMountedMessage(decoded.value)) return { status: 'wrong-direction' }
+		const declared = this.declaration.features.includes(BASE_STATE_FEATURE)
+		const gate = this.runtimeGate(decoded.value)
+		if (gate === 'gated' && declared && !this.ackObserved && !this.generationEnded) {
+			this.heldMounted = decoded.value
+			return { status: 'gated' }
+		}
+		if (gate) return { status: gate }
+		if (!declared) return { status: 'not-permitted' }
 		this.transport.send(decoded.value)
 		return { status: 'sent' }
 	}
@@ -698,6 +725,9 @@ export class RuntimePreviewProtocolBridge {
 		const held = this.heldReport
 		this.heldReport = undefined
 		if (held) this.sendFailureReport(held)
+		const heldMounted = this.heldMounted
+		this.heldMounted = undefined
+		if (heldMounted) this.sendBaseStateMounted(heldMounted)
 		return { status: 'accepted', message: decoded.value }
 	}
 

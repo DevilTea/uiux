@@ -49,7 +49,7 @@ const DROP_BASE_STATE_RESPONSES = `(() => {
 	}, true)
 })()`
 
-async function open(path: string, options: Readonly<{ dropResponses?: boolean }> = {}): Promise<{ context: BrowserContext; page: Page }> {
+async function open(path: string, options: Readonly<{ dropResponses?: boolean; prepare?: (page: Page) => Promise<void>; waitUntil?: 'networkidle' | 'domcontentloaded' }> = {}): Promise<{ context: BrowserContext; page: Page }> {
 	const context = await browser.newContext({ viewport: { width: 1920, height: 1080 }, colorScheme: 'light' })
 	await context.addInitScript(() => {
 		localStorage.setItem('nuxt-color-mode', 'light')
@@ -60,7 +60,8 @@ async function open(path: string, options: Readonly<{ dropResponses?: boolean }>
 	if (options.dropResponses) await context.addInitScript(DROP_BASE_STATE_RESPONSES)
 	await context.addCookies([{ ...server.cookie, url: server.origin, httpOnly: true, sameSite: 'Strict' }])
 	const page = await context.newPage()
-	await page.goto(`${server.origin}${path}`, { waitUntil: 'networkidle' })
+	await options.prepare?.(page)
+	await page.goto(`${server.origin}${path}`, { waitUntil: options.waitUntil ?? 'networkidle' })
 	await page.locator('main').first().waitFor()
 	return { context, page }
 }
@@ -85,8 +86,60 @@ describe('Inspector Base cell (issue #52)', () => {
 			const responses = (await wire(page)).filter(message => message.type === 'inspection.base-state.response')
 			expect(responses).toHaveLength(1)
 			expect(responses[0]?.payload).toMatchObject({ widgetId: WIDGET_ID, values: { disabled: { value: false } }, renderContext: { locale: 'en-US' } })
+
+			// The Preview reported the revision of the View it mounted before it answered, and the answer echoes it (issue #484).
+			const messages = await wire(page)
+			const mounted = messages.filter(message => message.type === 'inspection.base-state.mounted')
+			expect(mounted.length).toBeGreaterThan(0)
+			expect(mounted[0]?.payload.viewRevision).toBe((await readView()).revision)
+			expect(messages.findIndex(message => message.type === 'inspection.base-state.mounted')).toBeLessThan(messages.findIndex(message => message.type === 'inspection.base-state.response'))
+			expect(responses[0]?.payload.renderContext).toMatchObject({ viewRevision: mounted[0]?.payload.viewRevision })
 		}
 		finally { await context.close() }
+	}, 90_000)
+
+	it('shows the base value when a Spec edit lands between the Preview document\'s read of the View and the Workbench\'s own (issue #484)', async () => {
+		// The Preview document reads the View after it declared its generation: hold that read until the edit landed.
+		let reached!: () => void
+		let release!: () => void
+		const readReached = new Promise<void>((resolve) => { reached = resolve })
+		const edited = new Promise<void>((resolve) => { release = resolve })
+		const { context, page } = await open(`/views/${VIEW_ID}?variant=${VARIANT}&widget=${WIDGET_ID}&panel=inspect`, {
+			waitUntil: 'domcontentloaded',
+			prepare: async (target) => {
+				await target.route(url => url.pathname === `/api/resources/view/${VIEW_ID}`, async (route) => {
+					if (!route.request().frame()?.parentFrame()) return await route.continue()
+					reached()
+					await edited
+					await route.continue()
+				})
+			},
+		})
+		try {
+			await readReached
+			// The generation is admitted and acknowledged while the Preview has not read the View yet.
+			await expect.poll(async () => (await page.evaluate(() => (window as unknown as WireRecorderWindow).__wire.messages)).some(message => message.type === 'capability.declare'), { timeout: 30_000 }).toBe(true)
+			const before = await readView()
+			const content = Object.fromEntries(Object.entries(before.resource.spec).filter(([key]) => key !== 'decisions'))
+			const response = await fetch(`${server.origin}/api/views/${VIEW_ID}/spec`, {
+				method: 'PUT',
+				headers: { ...server.headers, 'content-type': 'application/json' },
+				body: JSON.stringify({ expectedRevision: before.revision, spec: { ...content, intent: 'An intent edited before the Preview reads the View.' } }),
+			})
+			expect(response.ok).toBe(true)
+			const revision = (await readView()).revision
+			expect(revision).not.toBe(before.revision)
+			release()
+			await expect.poll(() => baseCell(page).first().getAttribute('data-base-state'), { timeout: 30_000 }).toBe('value')
+			expect((await baseCell(page).first().textContent())?.trim()).toBe('false')
+			// The Preview mounted the revision it read, which is the edited one.
+			const mounted = (await wire(page)).filter(message => message.type === 'inspection.base-state.mounted')
+			expect(mounted.at(-1)?.payload.viewRevision).toBe(revision)
+		}
+		finally {
+			release()
+			await context.close()
+		}
 	}, 90_000)
 
 	it('reads again for a changed render context and still shows the base value', async () => {

@@ -51,7 +51,6 @@ import type { Point } from '../../src/preview/protocol/schema'
 import { useUiuxClient } from './useUiuxClient'
 import type { WorkbenchState } from './useWorkbenchState'
 import type { SessionPhase } from './workbench-types'
-import { anchorGenerationView, anchorOnViewLoad, type GenerationViewAnchor } from '../utils/generation-view-revision'
 
 /**
  * The canvas tool. Select holds an `inspection` targeting interaction, Comment a `comment-range`
@@ -68,6 +67,8 @@ export type CanvasTool = 'select' | 'comment' | 'interact'
 export type BaseStateInbound =
 	| Readonly<{ kind: 'response'; message: BaseStateResponseMessage }>
 	| Readonly<{ kind: 'rejected'; requestId?: string }>
+	/** The generation reported the View revision it mounted; `generationViewRevision` already holds it. */
+	| Readonly<{ kind: 'mounted' }>
 
 /**
  * A committed comment-range target (Part 3): the hit-tested Widget and the transient click point
@@ -169,12 +170,12 @@ export function createPreviewSession(state: WorkbenchState) {
 	 */
 	const runtimeGenerationId = ref<string>()
 	/**
-	 * The revision of the View when the admitted generation appeared: the one its document was built
-	 * from. A Spec-only edit changes the View's revision without a new generation, so this stays what
-	 * the Runtime reads and echoes (`inspection.base-state`, Clause 01a19ab9-d028-7bb9-a370-4736992852f5).
+	 * The revision of the View the open generation renders: the latest `inspection.base-state.mounted`
+	 * the generation sent (Discussion #241, owner ruling 2026-11-03; Clause 01a19ab9-d028-7bb9-a370-4736992852f5).
+	 * A Spec-only edit changes the View's revision without a new generation, so this stays what the Runtime
+	 * mounted until it mounts again. `undefined` until the first one arrives: a Base cell reads pending.
 	 */
-	const generationView = ref<GenerationViewAnchor>()
-	const generationViewRevision = computed(() => generationView.value?.revision)
+	const generationViewRevision = ref<string>()
 	/**
 	 * Bumps for every Preview document the Workbench requests, and is part of the document URL, so a
 	 * request for the same View still loads a new document. It never names the generation.
@@ -928,7 +929,7 @@ export function createPreviewSession(state: WorkbenchState) {
 	function endGeneration(): void {
 		const previousGeneration = runtimeGenerationId.value
 		runtimeGenerationId.value = undefined
-		generationView.value = undefined
+		generationViewRevision.value = undefined
 		generationIframe = undefined
 		runtimeFeatures.value = []
 		widgetEvents.onGenerationBoundary()
@@ -966,7 +967,6 @@ export function createPreviewSession(state: WorkbenchState) {
 	function onGenerationAdmitted(generationId: string): void {
 		if (runtimeGenerationId.value) endGeneration()
 		runtimeGenerationId.value = generationId
-		generationView.value = anchorGenerationView(state.selectedViewId.value, state.selectedView.value)
 		generationIframe = previewIframe.value
 		syncGeometryContext()
 		handshakePhase.value = 'initiating'
@@ -1270,6 +1270,11 @@ export function createPreviewSession(state: WorkbenchState) {
 			else if (message.type === 'widget.event.occurrence') widgetEvents.receive(message)
 			else if (message.type === 'checks.report') receiveChecksReport(message)
 			else if (message.type === 'inspection.base-state.response') emitBaseState({ kind: 'response', message })
+			else if (message.type === 'inspection.base-state.mounted') {
+				generationViewRevision.value = message.payload.viewRevision
+				// Synchronously, so a response that follows in the same batch is compared with this revision.
+				emitBaseState({ kind: 'mounted' })
+			}
 			else if (message.type === 'contour.full.response' || message.type === 'contour.partial.response') refinement.receiveResponse(message)
 			// A work-scoped failure report ends one contour work as a non-recoverable refinement failure and
 			// leaves its stream and generation alone (Clause 01a11a59-def9-797a-8d08-5e4b02ecd900).
@@ -1344,11 +1349,6 @@ export function createPreviewSession(state: WorkbenchState) {
 		window.removeEventListener('keydown', onWindowKeydown)
 		clearRetryStallTimer()
 	}
-
-	// A View that loads after its generation was admitted is the one that generation renders.
-	watch(() => state.selectedView.value, (view) => {
-		generationView.value = anchorOnViewLoad(generationView.value, view)
-	})
 
 	// Comment mode is meaningless without a mounted View.
 	watch(() => state.selectedView.value, (view) => {

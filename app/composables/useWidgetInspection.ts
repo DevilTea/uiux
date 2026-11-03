@@ -95,13 +95,15 @@ export function useWidgetInspection(workbench: Workbench) {
 		send: request => preview.sendBaseStateRequest(request),
 		mintRequestId: mintBaseStateRequestId,
 		changed: () => { baseStateVersion.value++ },
+		// A mount report retargets at once, before the watcher below runs.
+		currentTarget: () => baseStateTarget.value,
 	})
 	const stopBaseState = preview.onBaseState(event => baseState.receive(event))
 	const baseStateTarget = computed<BaseStateTarget>(() => {
 		const options = contextOptions.value
 		const viewId = selectedViewId.value
 		const generation = preview.runtimeGenerationId.value
-		// The revision of the View the Preview document was built from, not the Workbench's latest.
+		// The revision of the View the open generation renders: the Preview reports it as `inspection.base-state.mounted`, and until it does Base cells read pending.
 		const revision = preview.generationViewRevision.value
 		const dimensions = options.viewports.selectedDimensions
 		const variantId = variantName.value

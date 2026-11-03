@@ -9,8 +9,10 @@ import { inspectRuntime } from '@deviltea/widget-core/inspection'
 
 import type { PreviewRuntimeBridge, PreviewRuntimeMountOptions } from '../src/preview/browser-runtime'
 import { answerBaseStateRequest, BaseStateRequestHold, readBaseState, sendBaseStateAnswer, type BaseStateMounted } from '../src/preview/base-state'
+import { declaredRuntimeFeatures } from '../src/preview/declared-features'
 import {
 	BASE_STATE_FEATURE,
+	baseStateMountedMessage,
 	MAX_BASE_STATE_RESPONSE_LENGTH,
 	validateBaseStateMessage,
 	type BaseStateRequestMessage,
@@ -753,5 +755,116 @@ describe('a base-state request received while nothing is mounted', () => {
 		sendBaseStateAnswer(answers[0]!, answer => runtime.sendBaseStateResponse(answer), () => { throw new Error('unsendable') })
 		expect(workbench.receive(runtimeOutbound.at(-1))).toMatchObject({ status: 'accepted', message: { type: 'inspection.base-state.response', payload: { requestId: 'wire', values: { count: { value: 0 } } } } })
 		bridge.dispose()
+	})
+})
+
+// -------------------------------------------------------------------------------------------------
+// The View revision the Preview reports it mounted (issue #484; Clause 01a19ab9-d028-7bb9-a370-4736992852f5)
+// -------------------------------------------------------------------------------------------------
+
+/** A runtime bridge of generation-a over a Workbench bridge, with the ACK still to be delivered. */
+function wireBeforeAck(features: readonly string[]) {
+	const workbenchOutbound: PreviewWireMessage[] = []
+	const runtimeOutbound: PreviewWireMessage[] = []
+	const workbench = new WorkbenchPreviewProtocolBridge('session-a', { send: message => workbenchOutbound.push(message) }, () => ({ ok: true }))
+	const runtime = new RuntimePreviewProtocolBridge('session-a', 'generation-a', { protocolVersion: 1, features }, { send: message => runtimeOutbound.push(message) })
+	workbench.receive(runtime.declareCapabilities())
+	const mountedTypes = () => runtimeOutbound.filter(message => message.type === 'inspection.base-state.mounted')
+	const mountedRevisions = () => mountedTypes().map(message => (message as { payload: { viewRevision: string } }).payload.viewRevision)
+	return { workbench, runtime, runtimeOutbound, acknowledge: () => runtime.receive(workbenchOutbound[0]), mountedRevisions, mountedTypes }
+}
+
+/** Mounts as `app/pages/preview.vue` does: a completed mount reports its View revision, then answers the held request. */
+function mountReporting(bundle: BundleModule, runtime: RuntimePreviewProtocolBridge, hold: BaseStateRequestHold, options: PreviewRuntimeMountOptions): PreviewRuntimeBridge {
+	const active: { bridge?: PreviewRuntimeBridge } = {}
+	const onMounted = (mounted: Readonly<{ viewRevision?: string }>) => {
+		const message = baseStateMountedMessage({ previewSessionId: 'session-a', runtimeGenerationId: 'generation-a' }, mounted)
+		if (message) runtime.sendBaseStateMounted(message)
+		const response = hold.settle(active.bridge)
+		if (response) sendBaseStateAnswer(response, answer => runtime.sendBaseStateResponse(answer), () => { throw new Error('unsendable') })
+	}
+	const container = document.createElement('div')
+	document.body.appendChild(container)
+	active.bridge = bundle.mountPreviewRuntime(container, { ...options, onRuntimeMounted: onMounted })
+	return active.bridge
+}
+
+describe('the View revision the Preview reports it mounted', () => {
+	it('reports the revision of the first render, and holds a render that completed before the ACK until it arrives', async () => {
+		const bundle = await loadBundle(await statefulWorkspace())
+		const wire = wireBeforeAck(['geometry', BASE_STATE_FEATURE])
+		const bridge = mountReporting(bundle, wire.runtime, new BaseStateRequestHold(), { view: statefulView(), viewRevision: 'revision-1', context: renderContext() })
+		// The construction rendered at once, before the ACK: nothing has crossed.
+		expect(bridge.hasMountedRuntime!()).toBe(true)
+		expect(wire.mountedTypes()).toEqual([])
+		wire.acknowledge()
+		expect(wire.mountedRevisions()).toEqual(['revision-1'])
+		bridge.dispose()
+	})
+
+	it('reports a render that completes later, once the Product Kit stylesheet has loaded, and not before', async () => {
+		const stylesheet = await heldStylesheet()
+		const bundle = await loadBundle(await statefulWorkspace(), `${stylesheet.origin}/preview`)
+		const wire = wireBeforeAck(['geometry', BASE_STATE_FEATURE])
+		wire.acknowledge()
+		const bridge = mountReporting(bundle, wire.runtime, new BaseStateRequestHold(), { view: statefulView(), viewRevision: 'revision-1', context: renderContext(), stylesheetHref: stylesheet.href })
+		expect(bridge.hasMountedRuntime!()).toBe(false)
+		expect(wire.mountedRevisions()).toEqual([])
+		await stylesheet.release()
+		await until(() => wire.mountedRevisions().length > 0, 'the mount report')
+		expect(wire.mountedRevisions()).toEqual(['revision-1'])
+		bridge.dispose()
+	})
+
+	it('reports again after every remount that replaced the Runtime, and not for an update that mounted nothing or a Variant switch', async () => {
+		const bundle = await loadBundle(await statefulWorkspace())
+		const wire = wireBeforeAck(['geometry', BASE_STATE_FEATURE])
+		wire.acknowledge()
+		const bridge = mountReporting(bundle, wire.runtime, new BaseStateRequestHold(), { view: statefulView(), viewRevision: 'revision-1', context: renderContext() })
+		expect(wire.mountedRevisions()).toEqual(['revision-1'])
+		// A Spec edit: the View is read again and the Runtime replaced.
+		bridge.updateView(statefulView(), undefined, 'revision-2')
+		expect(wire.mountedRevisions()).toEqual(['revision-1', 'revision-2'])
+		// A Locale's messages arriving rebuilds the Runtime from the View it already holds.
+		bridge.updateLocales!(new Map())
+		expect(wire.mountedRevisions()).toEqual(['revision-1', 'revision-2', 'revision-2'])
+		// A View an update refused mounts nothing, so nothing is reported for its revision.
+		bridge.updateView(statefulView([{ id: 'stateful-1', type: 'Unknown' }]), undefined, 'revision-3')
+		expect(wire.mountedRevisions()).toEqual(['revision-1', 'revision-2', 'revision-2'])
+		// A Variant switch, a Locale or a theme change replaces nothing.
+		bridge.updateContext(renderContext({ variantName: 'Many' }))
+		bridge.updateContext(renderContext({ variantName: 'Many', themeId: 'dark', locale: 'zh-TW' }))
+		expect(wire.mountedRevisions()).toEqual(['revision-1', 'revision-2', 'revision-2'])
+		bridge.dispose()
+	})
+
+	it('reaches the Workbench in order: the revision before the answer to a request that was held while nothing was mounted', async () => {
+		const stylesheet = await heldStylesheet()
+		const bundle = await loadBundle(await statefulWorkspace(), `${stylesheet.origin}/preview`)
+		const wire = wireBeforeAck(['geometry', BASE_STATE_FEATURE])
+		wire.acknowledge()
+		const hold = new BaseStateRequestHold()
+		const bridge = mountReporting(bundle, wire.runtime, hold, { view: statefulView(), viewRevision: 'revision-1', context: renderContext(), stylesheetHref: stylesheet.href })
+		hold.receive(askFor(undefined, { requestId: 'early', keys: ['count'] }), bridge)
+		await stylesheet.release()
+		await until(() => wire.runtimeOutbound.some(message => message.type === 'inspection.base-state.response'), 'the held answer')
+		const types = wire.runtimeOutbound.map(message => message.type).filter(type => type.startsWith('inspection.'))
+		expect(types).toEqual(['inspection.base-state.mounted', 'inspection.base-state.response'])
+		expect(wire.workbench.receive(wire.runtimeOutbound.at(-2))).toMatchObject({ status: 'accepted', message: { type: 'inspection.base-state.mounted', payload: { viewRevision: 'revision-1' } } })
+		bridge.dispose()
+	})
+
+	it('reports nothing for a View read without a revision, and nothing for a generation that did not declare the feature (a capture or a version frame)', async () => {
+		const bundle = await loadBundle(await statefulWorkspace())
+		const without = wireBeforeAck(['geometry', BASE_STATE_FEATURE])
+		without.acknowledge()
+		mountReporting(bundle, without.runtime, new BaseStateRequestHold(), { view: statefulView(), context: renderContext() }).dispose()
+		expect(without.mountedTypes()).toEqual([])
+		for (const mode of [{ harness: true, version: false }, { harness: false, version: true }]) {
+			const undeclared = wireBeforeAck(declaredRuntimeFeatures(mode))
+			undeclared.acknowledge()
+			mountReporting(bundle, undeclared.runtime, new BaseStateRequestHold(), { view: statefulView(), viewRevision: 'revision-1', context: renderContext() }).dispose()
+			expect(undeclared.mountedTypes()).toEqual([])
+		}
 	})
 })

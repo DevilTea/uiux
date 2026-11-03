@@ -9,6 +9,7 @@ import {
 import {
 	BASE_STATE_FEATURE,
 	baseStateMemberOf,
+	baseStateMountedMessage,
 	baseStateResponseAnswers,
 	encodeBaseStateResponse,
 	MAX_BASE_STATE_KEYS,
@@ -16,6 +17,7 @@ import {
 	toBaseStateValue,
 	unavailableReadings,
 	validateBaseStateMessage,
+	type BaseStateMountedMessage,
 	type BaseStateRequestMessage,
 	type BaseStateResponseMessage,
 } from '../src/preview/protocol/base-state'
@@ -65,6 +67,11 @@ const response = (payload: Record<string, unknown> = {}, ctx: Record<string, unk
 		values: { count: { value: 0 }, label: { unavailable: true } },
 		...payload,
 	},
+})
+const mounted = (payload: Record<string, unknown> = {}, ctx: Record<string, unknown> = {}) => ({
+	type: 'inspection.base-state.mounted',
+	context: { previewSessionId: 'session-a', runtimeGenerationId: 'generation-a', ...ctx },
+	payload: { viewRevision: 'revision-1', ...payload },
 })
 const issues = (input: unknown) => {
 	const result = validateBaseStateMessage(input)
@@ -392,6 +399,16 @@ function openGeneration(declaration: typeof WITH_BASE_STATE | typeof WITHOUT_BAS
 	return { workbench, runtime, workbenchOutbound, runtimeOutbound }
 }
 
+/** A runtime bridge that declared `inspection.base-state` and has not yet observed the ACK. */
+function unacknowledgedGeneration() {
+	const workbenchOutbound: PreviewWireMessage[] = []
+	const runtimeOutbound: PreviewWireMessage[] = []
+	const workbench = new WorkbenchPreviewProtocolBridge('session-a', collector(workbenchOutbound), () => compatible)
+	const runtime = new RuntimePreviewProtocolBridge('session-a', 'generation-a', WITH_BASE_STATE, collector(runtimeOutbound))
+	workbench.receive(runtime.declareCapabilities())
+	return { workbench, runtime, workbenchOutbound, runtimeOutbound }
+}
+
 describe('inspection.base-state in the bridges', () => {
 	it('sends a request only after the ACK and only to a generation that declared the feature, and the runtime sees it after observing the ACK', () => {
 		const workbenchOutbound: PreviewWireMessage[] = []
@@ -504,6 +521,149 @@ describe('inspection.base-state in the bridges', () => {
 		expect(result).not.toHaveProperty('requestId')
 		// The generation is still open: a valid response is accepted afterwards.
 		expect(workbench.receive(response())).toMatchObject({ status: 'accepted' })
+	})
+})
+
+describe('inspection.base-state.mounted decoder', () => {
+	it('decodes the session and generation identities and the viewRevision, and drops additive members', () => {
+		const result = validateBaseStateMessage(mounted({ extra: 1 }, { viewId: VIEW_ID, variantId: 'Loading' }))
+		expect(result.ok && result.value).toEqual({
+			type: 'inspection.base-state.mounted',
+			context: { previewSessionId: 'session-a', runtimeGenerationId: 'generation-a' },
+			payload: { viewRevision: 'revision-1' },
+		})
+	})
+
+	it('requires both context identities and a non-empty viewRevision', () => {
+		for (const key of ['previewSessionId', 'runtimeGenerationId']) {
+			const input = mounted()
+			delete (input.context as Record<string, unknown>)[key]
+			expect(issues(input)).toContain('protocol.missing_context_identity')
+		}
+		const noRevision = mounted()
+		delete (noRevision.payload as Record<string, unknown>).viewRevision
+		expect(issues(noRevision)).toContain('protocol.missing_base_state_member')
+		expect(issues(mounted({ viewRevision: '' }))).toContain('schema.empty_string')
+		expect(issues(mounted({ viewRevision: 3 }))).toContain('schema.expected_string')
+		expect(issues({ type: 'inspection.base-state.mounted', payload: { viewRevision: 'r' } })).toContain('schema.expected_object')
+	})
+
+	it('bounds viewRevision as display-safe text of at most 500 characters', () => {
+		expect(issues(mounted({ viewRevision: 'r'.repeat(500) }))).toEqual([])
+		expect(issues(mounted({ viewRevision: 'r'.repeat(501) }))).toContain('protocol.unsafe_text')
+		expect(issues(mounted({ viewRevision: 'a\u0000b' }))).toContain('protocol.unsafe_text')
+	})
+
+	it('applies the checks every inspection.base-state context shares: no inapplicable identity, no payload identity, no null member', () => {
+		expect(issues(mounted({}, { navigationRequestId: 'n' }))).toContain('protocol.inapplicable_context_identity')
+		expect(issues(mounted({}, { geometryRevision: 1 }))).toContain('protocol.inapplicable_context_identity')
+		expect(issues(mounted({}, { requestId: 'r' }))).toContain('protocol.identity_in_wrong_envelope')
+		expect(issues(mounted({}, { renderContext: {} }))).toContain('protocol.identity_in_wrong_envelope')
+		expect(issues(mounted({}, { variantId: null }))).toContain('protocol.null_optional_field')
+	})
+
+	it('names itself among the types the decoder accepts, and refuses another', () => {
+		const result = validateBaseStateMessage({ ...mounted(), type: 'inspection.base-state.nope' })
+		expect(result.ok ? [] : result.diagnostics.filter(d => d.code === 'protocol.unknown_message_type').map(d => d.message)).toEqual([
+			'This decoder accepts only inspection.base-state.request, inspection.base-state.response and inspection.base-state.mounted.',
+		])
+	})
+
+	it('is built from a mount that carries a revision, and from none without one', () => {
+		const identity = { previewSessionId: 'session-a', runtimeGenerationId: 'generation-a' }
+		expect(baseStateMountedMessage(identity, { viewRevision: 'revision-1' })).toEqual(mounted())
+		expect(baseStateMountedMessage(identity, {})).toBeUndefined()
+	})
+})
+
+describe('inspection.base-state.mounted in the bridges', () => {
+	it('is sent only after the ACK, and a mount that completed before the ACK is held and sent once it arrives', () => {
+		const { workbenchOutbound, runtimeOutbound, runtime } = unacknowledgedGeneration()
+		const message = mounted() as unknown as BaseStateMountedMessage
+		const declared = runtimeOutbound.length
+		expect(runtime.sendBaseStateMounted(message)).toEqual({ status: 'gated' })
+		expect(runtimeOutbound).toHaveLength(declared)
+		runtime.receive(workbenchOutbound[0])
+		// The ACK releases it, once.
+		expect(runtimeOutbound.slice(declared)).toEqual([expect.objectContaining({ type: 'inspection.base-state.mounted' })])
+		expect(runtime.sendBaseStateMounted(message)).toEqual({ status: 'sent' })
+		expect(runtimeOutbound).toHaveLength(declared + 2)
+	})
+
+	it('holds only the latest mount that completed before the ACK', () => {
+		const { workbenchOutbound, runtimeOutbound, runtime } = unacknowledgedGeneration()
+		const declared = runtimeOutbound.length
+		runtime.sendBaseStateMounted(mounted({ viewRevision: 'revision-1' }) as unknown as BaseStateMountedMessage)
+		runtime.sendBaseStateMounted(mounted({ viewRevision: 'revision-2' }) as unknown as BaseStateMountedMessage)
+		runtime.receive(workbenchOutbound[0])
+		expect(runtimeOutbound.slice(declared)).toEqual([expect.objectContaining({ payload: { viewRevision: 'revision-2' } })])
+	})
+
+	it('sends nothing for a generation that did not declare the feature, before or after the ACK', () => {
+		const { runtime, workbenchOutbound, runtimeOutbound } = openGeneration(WITHOUT_BASE_STATE)
+		const message = mounted() as unknown as BaseStateMountedMessage
+		expect(runtime.sendBaseStateMounted(message)).toEqual({ status: 'gated' })
+		runtime.receive(workbenchOutbound[0])
+		expect(runtime.sendBaseStateMounted(message)).toEqual({ status: 'not-permitted' })
+		expect(runtimeOutbound.filter(sent => sent.type.startsWith('inspection.'))).toEqual([])
+	})
+
+	it('sends nothing for another session or generation, after the generation ended, or in the wrong direction', () => {
+		const { workbench, runtime, workbenchOutbound, runtimeOutbound } = openGeneration()
+		runtime.receive(workbenchOutbound[0])
+		expect(runtime.sendBaseStateMounted(mounted({}, { runtimeGenerationId: 'generation-b' }) as unknown as BaseStateMountedMessage)).toEqual({ status: 'stale-generation' })
+		expect(runtime.sendBaseStateMounted(mounted({}, { previewSessionId: 'session-b' }) as unknown as BaseStateMountedMessage)).toEqual({ status: 'stale-session' })
+		expect(runtime.sendBaseStateMounted(mounted({ viewRevision: '' }) as unknown as BaseStateMountedMessage).status).toBe('invalid')
+		expect(runtime.sendBaseStateMounted(request() as unknown as BaseStateMountedMessage)).toEqual({ status: 'wrong-direction' })
+		// The Workbench never sends one.
+		expect(workbench.sendBaseStateRequest(mounted() as unknown as BaseStateRequestMessage)).toEqual({ status: 'wrong-direction' })
+		expect(runtime.reportRuntimeUnavailable('geometry producer failed')).toEqual({ status: 'sent' })
+		expect(runtime.sendBaseStateMounted(mounted() as unknown as BaseStateMountedMessage)).toEqual({ status: 'gated' })
+		expect(runtimeOutbound.some(sent => sent.type === 'inspection.base-state.mounted')).toBe(false)
+	})
+
+	it('is accepted by the Workbench for the open generation that declared the feature', () => {
+		const { workbench, runtime, workbenchOutbound, runtimeOutbound } = openGeneration()
+		runtime.receive(workbenchOutbound[0])
+		expect(runtime.sendBaseStateMounted(mounted() as unknown as BaseStateMountedMessage)).toEqual({ status: 'sent' })
+		expect(workbench.receive(runtimeOutbound.at(-1))).toMatchObject({
+			status: 'accepted',
+			message: { type: 'inspection.base-state.mounted', payload: { viewRevision: 'revision-1' } },
+		})
+	})
+
+	it('is dropped by the Workbench as stale for another session or generation, without a verdict', () => {
+		const { workbench } = openGeneration()
+		expect(workbench.receive(mounted({}, { previewSessionId: 'session-b' }))).toEqual({ status: 'stale-session' })
+		expect(workbench.receive(mounted({}, { runtimeGenerationId: 'generation-b' }))).toEqual({ status: 'stale-generation' })
+	})
+
+	it('is dropped by the Workbench from a generation that did not declare the feature or is not acknowledged, and never fails it', () => {
+		expect(openGeneration(WITHOUT_BASE_STATE).workbench.receive(mounted())).toEqual({ status: 'gated' })
+		const workbench = new WorkbenchPreviewProtocolBridge('session-a', collector([]), () => compatible)
+		workbench.admitGeneration('generation-a', 'initial')
+		expect(workbench.receive(mounted())).toEqual({ status: 'gated' })
+		expect(workbench.receive(mounted({ viewRevision: '' }))).toEqual({ status: 'gated' })
+	})
+
+	it('is rejected whole by the Workbench when it does not decode, never as an invalid message and without a requestId', () => {
+		const { workbench } = openGeneration()
+		for (const bad of [mounted({ viewRevision: '' }), mounted({ viewRevision: 'r'.repeat(501) }), mounted({ viewRevision: 7 })]) {
+			const result = workbench.receive(bad)
+			expect(result.status).toBe('rejected')
+			expect(result).not.toHaveProperty('requestId')
+		}
+		// The generation is still open.
+		expect(workbench.receive(mounted())).toMatchObject({ status: 'accepted' })
+	})
+
+	it('is the wrong direction when it reaches the runtime, which drops it without failing the generation', () => {
+		const { runtime, workbenchOutbound } = openGeneration()
+		runtime.receive(workbenchOutbound[0])
+		expect(runtime.receive(mounted())).toEqual({ status: 'wrong-direction' })
+		const undeclared = openGeneration(WITHOUT_BASE_STATE)
+		undeclared.runtime.receive(undeclared.workbenchOutbound[0])
+		expect(undeclared.runtime.receive(mounted())).toEqual({ status: 'gated' })
 	})
 })
 

@@ -43,7 +43,7 @@ function target(overrides: Partial<BaseStateTarget> & { generation?: string; var
 }
 
 type Harness = ReturnType<typeof harness>
-function harness(options: Readonly<{ sendStatus?: (request: BaseStateRequestMessage) => string }> = {}) {
+function harness(options: Readonly<{ sendStatus?: (request: BaseStateRequestMessage) => string; currentTarget?: () => BaseStateTarget }> = {}) {
 	const sent: BaseStateRequestMessage[] = []
 	let ids = 0
 	let changes = 0
@@ -54,6 +54,7 @@ function harness(options: Readonly<{ sendStatus?: (request: BaseStateRequestMess
 		},
 		mintRequestId: () => `req-${++ids}`,
 		changed: () => { changes++ },
+		...(options.currentTarget ? { currentTarget: options.currentTarget } : {}),
 	})
 	return {
 		controller,
@@ -487,5 +488,147 @@ describe('a render context that differs from the Workbench\'s (Clause 01a19ab9-c
 		expect(read(h)).toEqual({ status: 'pending' })
 		vi.advanceTimersByTime(1)
 		expect(read(h)).toEqual({ status: 'unavailable' })
+	})
+})
+
+/**
+ * The revision the Workbench compares is the latest `inspection.base-state.mounted` of the open
+ * generation (issue #484; Clause 01a19ab9-d028-7bb9-a370-4736992852f5). The session keeps it and the
+ * Inspector hands it to the controller as the target's `renderContext.viewRevision`: absent until the
+ * first one arrives, then the revision a response must echo.
+ */
+describe('the revision of the View the open generation renders (issue #484)', () => {
+	const mountedAs = (viewRevision: string): BaseStateTarget => target({ renderContext: { ...RENDER, viewRevision } })
+
+	it('reads pending, and asks nothing, until the first mount report arrives', () => {
+		const h = harness()
+		h.controller.retarget(target({ renderContext: undefined }))
+		expect(h.sent).toHaveLength(0)
+		expect(read(h)).toEqual({ status: 'pending' })
+		vi.advanceTimersByTime(BASE_STATE_RESPONSE_TIMEOUT_MS - 1)
+		expect(read(h)).toEqual({ status: 'pending' })
+		h.controller.retarget(mountedAs('rev-2'))
+		expect(h.sent).toHaveLength(1)
+		expect(read(h)).toEqual({ status: 'pending' })
+		// The report ended the wait: it does not expire afterwards.
+		vi.advanceTimersByTime(1)
+		expect(read(h)).toEqual({ status: 'pending' })
+	})
+
+	it('reads Unavailable once the generation has waited 5000 ms for its first mount report, and recovers when one arrives', () => {
+		const h = harness()
+		h.controller.retarget(target({ renderContext: undefined }))
+		vi.advanceTimersByTime(BASE_STATE_RESPONSE_TIMEOUT_MS)
+		expect(read(h)).toEqual({ status: 'unavailable' })
+		expect(h.sent).toHaveLength(0)
+		// Another change of the target does not start the wait again.
+		h.controller.retarget(target({ renderContext: undefined, keys: ['other'] }))
+		expect(read(h, 'other')).toEqual({ status: 'unavailable' })
+		h.controller.retarget(mountedAs('rev-2'))
+		expect(h.sent).toHaveLength(1)
+		expect(read(h, 'other')).toEqual({ status: 'pending' })
+	})
+
+	it('measures that wait from the generation opening, per generation, and not while the generation is still opening', () => {
+		const h = harness()
+		h.controller.retarget(target({ supported: undefined, context: undefined, renderContext: undefined }))
+		vi.advanceTimersByTime(BASE_STATE_RESPONSE_TIMEOUT_MS * 2)
+		expect(read(h)).toEqual({ status: 'pending' })
+		h.controller.retarget(target({ renderContext: undefined }))
+		vi.advanceTimersByTime(BASE_STATE_RESPONSE_TIMEOUT_MS - 1)
+		expect(read(h)).toEqual({ status: 'pending' })
+		// The next generation waits for its own report.
+		h.controller.retarget(target({ generation: 'gen-2', renderContext: undefined }))
+		vi.advanceTimersByTime(1)
+		expect(read(h)).toEqual({ status: 'pending' })
+		vi.advanceTimersByTime(BASE_STATE_RESPONSE_TIMEOUT_MS - 1)
+		expect(read(h)).toEqual({ status: 'unavailable' })
+	})
+
+	it('takes a mount report at once, without waiting for the host to retarget, and asks for the revision it names', () => {
+		let current = target({ renderContext: undefined })
+		const h = harness({ currentTarget: () => current })
+		h.controller.retarget(current)
+		expect(h.sent).toHaveLength(0)
+		current = mountedAs('rev-2')
+		h.controller.receive({ kind: 'mounted' })
+		expect(h.sent).toHaveLength(1)
+		// A response that follows in the same task is compared with the revision just reported: accepted, no re-ask.
+		h.respond(h.sent[0], { disabled: { value: true } }, { renderContext: { ...RENDER, viewRevision: 'rev-2' } })
+		expect(h.sent).toHaveLength(1)
+		expect(read(h)).toEqual({ status: 'value', value: true })
+	})
+
+	it('a mount report after a remount abandons the pending request at once: one new request, and the late answer of the old one is stale', () => {
+		let current = mountedAs('rev-1')
+		const h = harness({ currentTarget: () => current })
+		h.controller.retarget(current)
+		const first = h.sent[0]!
+		current = mountedAs('rev-2')
+		h.controller.receive({ kind: 'mounted' })
+		// The old request's answer, computed for the new revision, arrives in the same task.
+		h.respond(first, { disabled: { value: 'stale' } }, { renderContext: { ...RENDER, viewRevision: 'rev-2' } })
+		expect(h.sent).toHaveLength(2)
+		expect(read(h)).toEqual({ status: 'pending' })
+		h.respond(h.sent[1], { disabled: { value: 'fresh' } }, { renderContext: { ...RENDER, viewRevision: 'rev-2' } })
+		expect(h.sent).toHaveLength(2)
+		expect(read(h)).toEqual({ status: 'value', value: 'fresh' })
+	})
+
+	it('compares a response with the revision the Preview reported, not with any revision the Workbench read itself', () => {
+		const h = harness()
+		// The Preview read rev-2 although the Workbench read rev-1 when it admitted the generation.
+		h.controller.retarget(mountedAs('rev-2'))
+		h.respond(h.sent[0], { disabled: { value: true } }, { renderContext: { ...RENDER, viewRevision: 'rev-2' } })
+		expect(h.sent).toHaveLength(1)
+		expect(read(h)).toEqual({ status: 'value', value: true })
+	})
+
+	it('drops a response of an older revision than the latest report, asks once more, and reads Unavailable after a second', () => {
+		const h = harness()
+		h.controller.retarget(mountedAs('rev-3'))
+		h.respond(h.sent[0], {}, { renderContext: { ...RENDER, viewRevision: 'rev-2' } })
+		expect(h.sent).toHaveLength(2)
+		expect(read(h)).toEqual({ status: 'pending' })
+		h.respond(h.sent[1], {}, { renderContext: { ...RENDER, viewRevision: 'rev-2' } })
+		expect(h.sent).toHaveLength(2)
+		expect(read(h)).toEqual({ status: 'unavailable' })
+	})
+
+	it('a newer report after a remount abandons the pending request and asks again against the new revision', () => {
+		const h = harness()
+		h.controller.retarget(mountedAs('rev-1'))
+		const first = h.sent[0]!
+		// The Runtime mounted again from a newer read and reported it.
+		h.controller.retarget(mountedAs('rev-2'))
+		expect(h.sent).toHaveLength(2)
+		expect(h.sent[1]!.payload.requestId).not.toBe(first.payload.requestId)
+		// The answer to the abandoned request is stale, whatever revision it echoes.
+		h.respond(first, { disabled: { value: 'stale' } }, { renderContext: { ...RENDER, viewRevision: 'rev-2' } })
+		expect(read(h)).toEqual({ status: 'pending' })
+		h.respond(h.sent[1], { disabled: { value: 'fresh' } }, { renderContext: { ...RENDER, viewRevision: 'rev-2' } })
+		expect(read(h)).toEqual({ status: 'value', value: 'fresh' })
+	})
+
+	it('forgets a value read for the previous revision: no cache across a remount', () => {
+		const h = harness()
+		h.controller.retarget(mountedAs('rev-1'))
+		h.respond(h.sent[0], { disabled: { value: 'old' } })
+		expect(read(h)).toEqual({ status: 'value', value: 'old' })
+		h.controller.retarget(mountedAs('rev-2'))
+		expect(read(h)).toEqual({ status: 'pending' })
+		expect(h.sent).toHaveLength(2)
+	})
+
+	it('reads pending again, and abandons the request, when the generation ends and the next one has reported nothing', () => {
+		const h = harness()
+		h.controller.retarget(mountedAs('rev-1'))
+		h.controller.retarget(target({ generation: 'gen-2', renderContext: undefined }))
+		expect(read(h)).toEqual({ status: 'pending' })
+		expect(() => h.respond(h.sent[0])).not.toThrow()
+		expect(read(h)).toEqual({ status: 'pending' })
+		h.controller.retarget(target({ generation: 'gen-2', renderContext: { ...RENDER, viewRevision: 'rev-9' } }))
+		expect(h.sent).toHaveLength(2)
+		expect(h.sent[1]!.context.runtimeGenerationId).toBe('gen-2')
 	})
 })

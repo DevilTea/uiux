@@ -31,9 +31,8 @@ import { declaredRuntimeFeatures } from '../../src/preview/declared-features'
 import type { ChecksObservation } from '../../src/preview/checks-observer'
 import { buildChecksReportBody, ChecksReportPublisher, MaxWaitDebouncer } from '../../src/preview/checks-report-builder'
 import type { WidgetEventArmMessage } from '../../src/preview/protocol/widget-events'
-import type { BaseStateRequestMessage } from '../../src/preview/protocol/base-state'
+import { baseStateMountedMessage, type BaseStateRequestMessage, type BaseStateResponseMessage } from '../../src/preview/protocol/base-state'
 import { BaseStateRequestHold, sendBaseStateAnswer } from '../../src/preview/base-state'
-import type { BaseStateResponseMessage } from '../../src/preview/protocol/base-state'
 import { diagnostics } from '../../src/logging/diagnostics'
 import type { WidgetEventReport } from '../../src/preview/widget-event-observer'
 import type {
@@ -276,7 +275,21 @@ function receiveBaseStateRequest(message: BaseStateRequestMessage) {
 	sendBaseState(baseStateHold.receive(message, activeBridge))
 }
 
-/** A Runtime has been mounted: the request held until now is answered, once, from the Runtime that is mounted. */
+/**
+ * A Runtime has been mounted (the first render, or an update that replaced it): the View revision it
+ * was built from is reported with `inspection.base-state.mounted` (Discussion #241, owner ruling
+ * 2026-11-03; Clause 01a19ab9-d028-7bb9-a370-4736992852f5), and then the request held until now is
+ * answered, so the revision reaches the Workbench, which takes it on arrival, ahead of an answer sent in the same batch. The bridge sends
+ * nothing before the capability ACK, nothing for a generation that did not declare the feature (a
+ * capture or a version frame) and nothing once it ended.
+ */
+function onBaseStateRuntimeMounted(mounted: Readonly<{ viewRevision?: string }>) {
+	const message = baseStateMountedMessage({ previewSessionId: previewSessionId.value, runtimeGenerationId }, mounted)
+	if (message) runtimeBridge?.sendBaseStateMounted(message)
+	settleHeldBaseState()
+}
+
+/** The request held until now is answered, once, from the Runtime that is mounted. */
 function settleHeldBaseState() {
 	sendBaseState(baseStateHold.settle(activeBridge))
 }
@@ -686,8 +699,8 @@ async function evaluateRuntimeOnce() {
 			onWidgetEvent: reportWidgetEvent,
 			...(checksReportsEnabled ? { onChecksObservation: handleChecksObservation } : {}),
 			// A construction that renders at once mounts before `activeBridge` is assigned, so the
-			// settle below covers it; this one covers a mount that completes later.
-			onRuntimeMounted: settleHeldBaseState,
+			// settle below covers a held request; the mount report covers every mount, at once or later.
+			onRuntimeMounted: onBaseStateRuntimeMounted,
 		})
 		settleHeldBaseState()
 		bumpChecksContext()
