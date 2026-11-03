@@ -50,7 +50,7 @@ const asset: AdapterAssetCapability = { acceptedMediaTypes: ['image/png'] }
 export const iconSource = (value: AdapterAssetValue): string => value.url
 const entry: AdapterWidgetCatalogEntry = { i18n: { fields: { label: mapping } }, assetFields: { icon: asset } }
 const catalog: AdapterCatalog = { widgets: { Label: entry } }
-const version: AdapterApiVersion = '1.0'
+const version: AdapterApiVersion = '1.2'
 const config: JsonValue = { themeMap: { dark: 'midnight' } }
 // An author may write the schema read-only, as with `as const`.
 const configSchema = { $schema: 'https://json-schema.org/draft/2020-12/schema', type: 'object', required: ['themeMap'] } as const

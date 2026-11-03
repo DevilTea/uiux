@@ -116,9 +116,22 @@ export class NodeAdapterManifestLoader implements AdapterManifestLoader {
 	}
 }
 
+/**
+ * Why a declared `apiVersion` is refused: outside the `1` / `1.<minor>` grammar (`malformed`), or a
+ * minor above the highest one the running UIUX implements (`newer_minor`, Rule
+ * 01a11a5a-4aa0-7537-bbfc-600ea0ea61c5).
+ */
+export type AdapterApiRefusal = 'malformed' | 'newer_minor'
+
+/** A manifest member whose introducing minor is above the minor the Adapter declares (Rule 01a11a5a-4ba0-745f-a297-bd8d33babded). */
+export type AdapterApiMemberViolation = Readonly<{ member: string; minor: number }>
+
 /** Product integration owns the concrete supported adapter API versions. */
 export interface AdapterApiCompatibilityPolicy {
-	isCompatible(apiVersion: string): boolean
+	/** `undefined` when the declared version is accepted. */
+	refusal(apiVersion: string): AdapterApiRefusal | undefined
+	/** The members and entries the manifest uses under a declared minor below the one that introduced them. */
+	memberMinorViolations(manifest: AdapterManifest): readonly AdapterApiMemberViolation[]
 }
 
 export type AdapterRegistryOwnership = Readonly<{
@@ -393,12 +406,34 @@ export async function resolveWorkspaceAdapterSet(input: ResolveWorkspaceAdapterS
 		}
 		summaries.push(summary)
 
-		if (!input.apiCompatibility.isCompatible(manifest.apiVersion)) {
+		const apiRefusal = input.apiCompatibility.refusal(manifest.apiVersion)
+		if (apiRefusal === 'newer_minor') {
+			diagnostics.push({
+				code: 'adapter.api_minor_unsupported',
+				path: `${basePath}/manifest/apiVersion`,
+				message: `Adapter ${manifest.id} declares Adapter API ${manifest.apiVersion}, a newer minor than this UIUX implements; upgrade UIUX to a release that implements it.`,
+			})
+			continue
+		}
+		if (apiRefusal) {
 			diagnostics.push({
 				code: 'adapter.api_version_incompatible',
 				path: `${basePath}/manifest/apiVersion`,
 				message: `Adapter ${manifest.id} declares a malformed or unsupported UIUX adapter API version.`,
 			})
+			continue
+		}
+
+		// A member the declared minor does not include is invalid, never loaded with it ignored (Rule 01a11a5a-4ba0-745f-a297-bd8d33babded).
+		const memberViolations = input.apiCompatibility.memberMinorViolations(manifest)
+		if (memberViolations.length > 0) {
+			for (const violation of memberViolations) {
+				diagnostics.push({
+					code: 'adapter.api_member_minor_unmet',
+					path: `${basePath}/manifest/${violation.member}`,
+					message: `${violation.member} of Adapter ${manifest.id} needs Adapter API 1.${violation.minor} or later, but the Adapter declares ${manifest.apiVersion}.`,
+				})
+			}
 			continue
 		}
 

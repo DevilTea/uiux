@@ -10,7 +10,7 @@ import { isContainedSourcePath, validateAdapterSources } from '../src/domain/ada
 
 const manifestWith = (sources?: unknown) => ({
 	id: 'acme',
-	apiVersion: '1',
+	apiVersion: '1.3',
 	widgetPlugins: [],
 	catalog: { widgets: {} },
 	renderers: [],

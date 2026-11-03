@@ -49,7 +49,7 @@ function fixtureInput(selections: readonly WorkspaceAdapterSelection[], manifest
 			},
 		},
 		loader,
-		apiCompatibility: { isCompatible: (version: string) => version === 'compatible' },
+		apiCompatibility: { refusal: (version: string) => version === 'compatible' ? undefined : 'malformed', memberMinorViolations: () => [] },
 		registryInspector: { async inspect() { return { widgetTypes: [], rendererKeys: [] } } },
 		...(themeIds ? { themeIds } : {}),
 	}
@@ -176,7 +176,7 @@ async function gateWorkspace(themes: Record<string, unknown>): Promise<string> {
 	await mkdir(join(root, 'kit', 'adapters'), { recursive: true })
 	await writeFile(join(root, 'kit', 'adapters', 'gate.mjs'), [
 		'export const manifest = {',
-		'  id: \'theme-gate\', apiVersion: \'1\', widgetPlugins: [], catalog: { widgets: {} }, renderers: [], providers: [],',
+		'  id: \'theme-gate\', apiVersion: \'1.2\', widgetPlugins: [], catalog: { widgets: {} }, renderers: [], providers: [],',
 		'  themeSupport: { supports: themeId => themeId !== \'contrast\' },',
 		'}',
 		'',
@@ -206,7 +206,7 @@ describe('the selected Workspace\'s theme support', () => {
 
 	it('reports no theme support while the Adapter set is invalid', async () => {
 		const root = await gateWorkspace({ light: { label: 'Light' } })
-		await writeFile(join(root, 'kit', 'adapters', 'gate.mjs'), 'export const manifest = { id: \'theme-gate\', apiVersion: \'1\', widgetPlugins: [], catalog: { widgets: {} }, renderers: [], providers: [], themeSupport: {} }\n')
+		await writeFile(join(root, 'kit', 'adapters', 'gate.mjs'), 'export const manifest = { id: \'theme-gate\', apiVersion: \'1.2\', widgetPlugins: [], catalog: { widgets: {} }, renderers: [], providers: [], themeSupport: {} }\n')
 		expect(await selectedWorkspaceThemeSupport(root)).toBeUndefined()
 	})
 })

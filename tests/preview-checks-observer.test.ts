@@ -95,7 +95,7 @@ async function bundle() {
 		adapters: [{ moduleSpecifier: '@fixture/adapter' }],
 		resolver: { async resolve(_root, moduleSpecifier) { return { moduleSpecifier, resolvedPath: '/fixture/adapter.mjs', moduleIdentity: 'file:///fixture/adapter.mjs' } } },
 		loader: { async loadManifest() { return manifest } },
-		apiCompatibility: { isCompatible() { return true } },
+		apiCompatibility: { refusal: () => undefined, memberMinorViolations: () => [] },
 		registryInspector: { async inspect() { return { widgetTypes: ['Label'], rendererKeys: ['Label'] } } },
 	})
 	if (resolved.state !== 'valid') throw new Error(JSON.stringify(resolved.diagnostics))

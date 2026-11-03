@@ -436,7 +436,7 @@ describe('View / RootShell / Variant runtime assembly', () => {
 			adapters: [{ moduleSpecifier: '@fixture/plugin' }, { moduleSpecifier: '@fixture/catalog' }],
 			resolver: { async resolve(_root, moduleSpecifier) { return { moduleSpecifier, resolvedPath: `/fixture/${moduleSpecifier.endsWith('plugin') ? 'plugin' : 'catalog'}.mjs`, moduleIdentity: `file:///fixture/${moduleSpecifier.endsWith('plugin') ? 'plugin' : 'catalog'}.mjs` } } },
 			loader: { async loadManifest(resolvedModule) { return resolvedModule.moduleSpecifier.endsWith('plugin') ? pluginManifest : catalogManifest } },
-			apiCompatibility: { isCompatible() { return true } },
+			apiCompatibility: { refusal: () => undefined, memberMinorViolations: () => [] },
 			registryInspector: {
 				async inspect(manifest) {
 					return manifest.id === 'plugin-provider'
@@ -643,7 +643,7 @@ async function validatedSet(type: string, catalog?: AdapterWidgetCatalogEntry) {
 		adapters: [{ moduleSpecifier: '@fixture/adapter' }],
 		resolver: { async resolve(_root, moduleSpecifier) { return { moduleSpecifier, resolvedPath: '/fixture/adapter.mjs', moduleIdentity: 'file:///fixture/adapter.mjs' } } },
 		loader: { async loadManifest() { return manifest } },
-		apiCompatibility: { isCompatible() { return true } },
+		apiCompatibility: { refusal: () => undefined, memberMinorViolations: () => [] },
 		registryInspector: { async inspect() { return { widgetTypes: [type], rendererKeys: [type] } } },
 	})
 	if (result.state !== 'valid') throw new Error(JSON.stringify(result.diagnostics))

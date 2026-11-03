@@ -49,8 +49,10 @@ describe('UIUX Reference Adapter', () => {
 		const manifest = extractProductAdapterManifest(mod)
 
 		expect(manifest.id).toBe('uiux-reference-adapter')
-		expect(manifest.apiVersion).toBe('1')
-		expect(productAdapterApiCompatibility.isCompatible(manifest.apiVersion)).toBe(true)
+		// The lowest minor whose members it uses: `themeSupport` is Adapter API 1.2 (Clause 01a11a5a-41f3-7474-ba83-128fec22a1f7).
+		expect(manifest.apiVersion).toBe('1.2')
+		expect(productAdapterApiCompatibility.refusal(manifest.apiVersion)).toBeUndefined()
+		expect(productAdapterApiCompatibility.memberMinorViolations(manifest)).toEqual([])
 
 		const validation = validateAdapterManifest(manifest)
 		expect(validation.ok).toBe(true)

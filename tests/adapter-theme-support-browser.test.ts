@@ -23,7 +23,7 @@ const VIEW_ID = '7f3d7780-3cb9-4e57-8f0b-2e8d569905c1'
 const THEME_GATE_ADAPTER = [
 	'export const manifest = {',
 	'  id: \'theme-gate\',',
-	'  apiVersion: \'1\',',
+	'  apiVersion: \'1.2\',',
 	'  widgetPlugins: [],',
 	'  catalog: { widgets: {} },',
 	'  renderers: [],',

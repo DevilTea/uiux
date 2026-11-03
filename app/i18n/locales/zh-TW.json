@@ -2464,6 +2464,8 @@
       "schema_unsupported": "此版本的 UIUX 不支援這個 Workspace 的格式。"
     },
     "adapter": {
+      "api_member_minor_unmet": "這個 Adapter 使用的成員需要比其 apiVersion 所宣告的更新的 API 次版本。請把 Adapter 的 apiVersion 提高到該次版本。",
+      "api_minor_unsupported": "這個 Adapter 需要比此 UIUX 所實作的更新的 Adapter API 次版本。請升級 UIUX 至實作該次版本的版本。",
       "api_version_incompatible": "這個 Adapter 是為不同的 API 版本所建置。",
       "asset_capability_unbounded": "Asset 欄位必須宣告可接受的媒體類型。",
       "bundle_invalid": "預覽套件無效，請重新建置 Workbench。",

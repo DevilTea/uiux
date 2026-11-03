@@ -154,16 +154,54 @@ function readRegistryPluginType(member: unknown): string {
 	return type
 }
 
+
 /**
  * Adapter API version 1: `1` or `1.<minor>`, where `<minor>` is `0` or a decimal integer without
- * leading zeros. The declared minor is not yet bound to manifest members or capped by a host
- * ceiling; that policy is deferred (Discussion #241 R5).
+ * leading zeros (Clause 01a115cd-d095-790b-bc0b-95297733fed4).
  */
-const ADAPTER_API_VERSION_1 = /^1(?:\.(?:0|[1-9]\d*))?$/
+const ADAPTER_API_VERSION_1 = /^1(?:\.(0|[1-9]\d*))?$/
+
+/**
+ * The highest minor of Adapter API version 1 this release implements: the host ceiling (Rule
+ * 01a11a5a-4aa0-7537-bbfc-600ea0ea61c5). It is the highest minor of `ADAPTER_API_MEMBER_MINORS` and
+ * moves only when a minor ships. The public authoring entry exports no value naming it (Discussion
+ * #130 decision 7), so an Adapter writes the lowest minor it relies on, never the host's.
+ */
+export const ADAPTER_API_HOST_MINOR = 3
+
+/**
+ * The minor of Adapter API version 1 that introduced each member, in the order they shipped (Clause
+ * 01a11a5a-41f3-7474-ba83-128fec22a1f7): the entries of `providers` `1.1`, `themeSupport` `1.2` and
+ * `sources` `1.3`. Every other manifest member is part of `1.0`.
+ */
+export const ADAPTER_API_MEMBER_MINORS = Object.freeze({
+	providers: 1,
+	themeSupport: 2,
+	sources: 3,
+} as const)
+
+/** The declared minor of a well-formed `apiVersion`, `1` being `1.0`; `undefined` outside the grammar. */
+function declaredMinor(apiVersion: string): bigint | undefined {
+	const match = ADAPTER_API_VERSION_1.exec(apiVersion)
+	return match ? BigInt(match[1] ?? '0') : undefined
+}
 
 export const productAdapterApiCompatibility: AdapterApiCompatibilityPolicy = {
-	isCompatible(apiVersion: string): boolean {
-		// `test` is a non-normative test hook (owner ruling 2026-10-07), not an Adapter API version.
-		return apiVersion === 'test' || ADAPTER_API_VERSION_1.test(apiVersion)
+	// `test` is a non-normative test hook (owner ruling 2026-10-07), not an Adapter API version: it is
+	// neither capped by the host ceiling nor bound to members.
+	refusal(apiVersion: string) {
+		if (apiVersion === 'test') return undefined
+		const minor = declaredMinor(apiVersion)
+		if (minor === undefined) return 'malformed'
+		return minor > BigInt(ADAPTER_API_HOST_MINOR) ? 'newer_minor' : undefined
+	},
+	memberMinorViolations(manifest: AdapterManifest) {
+		if (manifest.apiVersion === 'test') return []
+		const declared = declaredMinor(manifest.apiVersion) ?? BigInt(0)
+		const used: { member: string; minor: number }[] = []
+		if (manifest.providers.length > 0) used.push({ member: 'providers', minor: ADAPTER_API_MEMBER_MINORS.providers })
+		if (Object.hasOwn(manifest, 'themeSupport')) used.push({ member: 'themeSupport', minor: ADAPTER_API_MEMBER_MINORS.themeSupport })
+		if (Object.hasOwn(manifest, 'sources')) used.push({ member: 'sources', minor: ADAPTER_API_MEMBER_MINORS.sources })
+		return used.filter(item => BigInt(item.minor) > declared)
 	},
 }
