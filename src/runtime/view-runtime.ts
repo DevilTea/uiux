@@ -1,4 +1,4 @@
-import type { WidgetSystemRuntime, WidgetSystemRuntimeDiagnostic } from '@deviltea/widget-core'
+import type { WidgetSystemRuntime, RuntimeDiagnostic } from '@deviltea/widget-core'
 import { inspectBlueprint } from '@deviltea/widget-core/inspection'
 
 import type { AssetResolutionTable } from '../assets/bindings'
@@ -111,7 +111,7 @@ export class LiveViewRuntimeController {
 		const variant = this.view.variants[variantName]!
 		const diagnostics: Diagnostic[] = []
 		for (const [widgetId, members] of Object.entries(variant.state)) {
-			const widget = this.currentRuntime.getWidget(widgetId) as unknown as { state?: Record<string, { set(value: unknown): { ok: true } | { ok: false; failure: { diagnostics: readonly WidgetSystemRuntimeDiagnostic[] } } } | undefined> } | null
+			const widget = this.currentRuntime.getWidget(widgetId) as unknown as { state?: Record<string, { set(value: unknown): { ok: true } | { ok: false; failure: { diagnostics: readonly RuntimeDiagnostic[] } } } | undefined> } | null
 			for (const [member, value] of Object.entries(members)) {
 				const path = `/variants/${escapePointer(variantName)}/state/${escapePointer(widgetId)}/${escapePointer(member)}`
 				const state = widget?.state?.[member]
@@ -134,7 +134,7 @@ export class LiveViewRuntimeController {
 	}
 
 	private rootState(key: 'locale' | 'viewport' | 'themeId') {
-		const root = this.currentRuntime.getWidget('root') as unknown as { state?: Record<string, { set(value: unknown): { ok: true; value: unknown } | { ok: false; failure: { diagnostics: readonly WidgetSystemRuntimeDiagnostic[] } } }> } | null
+		const root = this.currentRuntime.getWidget('root') as unknown as { state?: Record<string, { set(value: unknown): { ok: true; value: unknown } | { ok: false; failure: { diagnostics: readonly RuntimeDiagnostic[] } } }> } | null
 		const state = root?.state?.[key]
 		if (!state) throw new Error(`UIUX RootShell runtime is missing State member ${key}.`)
 		return state

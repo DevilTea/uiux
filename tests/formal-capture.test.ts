@@ -180,9 +180,6 @@ function createCounterView(): ViewResource {
 				content: [{
 					type: 'Counter',
 					id: 'counter-1',
-					props: {},
-					bindings: {},
-					events: {},
 				}],
 			},
 		},
@@ -688,6 +685,7 @@ function createPlugin(type) {
   return createWidgetPlugin(type)
     .interfaces()
     .config({
+      description: 'Title key configuration',
       schema: { type: 'object', properties: { titleKey: { type: 'string' } }, additionalProperties: false },
       validate: (input) => input === undefined || input === null || (typeof input === 'object' && !Array.isArray(input)),
       resolve: (raw) => ({ titleKey: raw?.titleKey ?? null }),

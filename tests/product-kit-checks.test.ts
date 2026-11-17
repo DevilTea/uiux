@@ -110,7 +110,7 @@ function view(id: string, name: string, widgets: readonly Readonly<{ id: string;
 		ir: {
 			type: 'RootShell',
 			id: 'root',
-			slots: { content: widgets.map(widget => ({ ...widget, props: {}, bindings: {}, events: {} })) },
+			slots: { content: widgets.map(widget => ({ ...widget })) },
 		},
 		variants,
 		spec: { intent: name, entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], requirements: [], decisions: [] },

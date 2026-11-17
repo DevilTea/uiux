@@ -12,11 +12,11 @@ importers:
         specifier: 0.1.0
         version: 0.1.0
       '@deviltea/widget-core':
-        specifier: 0.0.6
-        version: 0.0.6
+        specifier: 0.1.1
+        version: 0.1.1
       '@deviltea/widget-vue':
-        specifier: 0.0.6
-        version: 0.0.6(vue@3.5.43(typescript@6.0.3))
+        specifier: 0.1.1
+        version: 0.1.1(@deviltea/widget-core@0.1.1)(vue@3.5.43(typescript@6.0.3))
       '@fontsource-variable/inter':
         specifier: 5.3.0
         version: 5.3.0
@@ -287,14 +287,15 @@ packages:
     engines: {node: ^22.14.0 || ^24.0.0}
     hasBin: true
 
-  '@deviltea/widget-core@0.0.6':
-    resolution: {integrity: sha512-j4MNix7YO10UB/DDKnEYHJc9pG+54ww5ZX4i2inqlYEq2nirAyUAiibSBNlrZKwyif1Yfn+OPJzTqim4rPePNQ==}
-    engines: {node: ^22.14.0 || ^24.0.0}
+  '@deviltea/widget-core@0.1.1':
+    resolution: {integrity: sha512-ZB4fKJvcJWbX+4N/pGBzvYRmvluLcnL3XeKF0j1nspiQNJK2prrhTmZjKlB9VuMLBu4nHqhlKvDl9q9hdDkG8Q==}
+    engines: {node: '>=22.14.0'}
 
-  '@deviltea/widget-vue@0.0.6':
-    resolution: {integrity: sha512-A5AJSM7UkzHd8Jx0+/Ero2FHy9GSMXdKdwsoAicJAEOnrlvaP3idzpCu68zkxpAZu4XgIhh5BmPquEMrEVKELw==}
-    engines: {node: ^22.14.0 || ^24.0.0}
+  '@deviltea/widget-vue@0.1.1':
+    resolution: {integrity: sha512-v6JbX57Y0NPlIHsMBDuQ/rr7hD6vaGDwQHCaosXXpNF7DZ15tEL/qZ7vE9MoKQssruPUiLTdgpyo7ljJB1ovHQ==}
+    engines: {node: '>=22.14.0'}
     peerDependencies:
+      '@deviltea/widget-core': ^0.1.1
       vue: ^3.5.0
 
   '@dxup/nuxt@0.5.10':
@@ -5679,14 +5680,14 @@ snapshots:
     dependencies:
       yaml: 2.9.1
 
-  '@deviltea/widget-core@0.0.6':
+  '@deviltea/widget-core@0.1.1':
     dependencies:
       alien-signals: 3.2.1
       json-schema-typed: 8.0.2
 
-  '@deviltea/widget-vue@0.0.6(vue@3.5.43(typescript@6.0.3))':
+  '@deviltea/widget-vue@0.1.1(@deviltea/widget-core@0.1.1)(vue@3.5.43(typescript@6.0.3))':
     dependencies:
-      '@deviltea/widget-core': 0.0.6
+      '@deviltea/widget-core': 0.1.1
       vue: 3.5.43(typescript@6.0.3)
 
   '@dxup/nuxt@0.5.10(esbuild@0.28.2)(magicast@0.5.5)(oxc-parser@0.141.0)(rolldown@1.2.11)(rollup@4.63.5)(vite@8.3.1(@types/node@24.19.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(yaml@2.9.1))':

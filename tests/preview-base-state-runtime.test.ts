@@ -72,7 +72,7 @@ const statefulPlugin = createWidgetPlugin('Stateful')
 		.big({ validate: anything, default: () => 'a'.repeat(600_000) })
 		.big2({ validate: anything, default: () => 'b'.repeat(600_000) })
 		.dag({ validate: anything, default: () => dag }))
-	.methods(methods => methods.poke({ validateArgs: (args): args is [] => args.length === 0, execute: ({ emit }) => { pokes++; emit.poked(); return null } }))
+	.methods(methods => methods.poke({ validateArgs: (args): args is [] => args.length === 0, emits: ['poked'], execute: ({ emit }) => { pokes++; emit.poked(); return null } }))
 	.events(events => events.poked({ description: 'Poked' }))
 	.done()
 
