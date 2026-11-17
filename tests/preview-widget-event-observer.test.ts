@@ -35,8 +35,8 @@ const probePlugin = createWidgetPlugin('Probe')
 	.description('Widget Event fixture')
 	.interfaces<ProbeInterfaces>()
 	.methods(methods => methods
-		.press({ validateArgs: (args): args is [string] => typeof args[0] === 'string', execute: ({ args, emit }) => { emit.pressed(args[0]); return null } })
-		.poke({ validateArgs: (args): args is [] => args.length === 0, execute: ({ emit }) => { emit.poked(); return null } }))
+		.press({ validateArgs: (args): args is [string] => typeof args[0] === 'string', emits: ['pressed'], execute: ({ args, emit }) => { emit.pressed(args[0]); return null } })
+		.poke({ validateArgs: (args): args is [] => args.length === 0, emits: ['poked'], execute: ({ emit }) => { emit.poked(); return null } }))
 	.events(events => events.pressed({ description: 'Pressed with a value' }).poked({ description: 'Poked' }))
 	.done()
 

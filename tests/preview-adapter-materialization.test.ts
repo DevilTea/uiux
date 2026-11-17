@@ -530,19 +530,16 @@ describe('preview adapter materialization transport', () => {
 
 	it('renders translated fields and updates visible output dynamically when locale changes', async () => {
 		const greetingAdapterSource = `
-import { createWidgetPlugin } from '@deviltea/widget-core';
+import { createWidgetPlugin, createWidgetValueContract } from '@deviltea/widget-core';
 import { defineComponent, h } from 'vue';
 import { useWidget } from '@deviltea/widget-vue';
+
+const STRING = createWidgetValueContract('deviltea.uiux/string@1');
 
 export const greetingPlugin = createWidgetPlugin('Greeting')
   .interfaces()
   .properties(p => p.label({
-    valueContract: {
-      type: 'string',
-      validate: (v) => typeof v === 'string',
-      serialize: (v) => v,
-      deserialize: (v) => ({ ok: true, value: v }),
-    },
+    valueContract: STRING,
     registerDeps: ({ dep }) => ({
       t: dep.root.methods.invoke('t').validate((v) => typeof v === 'object' && v !== null && 'text' in v),
     }),
@@ -834,6 +831,7 @@ const TITLE = createWidgetValueContract(${JSON.stringify(titleContract)});
 export const labelPlugin = createWidgetPlugin('Label')
   .interfaces()
   .config({
+    description: 'Title key configuration',
     schema: { type: 'object', properties: { titleKey: { type: 'string' } }, additionalProperties: false },
     validate: (input) => input === null || (typeof input === 'object' && !Array.isArray(input)),
     resolve: (raw) => ({ titleKey: raw?.titleKey ?? null }),

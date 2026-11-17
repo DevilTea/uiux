@@ -65,7 +65,7 @@ function counterView(): ViewResource {
 		id: VIEW,
 		name: 'Counter',
 		feature: 'demo',
-		ir: { type: 'RootShell', id: 'root', slots: { content: [{ type: 'Counter', id: 'counter-1', props: {}, bindings: {}, events: {} }] } },
+		ir: { type: 'RootShell', id: 'root', slots: { content: [{ type: 'Counter', id: 'counter-1' }] } },
 		variants: { alt: { state: {} } },
 		spec: { intent: 'Count.', entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references: [], requirements: [], decisions: [] },
 	} as unknown as ViewResource

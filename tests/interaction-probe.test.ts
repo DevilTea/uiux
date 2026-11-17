@@ -20,7 +20,7 @@ const plugin = createWidgetPlugin('Probe')
 	.description('Interaction probe fixture')
 	.interfaces<Interfaces>()
 	.state(state => state.value({ authorWritable: true, validate: (v): v is string => typeof v === 'string', default: () => 'initial' }))
-	.methods(methods => methods.emitWith({ validateArgs: (args): args is [unknown] => args.length === 1, execute: ({ args, emit }) => { emit.changed(args[0]); return null } }))
+	.methods(methods => methods.emitWith({ validateArgs: (args): args is [unknown] => args.length === 1, emits: ['changed'], execute: ({ args, emit }) => { emit.changed(args[0]); return null } }))
 	.events(events => events.changed({ description: 'Changed' }).poked({ description: 'Poked' }))
 	.done()
 

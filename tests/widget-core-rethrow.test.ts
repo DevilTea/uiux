@@ -11,7 +11,7 @@ import { createAdapterWidgetSystem } from '../src/runtime/widget-core-diagnostic
 /**
  * UIUX maps only widget-core's documented coded errors (`WidgetSystemConfigurationError` with a
  * known code, `WidgetInspectionError`) to diagnostics or "nothing to report". Any other exception is
- * a defect and must propagate. widget-core 0.0.6 never throws those, so the entries are wrapped
+ * a defect and must propagate. A defect is not something real inputs produce, so the entries are wrapped
  * here: each delegates to the real implementation unless a test installs a replacement.
  */
 
@@ -60,6 +60,22 @@ describe('createAdapterWidgetSystem rethrows what it does not map', () => {
 		const unmapped = new WidgetSystemConfigurationError('future-code' as unknown as WidgetSystemConfigurationError['code'], 0, 'Alpha')
 		overrides.createWidgetSystem = () => { throw unmapped }
 		expect(() => createAdapterWidgetSystem([alpha], ['/a'])).toThrow(unmapped)
+	})
+
+	// widget-core 0.1 migration guide, "Plugin index": `invalid-options` (options that are not an object, `plugins`
+	// that is not an array) has `pluginIndex === null`. UIUX always passes an array, so it is UIUX's own defect.
+	it('propagates invalid-options, which has no plugin index', () => {
+		const invalid = new WidgetSystemConfigurationError('invalid-options', null, null)
+		overrides.createWidgetSystem = () => { throw invalid }
+		expect(() => createAdapterWidgetSystem([alpha], ['/a'])).toThrow(invalid)
+	})
+
+	it('reports a foreign Plugin without a plugin index at /adapters', () => {
+		overrides.createWidgetSystem = () => { throw new WidgetSystemConfigurationError('foreign-plugin', null, 'Alpha') }
+		expect(createAdapterWidgetSystem([alpha], ['/a'])).toMatchObject({
+			state: 'invalid',
+			diagnostics: [{ code: 'adapter.runtime_widget_core_incompatible', path: '/adapters' }],
+		})
 	})
 })
 

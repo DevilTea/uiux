@@ -249,9 +249,6 @@ function createSampleView(id: string, name: string, assetRefId?: string): ViewRe
 				content: [{
 					type: 'Counter',
 					id: 'counter-1',
-					props: {},
-					bindings: {},
-					events: {},
 				}],
 			},
 		},
@@ -748,8 +745,8 @@ describe('Handoff closure export and readiness evaluation', { timeout: HEAVY_SER
 				id: 'root',
 				slots: {
 					content: [
-						{ type: 'Counter', id: 'c-1', props: {}, bindings: {}, events: {} },
-						{ type: 'UnknownWidget', id: 'u-1', props: {}, bindings: {}, events: {} },
+						{ type: 'Counter', id: 'c-1' },
+						{ type: 'UnknownWidget', id: 'u-1' },
 					],
 				},
 			},
@@ -1650,8 +1647,8 @@ async function productKitHandoffWorkspace(): Promise<{ root: string; persistence
 			id: 'root',
 			slots: {
 				content: [
-					{ type: 'OrderSummary', id: 'summary-1', props: {}, bindings: {}, events: {} },
-					{ type: 'ProductCard', id: 'card-1', props: {}, bindings: {}, events: {} },
+					{ type: 'OrderSummary', id: 'summary-1' },
+					{ type: 'ProductCard', id: 'card-1' },
 				],
 			},
 		},

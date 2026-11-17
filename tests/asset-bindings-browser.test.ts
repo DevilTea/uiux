@@ -34,6 +34,7 @@ import { useWidget } from '@deviltea/widget-vue';
 export const picturePlugin = createWidgetPlugin('Picture')
   .interfaces()
   .config({
+    description: 'Picture source configuration',
     schema: {
       type: 'object',
       properties: { src: { type: 'object', properties: { url: { type: 'string' }, mediaType: { type: 'string' }, contentDigest: { type: 'string' } }, required: ['url', 'mediaType', 'contentDigest'] } },
@@ -69,6 +70,7 @@ export const PictureRenderer = defineComponent({
 export const backdropPlugin = createWidgetPlugin('Backdrop')
   .interfaces()
   .config({
+    description: 'Picture URL configuration',
     schema: { type: 'object', properties: { url: { type: 'string' } }, additionalProperties: false },
     validate: (input) => input === null || (typeof input === 'object' && !Array.isArray(input)),
     resolve: (raw) => ({ url: raw?.url ?? '' }),
