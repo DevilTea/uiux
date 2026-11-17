@@ -52,7 +52,7 @@ export function createAdapterWidgetSystem(plugins: readonly AnyWidgetPlugin[], p
 	}
 	catch (cause) {
 		if (!(cause instanceof WidgetSystemConfigurationError)) throw cause
-		const path = pluginPaths[cause.pluginIndex] ?? '/adapters'
+		const path = (cause.pluginIndex === null ? undefined : pluginPaths[cause.pluginIndex]) ?? '/adapters'
 		if (cause.code === 'foreign-plugin') {
 			return { state: 'invalid', diagnostics: [{ code: 'adapter.runtime_widget_core_incompatible', path, message: incompatibleWidgetCoreMessage(cause.pluginType) }] }
 		}
