@@ -39,6 +39,11 @@ function fingerprint(path: string): string {
  * with one after it, so a test that creates and then deletes a file (or restores the same size
  * and modification time) goes unnoticed; and it covers only `vitest` runs, not the smoke scripts
  * (`scripts/smoke-*.mjs`), which run outside it.
+ *
+ * Git is required (Clause 01a1ece9-97ec-736f-99a3-80b76efc800b), so the system temporary directory a test
+ * makes its Workspaces in would be refused. The run therefore points `TMPDIR` at a directory that is a Git
+ * work tree of its own (nothing is committed), and keeps the real one in `UIUX_TEST_OUTSIDE_GIT_TMPDIR`
+ * for the tests that need a directory outside every work tree (`tests/support/git.ts`).
  */
 export default function setup(): () => void {
 	// The dogfood Workspace declares a kit build (`.uiux/kit/package.json`): its Adapter is the build output
@@ -47,9 +52,15 @@ export default function setup(): () => void {
 	execFileSync(process.execPath, [join(REPOSITORY_ROOT, '.uiux', 'kit', 'build.mjs')], { stdio: 'pipe' })
 	const home = mkdtempSync(join(tmpdir(), 'uiux-test-home-'))
 	process.env.UIUX_HOME = home
+	const outside = tmpdir()
+	const workTree = mkdtempSync(join(outside, 'g-'))
+	execFileSync('git', ['init', '-q', workTree], { stdio: 'pipe' })
+	process.env.UIUX_TEST_OUTSIDE_GIT_TMPDIR = outside
+	process.env.TMPDIR = workTree
 	const before = GUARDED.map(fingerprint)
 	return () => {
 		rmSync(home, { recursive: true, force: true })
+		rmSync(workTree, { recursive: true, force: true })
 		const changed = GUARDED.filter((path, index) => fingerprint(path) !== before[index])
 		if (changed.length > 0) {
 			process.exitCode = 1

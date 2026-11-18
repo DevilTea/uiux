@@ -10,6 +10,8 @@ import { fileURLToPath } from 'node:url'
 
 const host = '127.0.0.1'
 const temporaryDirectory = await mkdtemp(join(tmpdir(), 'uiux-package-smoke-'))
+// Git is required (workspace.git_required): the packed CLI and server run inside a work tree of their own.
+execFileSync('git', ['init', '-q', temporaryDirectory])
 const packDirectory = join(temporaryDirectory, 'pack')
 const installDirectory = join(temporaryDirectory, 'install')
 const workspaceDirectory = join(temporaryDirectory, 'workspace')

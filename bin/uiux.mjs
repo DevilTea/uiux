@@ -22,13 +22,17 @@ Options:
 Commands:
   init [--workspace <dir>]
                            Initialize a Workspace in <dir>, by default in .uiux/ of the
-                           Git repository's top level (of the current directory outside
-                           a repository): workspace.json, product-kit.json,
+                           Git repository's top level: workspace.json, product-kit.json,
                            access-presets.json (the built-in Access presets), an empty
                            default-Locale file i18n/en-US.json and a .gitignore for
-                           the runtime files, kit/node_modules/ and kit/dist/
+                           the runtime files, kit/node_modules/ and kit/dist/. Git is
+                           required: outside a Git work tree, or when git cannot be run,
+                           it refuses (workspace.git_required, exit status 2) and creates
+                           nothing
   dev [--workspace <dir>] [--host <address>] [--origin <url>]...
-                           Start the unified UIUX Workbench/Nitro server. By default
+                           Start the unified UIUX Workbench/Nitro server for a Workspace
+                           inside a Git work tree (otherwise it refuses with
+                           workspace.git_required, exit status 2). By default
                            it listens on loopback only (127.0.0.1; PORT selects the
                            port, default 3000) and accepts only loopback host names.
                            --host takes a loopback address (127.0.0.1, ::1, localhost)
@@ -81,11 +85,12 @@ Commands:
                            when any context fails or the server refuses or is not found
   artifacts gc [--workspace <dir>] [--dry-run]
                            Delete the blobs of the Workspace's derived-artifact store
-                           (artifacts/) that nothing still needs: what a Review
-                           submission, a Checkpoint or this host's history of the
-                           Workspace references and the latest Evidence of each View
-                           and render context are kept, with what they reference;
-                           Handoff blobs are not. Prints each
+                           (artifacts/) that nothing still needs: the Evidence a Review
+                           submission references and the latest Evidence of each View
+                           and render context (the records naming the View's current
+                           revision, or every record of a group whose order cannot be
+                           decided) are kept, with what they reference; Handoff blobs
+                           are not. Prints each
                            deleted blob's sha256: identity, then their count and total
                            bytes; --dry-run prints the same and deletes nothing. Refused
                            while a uiux dev server serves the Workspace. No other
@@ -111,11 +116,10 @@ Access (each takes [--workspace <dir>]; rosters live in $UIUX_HOME, default ~/.u
   invite create --member <nick> [--origin <url>] [--expires <hours>]
   session list | session revoke <session-id> | session revoke --member <nick>
   access copy --from <old-dir> [--replace]
-                           Copy members, tokens and host history from another
-                           Workspace path, once, such as after moving a Workspace or
-                           for a worktree; run it before the first uiux dev there.
-                           --replace discards the target's roster and its own host
-                           history`)
+                           Copy members and tokens from another Workspace path, once,
+                           such as after moving a Workspace or for a worktree; run it
+                           before the first uiux dev there. --replace discards the
+                           target's roster`)
 }
 
 // `uiux dev` takes its bind address only from --host. For compatibility, a loopback HOST or
@@ -214,6 +218,17 @@ async function runDev(options) {
 		return
 	}
 	const workspaceRoot = selection.root
+
+	// Git is required (workspace.git_required): checked before the server starts, so before any lock, hold or listener.
+	const git = await withBundled('src/persistence/git.ts', (module) => {
+		const check = module.checkGitWorkTree(workspaceRoot)
+		return check.ok ? check : { ...check, message: module.gitRequiredMessage(check.message) }
+	})
+	if (!git.ok) {
+		console.error(`uiux: ${git.message}`)
+		process.exitCode = 2
+		return
+	}
 
 	// UIUX serves plain HTTP only; an https origin is served by a TLS-terminating front end.
 	if (process.env.NITRO_SSL_CERT || process.env.NITRO_SSL_KEY) {

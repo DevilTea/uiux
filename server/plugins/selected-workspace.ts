@@ -1,5 +1,6 @@
 import { resolve } from 'node:path'
 
+import { checkGitWorkTree, gitRequiredMessage } from '../../src/persistence/git'
 import { acquireServerHold, type AcquiredServerHold } from '../../src/persistence/server-hold'
 import { checkWorkspaceSelection } from '../../src/persistence/workspace-selection'
 import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../../src/product/workspace-schema'
@@ -24,9 +25,16 @@ export default defineNitroPlugin((nitroApp) => {
 			diagnostics.error(`uiux: ${selection.message}`)
 			process.exit(2)
 		}
+		// Git is required however the server was started (Clause 01a1ece9-97ec-736f-99a3-80b76efc800b): refused
+		// before the runtime opens anything, so before any lock, hold or listener.
+		const git = checkGitWorkTree(resolve(process.env.UIUX_WORKSPACE_ROOT))
+		if (!git.ok) {
+			diagnostics.error(`uiux: ${gitRequiredMessage(git.message)}`)
+			process.exit(2)
+		}
 		const runtime = getSelectedWorkspaceServerRuntime()
-		// A live server holds its selected Workspace so `uiux access copy` refuses to copy host history
-		// underneath it, and `uiux invite create` can name its port.
+		// A live server holds its selected Workspace so `uiux access copy` and `uiux artifacts gc`
+		// refuse to run underneath it, and `uiux invite create` can name its port.
 		if (!import.meta.prerender) {
 			// The graceful shutdown waits for open connections before the `close` hook runs, and an
 			// event stream never ends by itself: close the streams as soon as the signal arrives.
@@ -45,12 +53,6 @@ export default defineNitroPlugin((nitroApp) => {
 					diagnostics.error(`uiux: ${error instanceof AccessError ? error.message : `could not open the access store: ${error instanceof Error ? error.message : String(error)}`}`)
 					process.exit(2)
 				})
-			// Version history: close a leftover autosave, record changes made while no server ran,
-			// write the Baseline on a host without history, prune, then record design writes. A
-			// failure here is logged and never stops the server.
-			void runtime.historyRecorder.start().then((report) => {
-				if (report.baseline) diagnostics.info(`uiux: history recorded the Baseline Checkpoint ${report.baseline} for ${runtime.root}.`)
-			})
 			pendingHold = acquireServerHold(resolve(process.env.UIUX_WORKSPACE_ROOT), { origin: resolveInternalServerOrigin(), layout: runtime.persistence.layout })
 				.then((hold) => {
 					acquiredHold = hold

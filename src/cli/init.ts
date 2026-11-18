@@ -1,9 +1,9 @@
-import { spawnSync } from 'node:child_process'
 import { lstat, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { basename, join, resolve } from 'node:path'
 
 import { builtInAccessPresetsFile } from '../domain/access-presets/schema'
 import { emptyProductKit } from '../domain/product-kit/schema'
+import { checkGitWorkTree, gitRequiredMessage, type GitWorkTreeCheck } from '../persistence/git'
 import { V5_LAYOUT, WORKSPACE_DATA_DIRECTORY } from '../persistence/paths'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION, WORKSPACE_GITIGNORE_RULES } from '../product/workspace-schema'
 import { isSameOrInside, realFuturePath, resolveUiuxHome } from '../server/access/store'
@@ -15,8 +15,8 @@ export type InitCommandOptions = Readonly<{
 	cwd?: string
 	stdout?: (line: string) => void
 	stderr?: (line: string) => void
-	/** Test seam: the Git toplevel of `cwd`, or `undefined` outside a Git repository. */
-	gitToplevel?: (cwd: string) => string | undefined
+	/** Test seam: whether a directory is inside a Git work tree (`checkGitWorkTree`, which runs `git`). */
+	git?: (path: string) => GitWorkTreeCheck
 	/** The environment that names `UIUX_HOME`; `process.env` by default. */
 	env?: Readonly<Record<string, string | undefined>>
 }>
@@ -24,7 +24,11 @@ export type InitCommandOptions = Readonly<{
 /**
  * `uiux init [--workspace <dir>]` (Clauses 01a1144e-55a3-74c4-8bf8-3205e968e275 and
  * 01a1144e-55be-785d-b494-7f7da834572a): creates a minimal current-schema Workspace in `<dir>`, by
- * default `<git toplevel>/.uiux/` inside a Git repository and `<cwd>/.uiux/` otherwise. `<dir>`
+ * default `<git toplevel>/.uiux/`. Git is required (Clause 01a1ece9-97ec-736f-99a3-80b76efc800b): a
+ * directory outside a Git work tree, `git` that cannot be run to tell, and a default location with no
+ * work tree to take the top level of, are refused with `workspace.git_required` and status 2 before
+ * anything is written, so no `<cwd>/.uiux/` is created. A directory that does not exist yet is checked in
+ * its nearest existing ancestor. `<dir>`
  * holds the manifest directly. It writes `workspace.json` (a `defaultLocale`, empty viewport and
  * theme registries), a `product-kit.json` whose members are all empty, an `access-presets.json`
  * holding the built-in Access presets (Clause 01a11c09-a930-7e31-bb0a-9e2bee79490c), an empty
@@ -44,9 +48,24 @@ export async function runInitCommand(options: InitCommandOptions = {}): Promise<
 	const out = options.stdout ?? writeStdoutLine
 	const err = options.stderr ?? writeStderrLine
 	const cwd = resolve(options.cwd ?? process.cwd())
-	const root = options.workspace === undefined
-		? join((options.gitToplevel ?? gitToplevel)(cwd) ?? cwd, WORKSPACE_DATA_DIRECTORY.workspaceMeta)
-		: resolve(cwd, options.workspace)
+	const probe = options.git ?? checkGitWorkTree
+	let root: string
+	if (options.workspace === undefined) {
+		const found = probe(cwd)
+		if (!found.ok) {
+			err(`uiux: ${gitRequiredMessage(found.message)}`)
+			return 2
+		}
+		root = join(found.toplevel, WORKSPACE_DATA_DIRECTORY.workspaceMeta)
+	}
+	else {
+		root = resolve(cwd, options.workspace)
+		const found = probe(root)
+		if (!found.ok) {
+			err(`uiux: ${gitRequiredMessage(found.message)}`)
+			return 2
+		}
+	}
 
 	const home = resolveUiuxHome(options.env ?? process.env)
 	const realRoot = realFuturePath(root)
@@ -169,13 +188,6 @@ async function writeGitignore(path: string): Promise<void> {
 	if (missing.length === 0) return
 	const separator = existing === '' || existing.endsWith('\n') ? '' : '\n'
 	await writeFile(path, `${existing}${separator}${missing.join('\n')}\n`, 'utf8')
-}
-
-/** The Git toplevel of `cwd`, or `undefined` outside a Git repository or without Git. */
-function gitToplevel(cwd: string): string | undefined {
-	const result = spawnSync('git', ['rev-parse', '--show-toplevel'], { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
-	const toplevel = result.status === 0 ? result.stdout.trim() : ''
-	return toplevel === '' ? undefined : resolve(toplevel)
 }
 
 async function exists(path: string): Promise<boolean> {

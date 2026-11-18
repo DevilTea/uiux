@@ -12,6 +12,7 @@ import { runInitCommand } from '../src/cli/init'
 import { V5_LAYOUT } from '../src/persistence/paths'
 import { type DiscoveryHost, selectWorkspace } from '../src/persistence/workspace-selection'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
+import { insideGitWorkTree } from './support/git'
 import { HEAVY_SERVER_SUITE_TIMEOUT_MS } from './support/timeouts'
 
 /**
@@ -62,7 +63,7 @@ async function makeDirectory(): Promise<string> {
 /** A repository holding a schemaVersion 5 Workspace in `.uiux/`, with a nested subdirectory. */
 async function repositoryWithWorkspace(): Promise<Readonly<{ repository: string; root: string; nested: string }>> {
 	const repository = await makeDirectory()
-	expect(await runInitCommand({ cwd: repository, gitToplevel: () => repository, stdout: () => undefined })).toBe(0)
+	expect(await runInitCommand({ cwd: repository, git: insideGitWorkTree(repository), stdout: () => undefined })).toBe(0)
 	const nested = join(repository, 'packages', 'app', 'src')
 	await mkdir(nested, { recursive: true })
 	return { repository, root: join(repository, '.uiux'), nested }
@@ -130,7 +131,7 @@ describe('Workspace discovery (no --workspace)', () => {
 describe('discovery trust boundary', () => {
 	it('examines the home directory but stops there when the walk would cross it', async () => {
 		const base = await makeDirectory()
-		expect(await runInitCommand({ cwd: base, gitToplevel: () => base, stdout: () => undefined })).toBe(0)
+		expect(await runInitCommand({ cwd: base, git: insideGitWorkTree(base), stdout: () => undefined })).toBe(0)
 		const home = join(base, 'home')
 		const project = join(home, 'project')
 		await mkdir(project, { recursive: true })
@@ -145,14 +146,14 @@ describe('discovery trust boundary', () => {
 			})
 		}
 
-		expect(await runInitCommand({ cwd: home, gitToplevel: () => home, stdout: () => undefined })).toBe(0)
+		expect(await runInitCommand({ cwd: home, git: insideGitWorkTree(home), stdout: () => undefined })).toBe(0)
 		expect(selectWorkspace({ cwd: project, discoveryHost: host(home) }, POLICY)).toEqual({ ok: true, root: join(home, '.uiux'), layout: V5_LAYOUT, discovered: true })
 	})
 
 	// Owner ruling https://github.com/DevilTea/uiux/discussions/139#discussioncomment-18871377.
 	it('examines only the current directory when it is outside the home directory, with the trust check', async () => {
 		const base = await makeDirectory()
-		expect(await runInitCommand({ cwd: base, gitToplevel: () => base, stdout: () => undefined })).toBe(0)
+		expect(await runInitCommand({ cwd: base, git: insideGitWorkTree(base), stdout: () => undefined })).toBe(0)
 		const home = join(base, 'home')
 		const elsewhere = join(base, 'elsewhere')
 		await mkdir(home)
