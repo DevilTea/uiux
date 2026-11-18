@@ -1,7 +1,7 @@
 Feature: The toggle moves the base to the merge base with the default branch
   # Source: [#491 P1: version history is Git's, owner acceptance](https://github.com/DevilTea/uiux/discussions/491#discussioncomment-19699447): the merge base with the default branch is a toggle (Settled details item 1); issue #492 https://github.com/DevilTea/uiux/issues/492.
-  # Note: No test exists yet; the implementation PR of issue #492 adds the Test lines.
-  # Status: Not built as of fcad4fef, tracked in issue #492 (https://github.com/DevilTea/uiux/issues/492).
+  # Test: code@9e7126e `tests/git-changes.test.ts#L130` "lists a change committed on the branch only against the merge base, with nothing uncommitted". https://github.com/DevilTea/uiux/blob/9e7126ebbbe528f27adfda2dc6312297aa172777/tests/git-changes.test.ts#L130
+  # Status: built as of 9e7126e.
   @spec:id:01a1ece9-a13b-7602-a393-c4fd25c657ff
   @spec:demonstrates:01a1ece7-907a-74bb-9602-d9edcce38e42
   Scenario: The toggle moves the base to the merge base with the default branch
