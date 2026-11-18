@@ -1,7 +1,7 @@
 Feature: The changes view stores nothing and offers no write action
   # Source: [#491 P1: version history is Git's, owner acceptance](https://github.com/DevilTea/uiux/discussions/491#discussioncomment-19699447): the view reads through `git`, stores nothing and is read-only; issue #492 https://github.com/DevilTea/uiux/issues/492.
-  # Test: code@9e7126e `tests/git-changes.test.ts#L204` "leaves every file of the repository, .git included, and the home directory exactly as they were". https://github.com/DevilTea/uiux/blob/9e7126ebbbe528f27adfda2dc6312297aa172777/tests/git-changes.test.ts#L204
-  # Test: code@9e7126e `tests/git-changes.test.ts#L221` "offers no write: the routes are reads, and the scoped session has no restore or revert". https://github.com/DevilTea/uiux/blob/9e7126ebbbe528f27adfda2dc6312297aa172777/tests/git-changes.test.ts#L221
+  # Test: code@7068132 `tests/git-changes.test.ts#L249` "leaves every file of the repository, .git included, and the home directory exactly as they were". https://github.com/DevilTea/uiux/blob/7068132c0bcb420dbaf7ab6505e17bb4c5f737f5/tests/git-changes.test.ts#L249
+  # Test: code@7068132 `tests/git-changes.test.ts#L266` "offers no write: the routes are reads, and the scoped session has no restore or revert". https://github.com/DevilTea/uiux/blob/7068132c0bcb420dbaf7ab6505e17bb4c5f737f5/tests/git-changes.test.ts#L266
   # Status: built as of 9e7126e.
   @spec:id:01a1ece9-a2d8-7eda-a9ed-ada7e38c64e4
   @spec:demonstrates:01a1ece7-910f-7bb4-aebe-ec9cff221ffc
