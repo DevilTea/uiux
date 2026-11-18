@@ -469,6 +469,79 @@ async function readLocale(code: string): Promise<I18nResource | undefined> {
 	return (await uiux.readResource<{ resource?: I18nResource }>('locale', code))?.resource
 }
 
+type PreviewAdaptersResponse =
+	| { state: 'valid'; diagnostics: []; summaries: unknown[]; bundleUrl: string; stylesheetUrl?: string; themes?: Readonly<Record<string, Readonly<Record<string, string>>>>; themeSupport?: Readonly<{ unsupportedThemeIds: readonly string[] }> }
+	| { state: 'invalid'; diagnostics: readonly Diagnostic[]; summaries: unknown[] }
+
+type PreviewBundleModule = { mountPreviewRuntime?: (container: HTMLElement, opts: unknown) => PreviewRuntimeBridge }
+
+function noop(): void {}
+
+function importPreviewBundle(url: string): Promise<PreviewBundleModule> {
+	return import(/* @vite-ignore */ url) as Promise<PreviewBundleModule>
+}
+
+/**
+ * The reads of one `loadView` that do not depend on one another, started together instead of one
+ * after the other: the Adapter plan with the bundle it names, the Assets the View binds, and the
+ * Locale files. `evaluateRuntimeOnce` still consumes each result at the stage where the sequential
+ * load awaited it, in the same order, so which failure shows when several happen is unchanged: the
+ * first stage that fails wins (the View, the default Locale, a missing default Locale, the Adapter
+ * plan or the bundle, the Assets), and a read of a later stage that fails or is never used is
+ * dropped. A read that nothing awaits ends handled (`noop`), never as an unhandled rejection.
+ */
+type EarlyReads = {
+	adapters: Promise<PreviewAdaptersResponse>
+	/** The imported bundle, started once the Adapter plan names it and the import is certain to be used; `undefined` otherwise. */
+	bundle: Promise<PreviewBundleModule | undefined>
+	/** A Locale's messages; one read per code, shared by every use of the code. */
+	locale: (code: string) => Promise<I18nResource | undefined>
+	/** Starts the Locale read for `code` now, as the default Locale (or the one from the URL) is already known. */
+	startLocale: (code: string) => void
+	/** The Assets of `view`, read as soon as the View is. */
+	assets?: { view: ViewResource; read: Promise<AssetResolutionTable> }
+	startAssets: (view: ViewResource) => void
+}
+
+function startEarlyReads(): EarlyReads {
+	const locales = new Map<string, Promise<I18nResource | undefined>>()
+	const adapters = uiux.previewAdapters() as Promise<PreviewAdaptersResponse>
+	adapters.catch(noop)
+	const bundle = adapters.then((status) => {
+		if (status.state !== 'valid' || !status.bundleUrl) return undefined
+		// An unsupported theme shows its diagnostic in place of the View and imports nothing: while the
+		// theme is not known yet, only a Workspace without unsupported themes may import ahead.
+		const unsupported = status.themeSupport?.unsupportedThemeIds ?? []
+		if (unsupported.length > 0 && (!themeId.value || unsupported.includes(themeId.value))) return undefined
+		return importPreviewBundle(status.bundleUrl)
+	})
+	bundle.catch(noop)
+	// A version frame resolves its Locale against the version after its View is read, so it reads each Locale when asked.
+	const readLocaleOnce = (code: string): Promise<I18nResource | undefined> => {
+		if (versionId) return readLocale(code)
+		let read = locales.get(code)
+		if (!read) {
+			read = readLocale(code)
+			read.catch(noop)
+			locales.set(code, read)
+		}
+		return read
+	}
+	const early: EarlyReads = {
+		adapters,
+		bundle,
+		locale: readLocaleOnce,
+		startLocale: (code) => { if (!versionId) void readLocaleOnce(code) },
+		startAssets(view) {
+			// An async wrapper: a View whose bindings cannot be collected fails where the Assets are awaited, as before.
+			const read = (async () => await uiux.previewAssets(collectBoundAssetIds(view.ir), versionId))()
+			read.catch(noop)
+			early.assets = { view, read }
+		},
+	}
+	return early
+}
+
 /** Version mode: the version's manifest and Locale list decide the defaults and the fallbacks. */
 async function resolveVersionDefaults() {
 	versionManifest = (await uiux.readVersionResource<WorkspaceManifest>(versionId!, 'workspace', 'workspace'))?.resource
@@ -528,11 +601,25 @@ async function loadView() {
 	loading.value = true
 	error.value = undefined
 	try {
-		await resolveWorkspaceDefaults()
-		const result = await readViewForPreview()
+		// The reads that do not depend on one another start together (`EarlyReads`): the Workspace, the View,
+		// the Adapter plan and the Locale the URL names. The default Locale follows the Workspace, and the
+		// Assets the View. Each result is used where the sequence used it, so the outcome is the same.
+		const early = startEarlyReads()
+		if (locale.value) early.startLocale(locale.value)
+		const defaults = resolveWorkspaceDefaults()
+		const requestedViewId = viewId.value
+		const viewRead = versionId ? undefined : readViewForPreview()
+		viewRead?.catch(noop)
+		await defaults
+		if (workspaceDefaultLocale.value) early.startLocale(workspaceDefaultLocale.value)
+		let result = await (viewRead ?? readViewForPreview())
+		// Another View was selected while this one loaded: read the one selected now, as the sequence did.
+		if (viewRead && viewId.value !== requestedViewId) result = await readViewForPreview()
 		if (!result) throw new Error(t('preview.errors.viewUnavailable'))
 		viewData.value = result
-		await evaluateRuntime()
+		// The reactive View, the object `evaluateRuntimeOnce` reads the Assets for.
+		early.startAssets(viewData.value.resource)
+		await evaluateRuntime(early)
 	}
 	catch (cause) {
 		error.value = describeFetchError(cause, t('preview.errors.viewLoadFailed')).message
@@ -564,10 +651,10 @@ function showThemeDiagnostic() {
 	materializationResult.value = undefined
 }
 
-async function evaluateRuntime() {
+async function evaluateRuntime(early?: EarlyReads) {
 	evaluationsInFlight++
 	try {
-		await evaluateRuntimeOnce()
+		await evaluateRuntimeOnce(early)
 	}
 	finally {
 		evaluationsInFlight--
@@ -575,7 +662,7 @@ async function evaluateRuntime() {
 	}
 }
 
-async function evaluateRuntimeOnce() {
+async function evaluateRuntimeOnce(early?: EarlyReads) {
 	if (!viewData.value?.resource || !viewId.value) return
 	const evaluation = ++runtimeEvaluation
 	const superseded = () => evaluation !== runtimeEvaluation
@@ -587,7 +674,7 @@ async function evaluateRuntimeOnce() {
 	const defaultLocale = workspaceDefaultLocale.value
 	let defaultMessages: I18nResource | undefined
 	try {
-		defaultMessages = defaultLocale ? await readLocale(defaultLocale) : undefined
+		defaultMessages = defaultLocale ? await (early?.locale(defaultLocale) ?? readLocale(defaultLocale)) : undefined
 	}
 	catch (cause) {
 		if (superseded()) return
@@ -602,12 +689,8 @@ async function evaluateRuntimeOnce() {
 		return
 	}
 
-	type PreviewAdaptersResponse =
-		| { state: 'valid'; diagnostics: []; summaries: unknown[]; bundleUrl: string; stylesheetUrl?: string; themes?: Readonly<Record<string, Readonly<Record<string, string>>>>; themeSupport?: Readonly<{ unsupportedThemeIds: readonly string[] }> }
-		| { state: 'invalid'; diagnostics: readonly Diagnostic[]; summaries: unknown[] }
-
 	try {
-		const adapterStatus = await uiux.previewAdapters() as PreviewAdaptersResponse
+		const adapterStatus = await (early?.adapters ?? uiux.previewAdapters() as Promise<PreviewAdaptersResponse>)
 		if (superseded()) return
 		if (adapterStatus.state === 'invalid') {
 			unsupportedThemeIds.value = []
@@ -627,9 +710,7 @@ async function evaluateRuntimeOnce() {
 
 		if (!adapterStatus.bundleUrl) return
 
-		const bundleModule = await import(/* @vite-ignore */ adapterStatus.bundleUrl) as {
-			mountPreviewRuntime?: (container: HTMLElement, opts: unknown) => PreviewRuntimeBridge
-		}
+		const bundleModule = (early && await early.bundle) ?? await importPreviewBundle(adapterStatus.bundleUrl)
 		if (superseded()) return
 
 		const mount = bundleModule.mountPreviewRuntime
@@ -650,7 +731,7 @@ async function evaluateRuntimeOnce() {
 		if (defaultLocale && defaultMessages) localesMap.set(defaultLocale, defaultMessages)
 		if (locale.value !== defaultLocale) {
 			try {
-				const messages = await readLocale(locale.value)
+				const messages = await (early?.locale(locale.value) ?? readLocale(locale.value))
 				if (messages) {
 					localesMap.set(locale.value, messages)
 				}
@@ -667,7 +748,7 @@ async function evaluateRuntimeOnce() {
 		const viewRevision = viewData.value.revision
 		let assets: AssetResolutionTable
 		try {
-			assets = await uiux.previewAssets(collectBoundAssetIds(view.ir), versionId)
+			assets = await (early?.assets?.view === view ? early.assets.read : uiux.previewAssets(collectBoundAssetIds(view.ir), versionId))
 		}
 		catch (cause) {
 			if (superseded()) return

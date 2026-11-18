@@ -19,7 +19,11 @@ export type PreviewBundleFile = Readonly<{
 export type PreviewBundleResult = Readonly<{
 	/** The bundle's JavaScript module, `PREVIEW_BUNDLE_ENTRY`, for evaluation on the server: without its source map link. */
 	bundleJs: string
-	/** The content hash: the cache key and the URL segment every file is served under. */
+	/**
+	 * The content hash: the cache key and the URL segment every file is served under. It is the
+	 * digest of the bytes of every file in `files`, so one URL names one set of bytes and a served
+	 * file may be cached as immutable.
+	 */
 	hash: string
 	/**
 	 * Every output file, by its path under `/api/preview/runtime/<hash>/`: the JavaScript module,
@@ -70,16 +74,22 @@ const RACY_WINDOW_MS = 1000
 /** The bundles built, by content hash, least recently used first. */
 const bundleCache = new Map<string, PreviewBundleResult>()
 
+/**
+ * The content hash of the bundle built from a build identity (`buildIdentity`), by that identity,
+ * least recently used first: how a use finds its bundle before any build, without its bytes.
+ */
+const bundleHashes = new Map<string, string>()
+
 /** One file of a bundle's module graph: its stat when its digest was taken, and the digest of its bytes. */
 type GraphInput = { readonly path: string; size: number; mtimeMs: number; readonly digest: string }
 
 /**
  * The module graph of the last bundle built from one input key: every file the build read for the
- * style entries and the Adapter modules, with the content hash computed from them. `racy` when an
+ * style entries and the Adapter modules, with the build identity computed from them. `racy` when an
  * input changed so close to the build that the bundle may hold other bytes than its digest: the next
  * use builds again.
  */
-type BundleGraph = Readonly<{ hash: string; inputs: readonly GraphInput[]; racy: boolean }>
+type BundleGraph = Readonly<{ identity: string; inputs: readonly GraphInput[]; racy: boolean }>
 
 /** The last graph built, by input key, least recently used first. */
 const graphCache = new Map<string, BundleGraph>()
@@ -99,14 +109,16 @@ function bundleInputKey(input: Readonly<{ workspaceRoot: string; moduleBase?: st
 }
 
 /**
- * The content hash of a bundle: the cache key and the URL segment its files are served under. It
- * covers the input key and, unless the bundle is pinned, the digest of every file in its module
- * graph (`readBundleGraph`), so a changed byte anywhere in the graph changes it. With `pin`, the
+ * The identity of a build, which finds the bundle already built from the same inputs without
+ * building. It covers the input key and, unless the bundle is pinned, the digest of every file in its
+ * module graph (`readBundleGraph`), so a changed byte anywhere in the graph changes it. With `pin`, the
  * version of the kit build output generation the set was resolved from, no file is read: the bundle of
  * that generation stays in use until the next settled output, even when a failed build has changed
- * the files since (Rule 01a11bb1-9e5e-79ab-841e-c953e8b44bbf).
+ * the files since (Rule 01a11bb1-9e5e-79ab-841e-c953e8b44bbf). It does not cover UIUX's own runtime
+ * files, and a pin names a generation only within one process, so the URL is named by the digest of
+ * the built files instead (`PreviewBundleResult.hash`).
  */
-function contentHash(key: string, inputs: readonly GraphInput[]): string {
+function buildIdentity(key: string, inputs: readonly GraphInput[]): string {
 	const hash = createHash('sha256')
 	hash.update(key)
 	for (const input of inputs) hash.update(`\0${input.path}\0${input.digest}`)
@@ -115,6 +127,7 @@ function contentHash(key: string, inputs: readonly GraphInput[]): string {
 
 export function clearPreviewBundleCache(): void {
 	bundleCache.clear()
+	bundleHashes.clear()
 	graphCache.clear()
 	buildsInFlight.clear()
 }
@@ -161,15 +174,14 @@ export async function buildWorkspacePreviewBundle(input: Readonly<{
 	const key = bundleInputKey({ workspaceRoot: input.workspaceRoot, moduleBase: input.moduleBase, packageRoot, entrySource, pin: input.pin })
 
 	if (input.pin !== undefined) {
-		const hash = contentHash(key, [])
-		const cached = bundleCache.get(hash)
-		if (cached) {
-			remember(bundleCache, hash, cached)
-			return cached
-		}
+		const identity = buildIdentity(key, [])
+		const cached = knownBundle(identity)
+		if (cached) return cached
 		return await shareBuild(key, async () => {
 			const built = await buildBundle({ ...input, packageRoot, entrySource, browserRuntimePath })
-			return built.finish(hash)
+			const bundle = built.finish()
+			remember(bundleHashes, identity, bundle.hash)
+			return bundle
 		})
 	}
 
@@ -177,10 +189,9 @@ export async function buildWorkspacePreviewBundle(input: Readonly<{
 	if (inFlight) return await inFlight
 	const graph = graphCache.get(key)
 	if (graph && !graph.racy && await graphUnchanged(graph)) {
-		const cached = bundleCache.get(graph.hash)
+		const cached = knownBundle(graph.identity)
 		if (cached) {
 			remember(graphCache, key, graph)
-			remember(bundleCache, graph.hash, cached)
 			return cached
 		}
 	}
@@ -191,10 +202,22 @@ export async function buildWorkspacePreviewBundle(input: Readonly<{
 		const startedAt = Date.now()
 		const built = await buildBundle({ ...input, packageRoot, entrySource, browserRuntimePath })
 		const inputs = await readBundleGraph(built.metafile, built.workingDir, browserRuntimePath, startedAt, Date.now())
-		const hash = contentHash(key, inputs.inputs)
-		remember(graphCache, key, { hash, inputs: inputs.inputs, racy: inputs.racy })
-		return built.finish(hash)
+		const identity = buildIdentity(key, inputs.inputs)
+		remember(graphCache, key, { identity, inputs: inputs.inputs, racy: inputs.racy })
+		const bundle = built.finish()
+		remember(bundleHashes, identity, bundle.hash)
+		return bundle
 	})
+}
+
+/** The bundle already built from a build identity, marked as most recently used. */
+function knownBundle(identity: string): PreviewBundleResult | undefined {
+	const hash = bundleHashes.get(identity)
+	const bundle = hash === undefined ? undefined : bundleCache.get(hash)
+	if (hash === undefined || !bundle) return undefined
+	remember(bundleHashes, identity, hash)
+	remember(bundleCache, hash, bundle)
+	return bundle
 }
 
 /** Runs the build for `key` unless one is in flight already, and keeps the bundle it builds. */
@@ -292,8 +315,11 @@ type BuiltBundle = Readonly<{
 	metafile: esbuild.Metafile
 	/** The directory the metafile's input paths are relative to. */
 	workingDir: string
-	finish: (hash: string) => PreviewBundleResult
+	finish: () => PreviewBundleResult
 }>
+
+/** The length of a content hash, and the token that stands for it while the bytes it names are digested. */
+const HASH_TOKEN = 'uiux-hash-token-'
 
 async function buildBundle(input: Readonly<{
 	workspaceRoot: string
@@ -364,18 +390,32 @@ async function buildBundle(input: Readonly<{
 	return {
 		metafile: buildResult.metafile,
 		workingDir: realWorkspaceRoot,
-		finish(hash) {
-			const files = new Map<string, PreviewBundleFile>()
-			for (const output of buildResult.outputFiles) {
-				const path = relative(outdir, output.path).split(sep).join('/')
-				const extension = extname(path).toLowerCase()
-				let contents = output.contents
-				if (TEXT_OUTPUT_TYPES.has(extension)) {
-					const text = output.text.replaceAll(previewRuntimeFileUrl(placeholder, ''), previewRuntimeFileUrl(hash, ''))
-					contents = extension === '.map' ? relabelSourceMap(text, outdir, labels) : new TextEncoder().encode(text)
+		finish() {
+			// The hash names the bytes served, which name the hash in their URLs: the digest is taken
+			// with a fixed token of the hash's length in its place, which is replaced afterwards.
+			const prepared = (named: string) => {
+				const files = new Map<string, PreviewBundleFile>()
+				for (const output of buildResult.outputFiles) {
+					const path = relative(outdir, output.path).split(sep).join('/')
+					const extension = extname(path).toLowerCase()
+					let contents = output.contents
+					if (TEXT_OUTPUT_TYPES.has(extension)) {
+						const text = output.text.replaceAll(previewRuntimeFileUrl(placeholder, ''), previewRuntimeFileUrl(named, ''))
+						contents = extension === '.map' ? relabelSourceMap(text, outdir, labels) : new TextEncoder().encode(text)
+					}
+					files.set(path, { contents, contentType: OUTPUT_TYPES[extension] ?? 'application/octet-stream' })
 				}
-				files.set(path, { contents, contentType: OUTPUT_TYPES[extension] ?? 'application/octet-stream' })
+				return files
 			}
+			const digest = createHash('sha256')
+			const unnamed = prepared(HASH_TOKEN)
+			for (const path of [...unnamed.keys()].sort()) {
+				const { contents, contentType } = unnamed.get(path)!
+				digest.update(`${path}\0${contentType}\0${contents.byteLength}\0`)
+				digest.update(contents)
+			}
+			const hash = digest.digest('hex').slice(0, HASH_TOKEN.length)
+			const files = prepared(hash)
 			// Evaluated on the server, the module has no source map to load: its link names a served URL.
 			const bundleJs = new TextDecoder().decode(files.get(PREVIEW_BUNDLE_ENTRY)?.contents ?? new Uint8Array())
 				.replace(/\n\/\/# sourceMappingURL=\S+\n?$/u, '\n')

@@ -39,7 +39,10 @@ export async function readPreviewRuntimeFile(workspaceRoot: string, layout: Work
 		file: served,
 		headers: {
 			'Content-Type': served.contentType,
-			'Cache-Control': 'no-store',
+			// The hash in the URL is the digest of the bytes of every file of the bundle (`PreviewBundleResult.hash`),
+			// so a 200 names one set of bytes for good; `private` keeps it out of shared caches. The 404 and 409
+			// answers name no bundle and carry no such header.
+			'Cache-Control': 'private, max-age=31536000, immutable',
 			'X-Content-Type-Options': 'nosniff',
 			// An asset opened as a document of its own (an SVG, say) runs no script on this origin.
 			...(LOADED_TYPES.includes(essence) ? {} : { 'Content-Security-Policy': STORED_CONTENT_SECURITY_POLICY }),
