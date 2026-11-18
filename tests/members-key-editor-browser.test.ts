@@ -149,7 +149,7 @@ describe('Edit access', () => {
 			expect(await checkedKeys(editor)).toEqual(VIEWER)
 			// The checklist is grouped by domain, each key with its identifier and description.
 			expect(await editor.locator('[data-key-domain]').evaluateAll(groups => groups.map(group => group.getAttribute('data-key-domain'))))
-				.toEqual(['workspace', 'history', 'product-kit', 'reviews', 'decisions', 'views', 'flows', 'locales', 'assets', 'settings', 'evidence', 'handoff', 'checkpoints', 'locks', 'presets', 'members'])
+				.toEqual(['workspace', 'product-kit', 'reviews', 'decisions', 'views', 'flows', 'locales', 'assets', 'settings', 'evidence', 'handoff', 'locks', 'presets', 'members'])
 			expect(await keyRow(editor, 'handoff.export').innerText()).toContain('Export a Handoff.')
 
 			await startFrom(page, editor, 'Editor')
@@ -172,7 +172,7 @@ describe('Edit access', () => {
 			await save(editor)
 			await editor.waitFor({ state: 'detached' })
 			expect(await storedKeys(nickname)).toEqual([...VIEWER, 'reviews.write', 'reviews.promote'])
-			await page.waitForFunction(name => [...document.querySelectorAll('[data-members-table] tbody tr')].some(tr => tr.textContent?.includes(name) && tr.textContent.includes('5 keys')), nickname)
+			await page.waitForFunction(name => [...document.querySelectorAll('[data-members-table] tbody tr')].some(tr => tr.textContent?.includes(name) && tr.textContent.includes('4 keys')), nickname)
 			expect((await row(page, nickname).locator('[data-member-label]').innerText()).trim()).toBe('Custom')
 		}
 		finally { await context.close() }
@@ -183,7 +183,7 @@ describe('Edit access', () => {
 		const { context, page } = await openMembers()
 		try {
 			const editor = await editAccess(page, nickname)
-			for (const key of ['reviews.resolve', 'decisions.decide', 'checkpoints.delete', 'locks.force-release', 'presets.manage', 'members.manage']) {
+			for (const key of ['reviews.resolve', 'decisions.decide', 'locks.force-release', 'presets.manage', 'members.manage']) {
 				expect(await keyRow(editor, key).locator('[data-key-human-only]').count(), key).toBe(1)
 				expect(await checkbox(editor, key).isDisabled(), key).toBe(true)
 			}
@@ -192,7 +192,7 @@ describe('Edit access', () => {
 
 			await startFrom(page, editor, 'Owner')
 			expect(await checkedKeys(editor)).toEqual(presetKeys('owner', 'agent'))
-			expect(await editor.locator('[data-key-editor-applied]').innerText()).toContain('Started from Owner without reviews.resolve, decisions.decide, checkpoints.delete, locks.force-release, presets.manage, members.manage')
+			expect(await editor.locator('[data-key-editor-applied]').innerText()).toContain('Started from Owner without reviews.resolve, decisions.decide, locks.force-release, presets.manage, members.manage')
 			// An Agent holding the Owner keys it can hold is labeled by the preset with the fewest humanOnly keys.
 			expect((await label(editor).innerText()).trim()).toBe('Editor')
 			await save(editor)
@@ -300,9 +300,9 @@ describe('refusals shown in place', () => {
 		const { context, page } = await openMembers('zh-TW')
 		try {
 			const editor = await editAccess(page, nickname)
-			await checkbox(editor, 'history.read').click()
-			for (const key of ['checkpoints.create', 'history.restore'])
-				expect(await keyRow(editor, key).locator('[data-key-missing]').innerText(), key).toContain('history.read')
+			await checkbox(editor, 'reviews.write').click()
+			for (const key of ['reviews.submit', 'reviews.promote'])
+				expect(await keyRow(editor, key).locator('[data-key-missing]').innerText(), key).toContain('reviews.write')
 			await save(editor)
 			const error = editor.locator('[data-member-editor-error]')
 			await error.waitFor()
@@ -353,7 +353,7 @@ describe('the notice of keys no person holds', () => {
 		try {
 			const notice = second.page.locator('[data-testid="unheld-keys"]')
 			await notice.waitFor({ timeout: 15_000 })
-			expect((await notice.locator('[data-unheld-keys]').innerText()).trim()).toBe('decisions.decide, checkpoints.delete, locks.force-release, presets.manage')
+			expect((await notice.locator('[data-unheld-keys]').innerText()).trim()).toBe('decisions.decide, locks.force-release, presets.manage')
 			const presets = notice.locator('[data-unheld-open-presets]')
 			expect(await presets.getAttribute('href')).toBe('/workspace/access-presets')
 			expect((await presets.innerText()).trim()).toBe('Open Access presets')

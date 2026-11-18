@@ -8,7 +8,6 @@ import { keysOfPreset, PERMISSION_KEYS } from '../src/application/access/keys'
 import { memberLabel } from '../src/application/access/labels'
 import { createLeaseManager } from '../src/application/access/leases'
 import type { MemberPrincipal } from '../src/application/access/principal'
-import { createHistoryRecorder, type HistoryRecorderClock } from '../src/application/services/history-recorder'
 import { createWorkspaceApplicationSession, type WorkspaceApplicationSession } from '../src/application/services/workspace-session'
 import { runAccessCommand } from '../src/cli/access'
 import { runInitCommand } from '../src/cli/init'
@@ -18,7 +17,6 @@ import {
 	validateAccessPresetsFile,
 	type AccessPreset,
 } from '../src/domain/access-presets/schema'
-import type { HostVersionRecord } from '../src/domain/history/schema'
 import { canonicalJsonBytes, FileNativePersistence, V5_LAYOUT } from '../src/persistence'
 import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { readAccessPresetsForHttp, updateAccessPresetsForHttp } from '../src/server/access-presets-http'
@@ -26,7 +24,6 @@ import { addMember } from '../src/server/access/roster'
 import { AccessService, memberPrincipal } from '../src/server/access/service'
 import { AccessStore } from '../src/server/access/store'
 import { createWorkspaceAccessPresetsReader, readWorkspaceAccessPresets } from '../src/server/access/workspace-presets'
-import { createHistoryStoreFactory } from '../src/server/history-stores'
 import { connectMcp, scoped, testMember } from './support/access'
 import { createCurrentWorkspace, v5Manifest, writeCurrentWorkspace, writeManifest } from './support/workspace-layout'
 
@@ -162,7 +159,7 @@ describe('reading and update_access_presets over HTTP (Clauses 01a11c09-a50e, 01
 	it('replaces the whole presets array with compare-and-swap, keys stored in catalog order, and an empty array is valid (Rule 01a11c09-c78f)', async () => {
 		const ctx = await workspace()
 		const presets = [
-			{ id: 'lead', name: 'Lead', keys: ['views.write', 'workspace.read', 'history.read'] },
+			{ id: 'lead', name: 'Lead', keys: ['views.write', 'workspace.read', 'product-kit.source.read'] },
 			...builtIns().filter(preset => preset.id !== 'owner'),
 		]
 		const updated = await updateAccessPresetsForHttp(http(ctx.app, OWNER), { expectedRevision: await revision(ctx.app), presets })
@@ -171,7 +168,7 @@ describe('reading and update_access_presets over HTTP (Clauses 01a11c09-a50e, 01
 		expect((updated.body as { changeSummary: unknown }).changeSummary).toEqual({ changes: [{ path: '/presets/lead', op: 'add' }, { path: '/presets/owner', op: 'remove' }] })
 		const stored = JSON.parse(await readFile(ctx.presetsPath, 'utf8')) as { presets: AccessPreset[] }
 		expect(stored.presets.map(preset => preset.id)).toEqual(['lead', 'viewer', 'reviewer', 'editor'])
-		expect(stored.presets[0]!.keys).toEqual(['workspace.read', 'history.read', 'views.write'])
+		expect(stored.presets[0]!.keys).toEqual(['workspace.read', 'product-kit.source.read', 'views.write'])
 
 		const stale = await updateAccessPresetsForHttp(http(ctx.app, OWNER), { expectedRevision: (updated.body as { revision: string }).revision.replace(/.$/u, '0'), presets: [] })
 		expect(stale).toMatchObject({ status: 409, body: { status: 'conflict', currentRevision: await revision(ctx.app) } })
@@ -248,10 +245,10 @@ describe('reading and update_access_presets over HTTP (Clauses 01a11c09-a50e, 01
 	it('keeps an unknown key only on the preset whose id holds it: moving future.x from F to Viewer is refused', async () => {
 		const ctx = await workspace()
 		const [viewer, ...others] = builtIns()
-		const f = { id: 'f', name: 'F', keys: ['workspace.read', 'history.read', 'future.x'] }
+		const f = { id: 'f', name: 'F', keys: ['workspace.read', 'product-kit.source.read', 'future.x'] }
 		await writeFile(ctx.presetsPath, `${JSON.stringify({ presets: [viewer, ...others, f] })}\n`)
 		const before = await readFile(ctx.presetsPath)
-		const moved = [{ ...viewer, keys: [...viewer!.keys, 'future.x'] }, ...others, { ...f, keys: ['workspace.read', 'history.read'] }]
+		const moved = [{ ...viewer, keys: [...viewer!.keys, 'future.x'] }, ...others, { ...f, keys: ['workspace.read', 'product-kit.source.read'] }]
 		const refused = await updateAccessPresetsForHttp(http(ctx.app, OWNER), { expectedRevision: await revision(ctx.app), presets: moved })
 		expect(refused).toMatchObject({ status: 400, body: { status: 'invalid', code: 'access.unknown_key', diagnostics: [{ code: 'access.unknown_key', path: '/presets/0' }] } })
 		expect((refused.body as { message: string }).message).toContain('preset "Viewer"')
@@ -330,7 +327,7 @@ describe('reading and update_access_presets over HTTP (Clauses 01a11c09-a50e, 01
 		expect(await updateAccessPresetsForHttp(http(ctx.app, OWNER), { expectedRevision: read!.revision, presets: [viewer] })).toMatchObject({ status: 200, body: { diagnostics: [] } })
 	})
 
-	it('is not offered over MCP: no Tool or Resource, and restore_resource_version refuses the kind (Rule 01a11c09-cbea)', async () => {
+	it('is not offered over MCP: no Tool or Resource (Rule 01a11c09-cbea)', async () => {
 		const ctx = await workspace()
 		const mcp = await connectMcp(ctx.app, AGENT)
 		try {
@@ -338,39 +335,8 @@ describe('reading and update_access_presets over HTTP (Clauses 01a11c09-a50e, 01
 			expect(tools.filter(name => name.includes('preset'))).toEqual([])
 			const resources = [...(await mcp.client.listResources()).resources.map(resource => resource.uri), ...(await mcp.client.listResourceTemplates()).resourceTemplates.map(template => template.uriTemplate)]
 			expect(resources.filter(uri => uri.includes('preset'))).toEqual([])
-			const restored = await mcp.client.callTool({ name: 'restore_resource_version', arguments: { versionId: '11111111-1111-4111-8111-111111111111', resource: { kind: 'access-presets', key: 'access-presets' }, expectedRevision: await revision(ctx.app) } })
-			expect(restored).toMatchObject({ isError: true, structuredContent: { code: 'history.restore_unsupported_kind' } })
 		}
 		finally { await mcp.close() }
-	})
-})
-
-describe('Access presets history and restore (Clauses 01a11a5e-1fc4, 01a11a5e-216d and 01a11c09-a42a)', () => {
-	const clock = (): HistoryRecorderClock => ({ now: () => Date.parse('2026-10-12T00:00:00.000Z'), setTimeout: () => Symbol('timer'), clearTimeout: () => undefined })
-
-	it('records updateAccessPresets as a write event of the access-presets resource, and restores it only with presets.manage', async () => {
-		const base = await workspace()
-		const home = join(await makeRoot('uiux-access-presets-home-'), 'home')
-		const history = createHistoryStoreFactory({ workspaceRoot: base.root, persistence: base.persistence, home: () => home })
-		const recorder = createHistoryRecorder({ persistence: base.persistence, stores: () => history.open(), clock: clock(), log: () => undefined })
-		const app = createWorkspaceApplicationSession(base.persistence, { history, historyBoundary: () => recorder })
-		const { baseline } = await recorder.start()
-		const checkpoint = JSON.parse(await readFile(join(base.root, 'history', 'checkpoints', `${baseline}.json`), 'utf8')) as { resources: { kind: string; key: string; files: Record<string, string> }[] }
-		expect(checkpoint.resources.find(resource => resource.kind === 'access-presets')).toMatchObject({ key: 'access-presets', files: { 'access-presets.json': expect.stringMatching(/^sha256:/u) } })
-
-		const renamed = builtIns().map(preset => preset.id === 'editor' ? { ...preset, name: 'Maker' } : preset)
-		expect(await updateAccessPresetsForHttp(http(app, OWNER), { expectedRevision: await revision(app), presets: renamed })).toMatchObject({ status: 200 })
-		await recorder.stop()
-		const versions = (await (await history.open())!.host.listVersions()).records as HostVersionRecord[]
-		expect(versions.flatMap(version => version.events.map(event => `${event.operation}:${event.source}`))).toEqual(['updateAccessPresets:workbench'])
-		expect(versions[0]!.resources.find(resource => resource.kind === 'access-presets')?.revision).toBe(await revision(app))
-
-		const restore = { versionId: baseline!, resource: { kind: 'access-presets', key: 'access-presets' }, expectedRevision: await revision(app) }
-		const restorer = testMember({ nickname: 'rhea', kind: 'human', credential: 'session', keys: ['workspace.read', 'history.read', 'history.restore'] })
-		expect(await http(app, restorer).restoreResourceVersion(restore)).toMatchObject({ status: 'blocked', code: 'auth.scope_denied', requiredKeys: ['presets.manage'] })
-		expect(await http(app, OWNER_TOKEN).restoreResourceVersion(restore)).toMatchObject({ status: 'blocked', code: 'auth.scope_denied', requiredKeys: ['presets.manage'] })
-		expect(await http(app, OWNER).restoreResourceVersion(restore)).toMatchObject({ status: 'updated', kind: 'access-presets', key: 'access-presets', restoredFrom: baseline })
-		expect(JSON.parse(await readFile(base.presetsPath, 'utf8'))).toEqual(builtInAccessPresetsFile())
 	})
 })
 
@@ -503,16 +469,16 @@ describe('labels and --preset from the Workspace\'s presets (Rules 01a11c09-c724
 			const code = await runAccessCommand({ argv, env: { UIUX_HOME: home }, cwd: base, stdout: line => out.push(line), stderr: line => err.push(line) })
 			return { code, out: out.join('\n'), err: err.join('\n') }
 		}
-		const lead = { id: 'lead', name: 'Lead', keys: ['workspace.read', 'history.read', 'views.write', 'future.capability'] }
+		const lead = { id: 'lead', name: 'Lead', keys: ['workspace.read', 'product-kit.source.read', 'views.write', 'future.capability'] }
 		await writeFile(join(root, ACCESS_PRESETS_FILENAME), JSON.stringify({ presets: [...builtIns().filter(preset => preset.id !== 'reviewer'), lead] }))
 
-		expect(await run('member', 'add', 'deviltea', '--preset', 'owner', '--workspace', root)).toMatchObject({ code: 0, out: expect.stringContaining('(Owner, 23 keys)') })
+		expect(await run('member', 'add', 'deviltea', '--preset', 'owner', '--workspace', root)).toMatchObject({ code: 0, out: expect.stringContaining('(Owner, 19 keys)') })
 		expect(await run('member', 'add', 'mei', '--preset', 'Reviewer', '--workspace', root)).toMatchObject({ code: 1, err: expect.stringContaining('The presets are Viewer, Editor, Owner, Lead.') })
 		// A preset key this version does not know is never applied; the member is then Custom.
 		const added = await run('member', 'add', 'lee', '--preset', 'Lead', '--workspace', root)
 		expect(added).toMatchObject({ code: 0, out: expect.stringContaining('(Custom, 3 keys)') })
 		// The keys it applied are printed, not only their count.
-		expect(added.out).toContain('Keys from the Lead preset: workspace.read, history.read, views.write')
+		expect(added.out).toContain('Keys from the Lead preset: workspace.read, product-kit.source.read, views.write')
 		expect(added.out).toContain('The Lead preset holds future.capability, unknown to this UIUX version; it was not applied.')
 		const agent = await run('member', 'add', 'bot', '--kind', 'agent', '--preset', 'Owner', '--workspace', root)
 		expect(agent.out).toContain(`Keys from the Owner preset: ${keysOfPreset('agent', PERMISSION_KEYS).join(', ')}`)

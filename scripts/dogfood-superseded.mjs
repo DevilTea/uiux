@@ -70,7 +70,7 @@ function readStore(workspaceRoot) {
 	return store
 }
 
-/** Every `sha256:` identity named by a file under the Workspace other than the store and the Kit (Review threads, history, Views, Flows, ...). */
+/** Every `sha256:` identity named by a file under the Workspace other than the store and the Kit (Review threads, Views, Flows, ...). */
 function identitiesOutsideStore(workspaceRoot) {
 	const found = new Set()
 	const root = join(workspaceRoot, DOGFOOD_DIR)

@@ -11,7 +11,7 @@ import { useUnsavedGuard } from '../../composables/useUnsavedGuard'
 import { createSettingsSection } from '../../composables/useSettingsSection'
 import { describeFetchError, isLockedError, type FetchErrorLock } from '../../utils/fetch-error'
 import { classifyAcknowledgedWriteAnswer, failureOf } from '../../utils/impact-acknowledge'
-import type { ReceivedImpact } from '../../utils/version-restore'
+import type { ReceivedImpact } from '../../utils/impact-list'
 import {
 	buildSettingsPayload,
 	cloneJson,

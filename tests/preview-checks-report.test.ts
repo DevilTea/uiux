@@ -483,10 +483,9 @@ describe('what the runtime reports', () => {
 })
 
 describe('the runtime declares checks.reports in a Workbench Preview only', () => {
-	it('declares it for a Workbench Preview, and not for the formal capture harness or a version frame', () => {
-		expect(declaredRuntimeFeatures({ harness: false, version: false })).toContain(CHECKS_REPORTS_FEATURE)
-		expect(declaredRuntimeFeatures({ harness: true, version: false })).not.toContain(CHECKS_REPORTS_FEATURE)
-		expect(declaredRuntimeFeatures({ harness: false, version: true })).not.toContain(CHECKS_REPORTS_FEATURE)
+	it('declares it for a Workbench Preview, and not for the formal capture harness', () => {
+		expect(declaredRuntimeFeatures({ harness: false })).toContain(CHECKS_REPORTS_FEATURE)
+		expect(declaredRuntimeFeatures({ harness: true })).not.toContain(CHECKS_REPORTS_FEATURE)
 	})
 })
 

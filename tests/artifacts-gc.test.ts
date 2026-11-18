@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import { lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, symlink, utimes, writeFile } from 'node:fs/promises'
 import { hostname, tmpdir } from 'node:os'
@@ -8,16 +8,13 @@ import { afterEach, describe, expect, it } from 'vitest'
 
 import { runArtifactsCommand } from '../src/cli/artifacts'
 import type { FormalEvidenceRecord } from '../src/domain/evidence/schema'
-import type { CheckpointRecord, HistoryResourceEntry, HostVersionRecord } from '../src/domain/history/schema'
 import { createChecksRunEvidenceService } from '../src/application/services/checks-run-evidence'
 import { ArtifactGcSweepError, CHECKS_RUN_RETENTION, collectArtifactGarbage, keptChecksRuns } from '../src/persistence/artifact-gc'
 import { canonicalJsonBytes, FileNativePersistence, revisionForResourceFiles, type PersistenceFaultHook } from '../src/persistence/file-native'
-import { CheckpointStore } from '../src/persistence/history/checkpoint-store'
-import { blobDigest, HostHistoryStore } from '../src/persistence/history/host-store'
 import { reviewRelativePath, viewRelativePath } from '../src/persistence/paths'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
-import { hostHistoryPaths } from '../src/server/access/store'
-import { artifactPath, artifactShardsPath, checkpointsPath, createCurrentWorkspace, currentManifest, writeCurrentWorkspace, writeManifest } from './support/workspace-layout'
+import { flowTraceRecord } from './support/evidence-record'
+import { artifactPath, artifactShardsPath, createCurrentWorkspace, currentManifest, writeCurrentWorkspace, writeManifest } from './support/workspace-layout'
 import { HEAVY_SERVER_SUITE_TIMEOUT_MS } from './support/timeouts'
 
 /**
@@ -25,7 +22,10 @@ import { HEAVY_SERVER_SUITE_TIMEOUT_MS } from './support/timeouts'
  * 01a14e30-314b-7ee5-b85e-c8a926013beb): the artifact cleanup of Rule 01a115cd-c208-7a92-9582-69966f36e7fe
  * with the roots of Rule 01a14e30-31c0-7289-a944-74af9556eabf, which never rewrites a canonical record
  * (Rule 01a115cd-c23e-7143-bd1e-7ffd9fcaa6f2), and the owner decisions of 2026-10-18
- * (https://github.com/DevilTea/uiux/discussions/241#discussioncomment-19019221).
+ * (https://github.com/DevilTea/uiux/discussions/241#discussioncomment-19019221) as amended by Discussion
+ * #491 P1: UIUX keeps no version history, so the roots are the Evidence a Review submission references
+ * and, per Evidence kind and render context, the records that name the View's current revision (every
+ * record of a group whose order cannot be decided), never a Checkpoint, a host version or a timeline.
  */
 const CLI = join(fileURLToPath(new URL('..', import.meta.url)), 'bin', 'uiux.mjs')
 const roots: string[] = []
@@ -40,23 +40,25 @@ async function makeDirectory(): Promise<string> {
 	return root
 }
 
-/** A Workspace and its own temporary `UIUX_HOME`, never the real one. */
-async function makeWorkspace(options: Readonly<{ fault?: PersistenceFaultHook }> = {}): Promise<{ root: string; home: string; persistence: FileNativePersistence }> {
+async function makeWorkspace(options: Readonly<{ fault?: PersistenceFaultHook }> = {}): Promise<{ root: string; persistence: FileNativePersistence }> {
 	const root = await makeDirectory()
-	const home = join(await makeDirectory(), 'uiux-home')
 	const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY, ...options })
 	await createCurrentWorkspace(persistence)
-	return { root, home, persistence }
+	return { root, persistence }
 }
 
-async function gc(workspace: Readonly<{ root: string; home: string }>, ...flags: string[]) {
+async function gc(workspace: Readonly<{ root: string }>, ...flags: string[]) {
 	const stdout: string[] = []
 	const stderr: string[] = []
-	const status = await runArtifactsCommand({ argv: ['gc', '--workspace', workspace.root, ...flags], cwd: workspace.root, home: workspace.home, stdout: line => stdout.push(line), stderr: line => stderr.push(line) })
+	const status = await runArtifactsCommand({ argv: ['gc', '--workspace', workspace.root, ...flags], cwd: workspace.root, stdout: line => stdout.push(line), stderr: line => stderr.push(line) })
 	return { status, stdout, stderr }
 }
 
 const encoder = new TextEncoder()
+
+function sha256Identity(bytes: Uint8Array): string {
+	return `sha256:${createHash('sha256').update(bytes).digest('hex')}`
+}
 const TIME = '2026-10-18T12:00:00Z'
 /** One modification time for every blob, as a Git checkout or a plain copy leaves them. */
 const CHECKOUT_TIME = new Date('2026-10-18T00:00:00Z')
@@ -119,40 +121,6 @@ async function writeReview(root: string, thread: Record<string, unknown>): Promi
 	await writeFile(join(root, reviewRelativePath(thread.id as string)), `${JSON.stringify(thread)}\n`)
 }
 
-/** A View resource of a version record whose one file is `bytes`. */
-function viewResource(viewId: string, bytes: Uint8Array, revision = 'r_checkpointed'): HistoryResourceEntry {
-	return { kind: 'view', key: viewId, revision, files: { [viewRelativePath(viewId)]: blobDigest(bytes) } }
-}
-
-function checkpoint(resources: readonly HistoryResourceEntry[], at = TIME): CheckpointRecord {
-	return {
-		historySchemaVersion: 1,
-		id: randomUUID(),
-		type: 'checkpoint',
-		actor: { type: 'human', id: 'member:owner', displayName: 'Owner' },
-		at,
-		workspaceSchemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION,
-		resources,
-		name: 'Before launch',
-		source: 'workbench',
-	}
-}
-
-async function createCheckpoint(persistence: FileNativePersistence, resources: readonly HistoryResourceEntry[], blobs: readonly Uint8Array[], at = TIME): Promise<CheckpointRecord> {
-	const record = checkpoint(resources, at)
-	await new CheckpointStore(persistence).create(record, new Map(blobs.map(bytes => [blobDigest(bytes), bytes])))
-	return record
-}
-
-function hostVersion(resources: readonly HistoryResourceEntry[], at: string): HostVersionRecord {
-	return { historySchemaVersion: 1, id: randomUUID(), type: 'external', actor: { type: 'external' }, at, workspaceSchemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION, resources, startedAt: at, netChange: true, events: [] }
-}
-
-/** This host's history of the Workspace at `root`, under `home`. */
-async function hostStore(root: string, home: string): Promise<HostHistoryStore> {
-	return (await HostHistoryStore.open({ paths: hostHistoryPaths(home, root), create: true }))!
-}
-
 async function exists(path: string): Promise<boolean> {
 	return lstat(path).then(() => true, () => false)
 }
@@ -212,13 +180,6 @@ async function populated() {
 	const submittedSuccessor = await putEvidence(persistence, evidenceRecord({ viewId: submittedView, viewRevision: submittedCurrent, screenshot: await put(persistence, 'png: successor') }))
 	await writeReview(root, readyThread(submitted, [{ viewId: submittedView, revision: 'r_submitted' }]))
 
-	// A blob a Checkpoint references; the Checkpoint also places `r_previous` on the timeline.
-	const checkpointView = randomUUID()
-	const checkpointBytes = encoder.encode('{"view":"checkpointed bytes"}\n')
-	const previousBytes = encoder.encode('{"view":"previous"}\n')
-	await createCheckpoint(persistence, [viewResource(checkpointView, checkpointBytes), viewResource(contextView, previousBytes, 'r_previous')], [checkpointBytes, previousBytes])
-	const checkpointBlobs = [blobDigest(checkpointBytes), blobDigest(previousBytes)]
-
 	// Unreachable: a Handoff-like blob, which is no root, and an orphan screenshot.
 	const handoff = await put(persistence, `{"bundleIdentity":"handoff manifest","evidence":"${latest}"}`)
 	const orphan = await put(persistence, 'png: orphan')
@@ -231,7 +192,7 @@ async function populated() {
 	await checkout(root)
 
 	const unreachable = [stale, staleScreenshot, handoff, orphan].sort()
-	const reachable = [latest, latestScreenshot, referencedByLatest, otherContext, otherContextScreenshot, submitted, submittedScreenshot, submittedSuccessor, ...checkpointBlobs]
+	const reachable = [latest, latestScreenshot, referencedByLatest, otherContext, otherContextScreenshot, submitted, submittedScreenshot, submittedSuccessor]
 	return { ...workspace, unreachable, reachable, latest, stale, staleScreenshot, handoff, misplaced: join(artifactShardsPath(root), '00', misplacedHex) }
 }
 
@@ -258,7 +219,6 @@ describe('uiux artifacts gc', () => {
 		const bytes = await sizeOf(root, unreachable)
 		const reviews = await readdir(join(root, 'reviews'))
 		const reviewBytes = await readFile(join(root, 'reviews', reviews[0]!))
-		const checkpointFiles = await readdir(checkpointsPath(root))
 		const run = await gc(workspace)
 		expect(run.status, run.stderr.join('\n')).toBe(0)
 		expect(run.stdout.slice(0, -1).sort()).toEqual(unreachable)
@@ -270,95 +230,64 @@ describe('uiux artifacts gc', () => {
 		// Entries that are not candidate blobs are left alone, and no canonical record was rewritten.
 		expect(await exists(misplaced)).toBe(true)
 		expect(await readFile(join(root, 'reviews', reviews[0]!))).toEqual(reviewBytes)
-		expect(await readdir(checkpointsPath(root))).toEqual(checkpointFiles)
 		// A second run finds nothing more to delete.
 		expect((await gc(workspace)).stdout).toEqual(['Deleted 0 blobs, 0 bytes.'])
 	})
 
-	it('orders Evidence by the version timeline of the View revision it names, not by blob time, and keeps an undecidable group whole', async () => {
+	it('keeps the Evidence that names the View\'s current revision, not the newest blob, and every record of a group whose order cannot be decided', async () => {
 		const workspace = await makeWorkspace()
-		const { root, home, persistence } = workspace
-		// The View no longer exists, so no current revision decides; only the timeline does.
+		const { root, persistence } = workspace
 		const viewId = randomUUID()
+		const current = await writeView(root, viewId, '{"view":"current"}\n')
 		const screenshot = (label: string) => put(persistence, `png: ${label}`)
-		const atCheckpoint = await putEvidence(persistence, evidenceRecord({ viewId, viewRevision: 'r_1', screenshot: await screenshot('r_1') }))
-		const atHostVersion = await putEvidence(persistence, evidenceRecord({ viewId, viewRevision: 'r_2', screenshot: await screenshot('r_2') }))
-		const atSubmissionScreenshot = await screenshot('r_3')
-		const atSubmission = await putEvidence(persistence, evidenceRecord({ viewId, viewRevision: 'r_3', screenshot: atSubmissionScreenshot }))
-		// Another render context: one record names a revision the timeline does not show.
-		const known = await putEvidence(persistence, evidenceRecord({ viewId, locale: 'zh-TW', viewRevision: 'r_1', screenshot: await screenshot('zh-TW r_1') }))
-		const unknown = await putEvidence(persistence, evidenceRecord({ viewId, locale: 'zh-TW', viewRevision: 'r_unrecorded', screenshot: await screenshot('zh-TW unrecorded') }))
-		// A third: two revisions share the newest instant.
-		const tiedLeft = await putEvidence(persistence, evidenceRecord({ viewId, locale: 'fr-FR', viewRevision: 'r_tie_a', screenshot: await screenshot('fr-FR a') }))
-		const tiedRight = await putEvidence(persistence, evidenceRecord({ viewId, locale: 'fr-FR', viewRevision: 'r_tie_b', screenshot: await screenshot('fr-FR b') }))
-
-		const v1 = encoder.encode('{"view":1}\n')
-		await createCheckpoint(persistence, [viewResource(viewId, v1, 'r_1')], [v1], '2026-10-01T00:00:00Z')
-		const host = await hostStore(root, home)
-		await host.writeVersion(hostVersion([viewResource(viewId, encoder.encode('{"view":2}\n'), 'r_2')], '2026-10-02T00:00:00Z'))
-		await host.writeVersion(hostVersion([viewResource(viewId, encoder.encode('{"view":"tie a"}\n'), 'r_tie_a')], '2026-10-04T00:00:00Z'))
-		await host.writeVersion(hostVersion([viewResource(viewId, encoder.encode('{"view":"tie b"}\n'), 'r_tie_b')], '2026-10-04T00:00:00Z'))
-		// A submission about the View (its Evidence is another record) places r_3 last.
-		const reviewed = await putEvidence(persistence, evidenceRecord({ viewId: randomUUID(), screenshot: await screenshot('reviewed') }))
-		await writeReview(root, readyThread(reviewed, [{ viewId, revision: 'r_3' }], '2026-10-03T00:00:00Z'))
+		// en-US: the record of the current revision is the latest; the others are older, however they were written.
+		const olderScreenshot = await screenshot('older')
+		const older = await putEvidence(persistence, evidenceRecord({ viewId, viewRevision: 'r_older', screenshot: olderScreenshot }))
+		const latestScreenshot = await screenshot('latest')
+		const latest = await putEvidence(persistence, evidenceRecord({ viewId, viewRevision: current, screenshot: latestScreenshot }))
+		const newerBlobScreenshot = await screenshot('newer blob')
+		const newerBlob = await putEvidence(persistence, evidenceRecord({ viewId, viewRevision: 'r_newer_blob', screenshot: newerBlobScreenshot }))
+		// zh-TW: no record names the current revision, so the order cannot be decided and both are kept.
+		const noneCurrentA = await putEvidence(persistence, evidenceRecord({ viewId, locale: 'zh-TW', viewRevision: 'r_a', screenshot: await screenshot('zh-TW a') }))
+		const noneCurrentB = await putEvidence(persistence, evidenceRecord({ viewId, locale: 'zh-TW', viewRevision: 'r_b', screenshot: await screenshot('zh-TW b') }))
+		// fr-FR: one record names two revisions of the View, so its group cannot be decided either, though another names the current one.
+		const twoRevisions = evidenceRecord({ viewId, locale: 'fr-FR', viewRevision: 'r_first', screenshot: await screenshot('fr-FR two') })
+		const ambiguous = await putEvidence(persistence, {
+			...twoRevisions,
+			provenance: { ...twoRevisions.provenance, resources: [{ identity: { type: 'view', id: viewId }, revision: 'r_first' }, { identity: { type: 'view', id: viewId }, revision: 'r_second' }] },
+		})
+		const frCurrent = await putEvidence(persistence, evidenceRecord({ viewId, locale: 'fr-FR', viewRevision: current, screenshot: await screenshot('fr-FR current') }))
+		// A View that no longer exists has no current revision: its group is kept whole.
+		const goneView = randomUUID()
+		const goneA = await putEvidence(persistence, evidenceRecord({ viewId: goneView, viewRevision: 'r_gone_a', screenshot: await screenshot('gone a') }))
+		const goneB = await putEvidence(persistence, evidenceRecord({ viewId: goneView, viewRevision: 'r_gone_b', screenshot: await screenshot('gone b') }))
+		// A Flow trace names no View in its context, so its group is kept whole.
+		const flowId = randomUUID()
+		const flowA = await putEvidence(persistence, flowTraceRecord({ flowId, flowRevision: 'r_flow_a', stepId: randomUUID(), viewId }, await screenshot('flow a')) as FormalEvidenceRecord)
+		const flowB = await putEvidence(persistence, flowTraceRecord({ flowId, flowRevision: 'r_flow_b', stepId: randomUUID(), viewId }, await screenshot('flow b')) as FormalEvidenceRecord)
 		await checkout(root)
 
 		const run = await gc(workspace, '--dry-run')
 		expect(run.status, run.stderr.join('\n')).toBe(0)
 		const doomed = run.stdout.slice(0, -1)
-		expect(doomed).toEqual(expect.arrayContaining([atCheckpoint, atHostVersion]))
-		for (const identity of [atSubmission, atSubmissionScreenshot, known, unknown, tiedLeft, tiedRight]) expect(doomed, identity).not.toContain(identity)
+		expect([...doomed].sort()).toEqual([older, olderScreenshot, newerBlob, newerBlobScreenshot].sort())
+		for (const identity of [latest, latestScreenshot, noneCurrentA, noneCurrentB, ambiguous, frCurrent, goneA, goneB, flowA, flowB]) expect(doomed, identity).not.toContain(identity)
 	})
 
-	it('places a revision that only a Review submission or the open autosave records on the timeline', async () => {
+	it('reads no version history: a blob only a leftover Checkpoint or host version names is collectable, and an unreadable history file refuses nothing', async () => {
 		const workspace = await makeWorkspace()
-		const { root, home, persistence } = workspace
-		const viewId = randomUUID()
-		const older = await putEvidence(persistence, evidenceRecord({ viewId, viewRevision: 'r_reviewed', screenshot: await put(persistence, 'png: reviewed') }))
-		const newer = await putEvidence(persistence, evidenceRecord({ viewId, viewRevision: 'r_open', screenshot: await put(persistence, 'png: open') }))
-		const orphanEvidence = await putEvidence(persistence, evidenceRecord({ viewId: randomUUID(), screenshot: await put(persistence, 'png: unrelated') }))
-		await writeReview(root, readyThread(orphanEvidence, [{ viewId, revision: 'r_reviewed' }], '2026-10-01T00:00:00Z'))
-		const host = await hostStore(root, home)
-		await host.appendOpenEntry({ type: 'begin', id: randomUUID(), startedAt: '2026-10-02T00:00:00Z' })
-		await host.appendOpenEntry({
-			type: 'event',
-			event: { at: '2026-10-02T00:00:00Z', actor: { type: 'agent', id: 'member:agent', displayName: 'agent' }, source: 'mcp', operation: 'updateViewSpec', resource: { kind: 'view', key: viewId }, beforeRevision: 'r_reviewed', afterRevision: 'r_open' },
-			files: { [viewRelativePath(viewId)]: null },
-		})
-		await checkout(root)
-		const run = await gc(workspace, '--dry-run')
-		expect(run.status, run.stderr.join('\n')).toBe(0)
-		expect(run.stdout).toContain(older)
-		expect(run.stdout).not.toContain(newer)
-	})
-
-	it('keeps every blob a host history version or the open autosave references, though no Checkpoint does any more', async () => {
-		const workspace = await makeWorkspace()
-		const { root, home, persistence } = workspace
-		const viewId = randomUUID()
-		const versioned = encoder.encode('{"view":"only in the artifact store"}\n')
-		const opened = encoder.encode('{"view":"named by the open autosave"}\n')
-		const base = await createCheckpoint(persistence, [viewResource(viewId, versioned), viewResource(randomUUID(), opened)], [versioned, opened])
-		const host = await hostStore(root, home)
-		// A host version whose base was that Checkpoint names its blob without a host copy.
-		await host.writeVersion(hostVersion([viewResource(viewId, versioned, 'r_versioned')], TIME))
-		expect(await host.hasBlob(blobDigest(versioned))).toBe(false)
-		await host.appendOpenEntry({ type: 'begin', id: randomUUID(), startedAt: TIME })
-		await host.appendOpenEntry({
-			type: 'event',
-			event: { at: TIME, actor: { type: 'agent', id: 'member:agent', displayName: 'agent' }, source: 'mcp', operation: 'updateViewSpec', resource: { kind: 'view', key: viewId }, beforeRevision: 'r_versioned', afterRevision: 'r_open' },
-			files: { [viewRelativePath(viewId)]: blobDigest(opened) },
-		})
-		const orphan = await put(persistence, 'png: orphan')
-		await rm(join(checkpointsPath(root), `${base.id}.json`))
+		const { root, persistence } = workspace
+		const checkpointed = encoder.encode('{"view":"named only by a leftover Checkpoint"}\n')
+		const checkpointedIdentity = await put(persistence, checkpointed)
+		// What an earlier UIUX left under the Workspace root: a Checkpoint naming the blob, and a file no record format accepts.
+		await mkdir(join(root, 'history', 'checkpoints'), { recursive: true })
+		await writeFile(join(root, 'history', 'checkpoints', `${randomUUID()}.json`), JSON.stringify({ resources: [{ kind: 'view', key: randomUUID(), revision: 'r_old', files: { 'views/x.view.json': checkpointedIdentity } }] }))
+		await writeFile(join(root, 'history', 'checkpoints', `${randomUUID()}.json`), '{ not a record')
+		const before = await tree(join(root, 'history'))
 		const run = await gc(workspace)
 		expect(run.status, run.stderr.join('\n')).toBe(0)
-		expect(run.stdout).toEqual([orphan, 'Deleted 1 blob, 11 bytes.'])
-		expect(await exists(artifactPath(root, blobDigest(versioned)))).toBe(true)
-		expect(await exists(artifactPath(root, blobDigest(opened)))).toBe(true)
-		// Another host (another UIUX_HOME) has no history of this Workspace, so there the blobs are collectable.
-		const elsewhere = await gc({ root, home: join(await makeDirectory(), 'other-home') }, '--dry-run')
-		expect(elsewhere.stdout).toEqual([...[blobDigest(versioned), blobDigest(opened)].sort(), expect.stringMatching(/^Would delete 2 blobs/u)])
+		expect(run.stdout).toEqual([checkpointedIdentity, `Deleted 1 blob, ${checkpointed.byteLength} bytes.`])
+		expect(await tree(join(root, 'history'))).toEqual(before)
 	})
 
 	it('keeps every sha256 identity found anywhere in a kept JSON blob that is not a valid Evidence record, recursively', async () => {
@@ -434,38 +363,6 @@ describe('uiux artifacts gc', () => {
 		for (const identity of [text, plain, withBom, bommed]) expect(await exists(artifactPath(root, identity)), identity).toBe(true)
 	})
 
-	it('keeps the Evidence of a revision that a later host version records again, and deletes the one in between', async () => {
-		const workspace = await makeWorkspace()
-		const { root, home, persistence } = workspace
-		const viewId = randomUUID()
-		const first = await putEvidence(persistence, evidenceRecord({ viewId, viewRevision: 'r_1', screenshot: await put(persistence, 'png: r_1') }))
-		const second = await putEvidence(persistence, evidenceRecord({ viewId, viewRevision: 'r_2', screenshot: await put(persistence, 'png: r_2') }))
-		const v1 = encoder.encode('{"view":1}\n')
-		await createCheckpoint(persistence, [viewResource(viewId, v1, 'r_1')], [v1], '2026-10-01T00:00:00Z')
-		const host = await hostStore(root, home)
-		await host.writeVersion(hostVersion([viewResource(viewId, encoder.encode('{"view":2}\n'), 'r_2')], '2026-10-02T00:00:00Z'))
-		// The View is reverted: r_1 is seen again, later than r_2.
-		await host.writeVersion(hostVersion([viewResource(viewId, v1, 'r_1')], '2026-10-03T00:00:00Z'))
-		await checkout(root)
-		const run = await gc(workspace)
-		expect(run.status, run.stderr.join('\n')).toBe(0)
-		expect(run.stdout.slice(0, -1)).toContain(second)
-		expect(run.stdout.slice(0, -1)).not.toContain(first)
-		expect(await exists(artifactPath(root, second))).toBe(false)
-		expect(await exists(artifactPath(root, first))).toBe(true)
-	})
-
-	it('refuses, deleting nothing, when UIUX_HOME is inside the Workspace', async () => {
-		const workspace = await populated()
-		const { root } = workspace
-		const before = await storeListing(root)
-		const run = await gc({ root, home: join(root, 'nested-home') })
-		expect(run.status).toBe(1)
-		expect(run.stdout).toEqual([])
-		expect(run.stderr.join('\n')).not.toBe('')
-		expect(await storeListing(root)).toEqual(before)
-	})
-
 	it('refuses, deleting nothing, a Workspace that a running uiux dev server holds', async () => {
 		const workspace = await populated()
 		const { root, unreachable } = workspace
@@ -497,30 +394,17 @@ describe('uiux artifacts gc', () => {
 			await mkdir(join(artifactShardsPath(root), 'ab'), { recursive: true })
 			await writeFile(join(artifactShardsPath(root), 'ab', `ab${'0'.repeat(62)}`), 'orphan')
 			const before = await tree(root)
-			const run = await gc({ root, home: join(await makeDirectory(), 'uiux-home') })
+			const run = await gc({ root })
 			expect(run.status, label).toBe(2)
 			expect(run.stderr.join('\n'), label).toContain(message)
 			expect(await tree(root), label).toEqual(before)
 		}
 	})
 
-	it('refuses, deleting nothing, when a Review thread, a Checkpoint, the host history or a stored blob cannot be read', async () => {
-		const arrangements: [string, (workspace: Readonly<{ root: string; home: string; persistence: FileNativePersistence }>) => Promise<unknown>, string][] = [
+	it('refuses, deleting nothing, when a Review thread or a stored blob cannot be read', async () => {
+		const arrangements: [string, (workspace: Readonly<{ root: string; persistence: FileNativePersistence }>) => Promise<unknown>, string][] = [
 			['an invalid Review thread', ({ root }) => writeReview(root, { ...readyThread(`sha256:${'1'.repeat(64)}`), status: 'unknown' }), 'is not a valid Review thread'],
 			['a Review thread that is not JSON', ({ root }) => mkdir(join(root, 'reviews'), { recursive: true }).then(() => writeFile(join(root, reviewRelativePath(randomUUID())), '{')), 'is not readable JSON'],
-			['an invalid Checkpoint', ({ root }) => mkdir(checkpointsPath(root), { recursive: true }).then(() => writeFile(join(checkpointsPath(root), `${randomUUID()}.json`), '{}')), 'is not a valid Checkpoint record'],
-			['an invalid host version', async ({ root, home }) => {
-				const host = await hostStore(root, home)
-				await writeFile(join(host.paths.versions, `${randomUUID()}.json`), '{}', { mode: 0o600 })
-			}, 'which is not a valid version record'],
-			['an unreadable open autosave journal', async ({ root, home }) => {
-				const host = await hostStore(root, home)
-				await writeFile(host.paths.open, 'not json\n', { mode: 0o600 })
-			}, 'holds an open.json that cannot be read'],
-			['an incomplete host history', async ({ root, home }) => {
-				const host = await hostStore(root, home)
-				await rm(host.paths.objects, { recursive: true })
-			}, 'is incomplete'],
 			['a corrupt blob', async ({ root, persistence }) => {
 				const identity = await put(persistence, 'png: will be corrupted')
 				await rm(artifactPath(root, identity))
@@ -546,7 +430,7 @@ describe('uiux artifacts gc', () => {
 		const { root, persistence } = workspace
 		const outside = join(await makeDirectory(), 'target')
 		await writeFile(outside, 'png: outside the store')
-		const linkedHex = blobDigest(encoder.encode('png: outside the store')).slice('sha256:'.length)
+		const linkedHex = sha256Identity(encoder.encode('png: outside the store')).slice('sha256:'.length)
 		const orphan = await put(persistence, 'png: orphan')
 		const shard = join(artifactShardsPath(root), linkedHex.slice(0, 2))
 		await mkdir(shard, { recursive: true })
@@ -574,20 +458,18 @@ describe('uiux artifacts gc', () => {
 					throw new Error('injected removal failure')
 			},
 		})
-		const { root, home, persistence } = workspace
+		const { root, persistence } = workspace
 		const staleScreenshot = await put(persistence, 'png: stale')
 		// A View whose stale record sorts after its screenshot, so an identity-ordered sweep would remove the screenshot first.
 		let viewId = randomUUID()
-		while (blobDigest(canonicalJsonBytes(evidenceRecord({ viewId, viewRevision: 'r_then', screenshot: staleScreenshot }))) < staleScreenshot) viewId = randomUUID()
+		while (sha256Identity(canonicalJsonBytes(evidenceRecord({ viewId, viewRevision: 'r_then', screenshot: staleScreenshot }))) < staleScreenshot) viewId = randomUUID()
 		const stale = await putEvidence(persistence, evidenceRecord({ viewId, viewRevision: 'r_then', screenshot: staleScreenshot }))
 		const orphan = await put(persistence, 'png: orphan')
-		const current = await putEvidence(persistence, evidenceRecord({ viewId, viewRevision: 'r_now', screenshot: await put(persistence, 'png: now') }))
-		const host = await hostStore(root, home)
-		await host.writeVersion(hostVersion([viewResource(viewId, encoder.encode('{}'), 'r_then')], '2026-10-01T00:00:00Z'))
-		await host.writeVersion(hostVersion([viewResource(viewId, encoder.encode('{}'), 'r_now')], TIME))
+		const now = await writeView(root, viewId, '{"view":"now"}\n')
+		const current = await putEvidence(persistence, evidenceRecord({ viewId, viewRevision: now, screenshot: await put(persistence, 'png: now') }))
 		failOn = stale
 		const deleted: string[] = []
-		const error = await collectArtifactGarbage(persistence, { dryRun: false, hostHistory: hostHistoryPaths(home, root), onDeleted: blob => deleted.push(blob.identity) }).catch((caught: unknown) => caught)
+		const error = await collectArtifactGarbage(persistence, { dryRun: false, onDeleted: blob => deleted.push(blob.identity) }).catch((caught: unknown) => caught)
 		expect(error).toBeInstanceOf(ArtifactGcSweepError)
 		expect((error as ArtifactGcSweepError).deleted.map(blob => blob.identity)).toEqual(deleted)
 		// The Evidence record failed to go, so its screenshot was not touched either.
@@ -607,8 +489,8 @@ describe('uiux artifacts gc', () => {
 	})
 
 	it('runs through the uiux binary, which lists it in help and refuses invalid usage with status 2', async () => {
-		const { root, home, persistence } = await makeWorkspace()
-		const env = { ...process.env, UIUX_HOME: home }
+		const { root, persistence } = await makeWorkspace()
+		const env = { ...process.env, UIUX_HOME: join(await makeDirectory(), 'uiux-home') }
 		const orphan = await put(persistence, 'png: orphan')
 		const help = spawnSync(process.execPath, [CLI, '--help'], { encoding: 'utf8', env })
 		expect(help.stdout).toContain('artifacts gc [--workspace <dir>] [--dry-run]')

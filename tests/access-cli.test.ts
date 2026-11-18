@@ -1,8 +1,8 @@
 import { spawnSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { chmod, lstat, mkdtemp, readdir, readFile, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises'
+import { lstat, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { dirname, join, relative } from 'node:path'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { afterEach, describe, expect, it } from 'vitest'
@@ -10,15 +10,11 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { HUMAN_ONLY_PERMISSION_KEYS, PERMISSION_KEYS } from '../src/application/access/keys'
 import { createLeaseManager } from '../src/application/access/leases'
 import { runAccessCommand } from '../src/cli/access'
-import type { HostVersionRecord } from '../src/domain/history/schema'
-import { FileNativePersistence } from '../src/persistence/file-native'
-import { blobDigest, HostHistoryStore } from '../src/persistence/history/host-store'
 import { acquireServerHold } from '../src/persistence/server-hold'
 import { verifyCredential } from '../src/server/access/roster'
 import { AccessService, agentAccessOption } from '../src/server/access/service'
-import { AccessStore, accessStorePaths, copyHostHistory, hostHistoryPaths, planHostHistoryCopy } from '../src/server/access/store'
+import { AccessStore, accessStorePaths } from '../src/server/access/store'
 import { presetKeys } from './support/access'
-import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { CURRENT_TEST_LAYOUT, writeCurrentWorkspace } from './support/workspace-layout'
 
 const CLI = join(fileURLToPath(new URL('..', import.meta.url)), 'bin', 'uiux.mjs')
@@ -47,23 +43,6 @@ async function initWorkspace(base: string, name: string): Promise<string> {
 	const root = join(base, name, 'design')
 	await writeCurrentWorkspace(root)
 	return root
-}
-
-function hostVersion(files?: Record<string, string>): HostVersionRecord {
-	const at = new Date().toISOString()
-	const resources = files ? [{ kind: 'view', key: '11111111-1111-4111-8111-111111111111', revision: 'r_x', files }] : []
-	return { historySchemaVersion: 1, id: randomUUID(), type: 'external', actor: { type: 'external' }, at, workspaceSchemaVersion: 4, resources, startedAt: at, netChange: true, events: [] }
-}
-
-/** Every directory and file under `root`, with its permission bits (and a file's bytes). */
-async function historyTree(root: string): Promise<Record<string, { directory: boolean; mode: number; bytes?: Buffer }>> {
-	const tree: Record<string, { directory: boolean; mode: number; bytes?: Buffer }> = {}
-	for (const entry of await readdir(root, { recursive: true, withFileTypes: true })) {
-		const path = join(entry.parentPath, entry.name)
-		const mode = (await lstat(path)).mode & 0o777
-		tree[relative(root, path)] = entry.isDirectory() ? { directory: true, mode } : { directory: false, mode, bytes: await readFile(path) }
-	}
-	return Object.fromEntries(Object.entries(tree).sort(([left], [right]) => left.localeCompare(right)))
 }
 
 describe('uiux access commands', () => {
@@ -213,21 +192,16 @@ describe('uiux access commands', () => {
 	it('refuses an access copy --replace that would drop the target\'s last human manager, before copying anything', async () => {
 		const { base, workspace, home, run } = await setup()
 		await run('member', 'add', 'claude', '--kind', 'agent', '--preset', 'Editor', '--workspace', workspace)
-		const sourceHost = (await HostHistoryStore.open({ paths: hostHistoryPaths(home, workspace), create: true }))!
-		await sourceHost.writeVersion(hostVersion())
 		const target = await initWorkspace(base, 'moved')
 		await run('member', 'add', 'deviltea', '--preset', 'Owner', '--workspace', target)
 		const rosterBefore = await readFile(accessStorePaths(home, target).file, 'utf8')
 		expect(await run('access', 'copy', '--from', workspace, '--workspace', target, '--replace')).toMatchObject({ code: 1, err: expect.stringContaining('deviltea is the last human holder of `members.manage`') })
 		expect(await readFile(accessStorePaths(home, target).file, 'utf8')).toBe(rosterBefore)
-		await expect(lstat(hostHistoryPaths(home, target).dir)).rejects.toMatchObject({ code: 'ENOENT' })
 	})
 
 	it('refuses to replace a version 1 roster, or one with `lan` or `listener`, and copies nothing (Clause 01a14917-7898)', async () => {
 		const { base, workspace, home, run } = await setup()
 		await run('member', 'add', 'deviltea', '--preset', 'Owner', '--workspace', workspace)
-		const sourceHost = (await HostHistoryStore.open({ paths: hostHistoryPaths(home, workspace), create: true }))!
-		await sourceHost.writeVersion(hostVersion())
 		const target = await initWorkspace(base, 'moved')
 		await run('member', 'add', 'mei', '--preset', 'Owner', '--workspace', target)
 		const targetFile = accessStorePaths(home, target).file
@@ -245,15 +219,12 @@ describe('uiux access commands', () => {
 			expect(result.err, name).toContain(detail)
 			expect(result.err, name).not.toContain('warning')
 			expect(await readFile(targetFile, 'utf8'), name).toBe(text)
-			await expect(lstat(hostHistoryPaths(home, target).dir), name).rejects.toMatchObject({ code: 'ENOENT' })
 		}
 	})
 
 	it('refuses to replace a roster written by a newer UIUX, and replaces a damaged one with a warning (owner ruling of 2026-10-11)', async () => {
 		const { base, workspace, home, run } = await setup()
 		await run('member', 'add', 'deviltea', '--preset', 'Owner', '--workspace', workspace)
-		const sourceHost = (await HostHistoryStore.open({ paths: hostHistoryPaths(home, workspace), create: true }))!
-		await sourceHost.writeVersion(hostVersion())
 		const target = await initWorkspace(base, 'moved')
 		await run('member', 'add', 'mei', '--preset', 'Owner', '--workspace', target)
 		const targetFile = accessStorePaths(home, target).file
@@ -261,7 +232,6 @@ describe('uiux access commands', () => {
 		await writeFile(targetFile, newer)
 		expect(await run('access', 'copy', '--from', workspace, '--workspace', target, '--replace')).toMatchObject({ code: 1, err: expect.stringContaining('written by a newer UIUX; this UIUX will not replace it. Run uiux access copy with that newer UIUX.') })
 		expect(await readFile(targetFile, 'utf8')).toBe(newer)
-		await expect(lstat(hostHistoryPaths(home, target).dir)).rejects.toMatchObject({ code: 'ENOENT' })
 
 		await writeFile(targetFile, '{ damaged')
 		const repaired = await run('access', 'copy', '--from', workspace, '--workspace', target, '--replace')
@@ -281,229 +251,15 @@ describe('uiux access commands', () => {
 		expect(out.join('\n')).toContain('resolves inside the Workspace')
 	})
 
-	it('copies the host history once with the roster, with the roster\'s permissions, and replaces it only with --replace', async () => {
-		const { base, workspace, home, run } = await setup()
-		await run('member', 'add', 'deviltea', '--preset', 'Owner', '--workspace', workspace)
-		const sourceHost = (await HostHistoryStore.open({ paths: hostHistoryPaths(home, workspace), create: true }))!
-		await sourceHost.putBlob(new TextEncoder().encode('{"blob":1}\n'))
-		await sourceHost.writeVersion(hostVersion())
-		await sourceHost.appendOpenEntry({ type: 'begin', id: randomUUID(), startedAt: new Date().toISOString() })
-		// An interrupted temporary write of the source store is not history.
-		await writeFile(join(sourceHost.paths.versions, '.interrupted.tmp'), 'partial', { mode: 0o600 })
-
-		const worktree = await initWorkspace(base, 'worktree')
-		const copied = await run('access', 'copy', '--from', workspace, '--workspace', worktree)
-		expect(copied).toMatchObject({ code: 0, err: '' })
-		const target = hostHistoryPaths(home, worktree)
-		expect(copied.out).toContain(`Copied the host history (3 file(s)) from ${sourceHost.paths.dir} to ${target.dir}.`)
-		const sourceTree = await historyTree(sourceHost.paths.dir)
-		const targetTree = await historyTree(target.dir)
-		expect(Object.keys(targetTree)).toEqual(Object.keys(sourceTree).filter(path => !path.endsWith('.interrupted.tmp')))
-		for (const [path, entry] of Object.entries(targetTree)) {
-			expect(entry.mode, path).toBe(entry.directory ? 0o700 : 0o600)
-			if (!entry.directory) expect(entry.bytes, path).toEqual(sourceTree[path]!.bytes)
-		}
-		expect((await lstat(target.dir)).mode & 0o777).toBe(0o700)
-		const targetHost = (await HostHistoryStore.open({ paths: target }))!
-		expect((await targetHost.listVersions()).records).toHaveLength(1)
-		expect((await targetHost.readOpenJournal())!.entries.map(entry => entry.type)).toEqual(['begin'])
-
-		// Once: later source history stays in the source.
-		await sourceHost.writeVersion(hostVersion())
-		expect((await targetHost.listVersions()).records).toHaveLength(1)
-		// The target now has history (and a roster): only --replace copies again, and it discards the target's own.
-		await targetHost.writeVersion(hostVersion())
-		expect(await run('access', 'copy', '--from', workspace, '--workspace', worktree)).toMatchObject({ code: 1, err: expect.stringContaining('Pass --replace') })
-		// Without a roster, the target's own history alone still refuses the copy.
-		const rosterless = await initWorkspace(base, 'rosterless')
-		await (await HostHistoryStore.open({ paths: hostHistoryPaths(home, rosterless), create: true }))!.writeVersion(hostVersion())
-		expect(await run('access', 'copy', '--from', workspace, '--workspace', rosterless)).toMatchObject({ code: 1, err: expect.stringContaining('already has host history') })
-		const replaced = await run('access', 'copy', '--from', workspace, '--workspace', worktree, '--replace')
-		expect(replaced.code).toBe(0)
-		// The target held the first copy's version plus one of its own: --replace says how many it discards.
-		expect(replaced.out).toContain('--replace discarded the target\'s own host history: 2 version(s)')
-		expect((await targetHost.listVersions()).records.map(record => record.id).sort()).toEqual((await sourceHost.listVersions()).records.map(record => record.id).sort())
-		expect((await readdir(dirname(target.dir))).filter(name => name.startsWith('.history-'))).toEqual([])
-	})
-
-	it('refuses a source history holding a symbolic link, and a target a running server holds, before writing anything', async () => {
-		const { base, workspace, home, run } = await setup()
-		await run('member', 'add', 'deviltea', '--preset', 'Owner', '--workspace', workspace)
-		const sourceHost = (await HostHistoryStore.open({ paths: hostHistoryPaths(home, workspace), create: true }))!
-		await sourceHost.writeVersion(hostVersion())
-		const outside = join(base, 'outside.json')
-		await writeFile(outside, '{}\n', { mode: 0o600 })
-		const link = join(sourceHost.paths.versions, `${randomUUID()}.json`)
-		await symlink(outside, link)
-
-		const worktree = await initWorkspace(base, 'worktree')
-		expect(await run('access', 'copy', '--from', workspace, '--workspace', worktree)).toMatchObject({ code: 1, err: expect.stringContaining('it is a symbolic link') })
-		expect(await AccessStore.open({ workspaceRoot: worktree, home })).toBeUndefined()
-		expect(await lstat(hostHistoryPaths(home, worktree).dir).catch(() => undefined)).toBeUndefined()
-
-		// The history directory itself as a link.
-		await rm(link)
-		const moved = join(base, 'moved-history')
-		await rename(sourceHost.paths.dir, moved)
-		await symlink(moved, sourceHost.paths.dir)
-		expect(await run('access', 'copy', '--from', workspace, '--workspace', worktree)).toMatchObject({ code: 1, err: expect.stringContaining('it is a symbolic link') })
-		expect(await AccessStore.open({ workspaceRoot: worktree, home })).toBeUndefined()
-		await rm(sourceHost.paths.dir)
-		await rename(moved, sourceHost.paths.dir)
-
-		// A running server keeps the target's history in memory.
-		const hold = (await acquireServerHold(worktree, { layout: CURRENT_TEST_LAYOUT }))!
-		expect(await run('access', 'copy', '--from', workspace, '--workspace', worktree)).toMatchObject({ code: 1, err: expect.stringContaining('Stop that server') })
-		expect(await AccessStore.open({ workspaceRoot: worktree, home })).toBeUndefined()
-		await hold.release()
-		expect((await run('access', 'copy', '--from', workspace, '--workspace', worktree)).code).toBe(0)
-
-		// A source without host history copies the roster alone.
-		const third = await initWorkspace(base, 'third')
-		await run('member', 'add', 'deviltea', '--preset', 'Owner', '--workspace', third)
-		const fourth = await initWorkspace(base, 'fourth')
-		expect(await run('access', 'copy', '--from', third, '--workspace', fourth)).toMatchObject({ code: 0, out: expect.stringContaining(`No host history recorded for ${third}; none copied.`) })
-		expect(await lstat(hostHistoryPaths(home, fourth).dir).catch(() => undefined)).toBeUndefined()
-	})
-
-	it('copies the history before the roster, so a failed history copy leaves the target unchanged', async () => {
-		const { base, workspace, home, run } = await setup()
-		await run('member', 'add', 'deviltea', '--preset', 'Owner', '--workspace', workspace)
-		const sourceHost = (await HostHistoryStore.open({ paths: hostHistoryPaths(home, workspace), create: true }))!
-		const digest = await sourceHost.putBlob(new TextEncoder().encode('unreadable\n'))
-		const blob = join(sourceHost.paths.objects, digest.slice(7, 9), digest.slice(7))
-		await chmod(blob, 0o000)
-		try {
-			const worktree = await initWorkspace(base, 'worktree')
-			const failed = await run('access', 'copy', '--from', workspace, '--workspace', worktree)
-			expect(failed).toMatchObject({ code: 1, err: expect.stringContaining('Could not copy the host history') })
-			expect(failed.err).toContain('Nothing was copied.')
-			expect(await AccessStore.open({ workspaceRoot: worktree, home })).toBeUndefined()
-			expect(await lstat(hostHistoryPaths(home, worktree).workspaceDir).catch(() => undefined)).toBeUndefined()
-		}
-		finally {
-			await chmod(blob, 0o600)
-		}
-	})
-
-	it('checks the copied versions\' blobs before replacing anything, and re-checks the server hold right before the swap', async () => {
-		const { base, workspace, home } = await setup()
-		const sourceHost = (await HostHistoryStore.open({ paths: hostHistoryPaths(home, workspace), create: true }))!
-		const bytes = new TextEncoder().encode('{"view":1}\n')
-		const digest = blobDigest(bytes)
-		await sourceHost.writeVersion(hostVersion({ 'views/11111111-1111-4111-8111-111111111111.view.json': digest }))
-		const worktree = await initWorkspace(base, 'worktree')
-		const plan = await planHostHistoryCopy(home, workspace, worktree)
-
-		// A source writer stores the blob after it was listed: the copy raced it, so it is refused and removed.
-		await expect(copyHostHistory(plan, {
-			replace: false,
-			async readBlobElsewhere() {
-				await sourceHost.putBlob(bytes)
-				return undefined
-			},
-		})).rejects.toThrow('changed while it was copied')
-		expect(await lstat(plan.target.dir).catch(() => undefined)).toBeUndefined()
-		expect((await readdir(plan.target.workspaceDir).catch(() => [])).filter(name => name.startsWith('.history-'))).toEqual([])
-
-		// A server that started meanwhile refuses the swap; the target stays without history.
-		await expect(copyHostHistory(plan, { replace: false, beforeSwap: async () => { throw new Error('a server holds the target') } })).rejects.toThrow('a server holds the target')
-		expect(await lstat(plan.target.dir).catch(() => undefined)).toBeUndefined()
-
-		// Consistent now: the blob is copied with its version.
-		expect(await copyHostHistory(plan, { replace: false })).toMatchObject({ files: 2, missingBlobs: [] })
-
-		// A blob the source lacks too is reported, not refused: the copy is faithful to an incomplete source.
-		const other = await initWorkspace(base, 'other')
-		await sourceHost.writeVersion(hostVersion({ 'views/11111111-1111-4111-8111-111111111111.view.json': `sha256:${'f'.repeat(64)}` }))
-		const run = async (...argv: string[]) => {
-			const out: string[] = []
-			const err: string[] = []
-			const code = await runAccessCommand({ argv, env: { UIUX_HOME: home }, cwd: base, stdout: line => out.push(line), stderr: line => err.push(line) })
-			return { code, out: out.join('\n'), err: err.join('\n') }
-		}
-		await run('member', 'add', 'deviltea', '--preset', 'Owner', '--workspace', workspace)
-		const copied = await run('access', 'copy', '--from', workspace, '--workspace', other)
-		expect(copied.code).toBe(0)
-		expect(copied.err).toContain('1 blob(s) that copied versions name are missing from the source host history and from this Workspace\'s artifact store')
-	})
-
-	it('checks the blobs the open autosave\'s events name too, not only the versions\'', async () => {
-		const { base, workspace, home } = await setup()
-		const sourceHost = (await HostHistoryStore.open({ paths: hostHistoryPaths(home, workspace), create: true }))!
-		const bytes = new TextEncoder().encode('{"view":"open"}\n')
-		const digest = blobDigest(bytes)
-		const missing = `sha256:${'e'.repeat(64)}`
-		const event = (afterRevision: string) => ({ at: new Date().toISOString(), actor: { type: 'agent' as const, id: 'member:m-agent', displayName: 'claude' }, source: 'mcp' as const, operation: 'updateViewSpec' as const, resource: { kind: 'view' as const, key: '11111111-1111-4111-8111-111111111111' }, beforeRevision: null, afterRevision })
-		await sourceHost.appendOpenEntry({ type: 'begin', id: randomUUID(), startedAt: new Date().toISOString() })
-		await sourceHost.appendOpenEntry({ type: 'event', event: event('r_a'), files: { 'views/11111111-1111-4111-8111-111111111111.view.json': digest } })
-		const worktree = await initWorkspace(base, 'worktree')
-		const plan = await planHostHistoryCopy(home, workspace, worktree)
-
-		// No version names the blob; only the open autosave's event does. A source writer stores it after it was listed.
-		await expect(copyHostHistory(plan, {
-			replace: false,
-			async readBlobElsewhere() {
-				await sourceHost.putBlob(bytes)
-				return undefined
-			},
-		})).rejects.toThrow('changed while it was copied')
-		expect(await lstat(plan.target.dir).catch(() => undefined)).toBeUndefined()
-
-		// An event's blob the source lacks too is reported, like a version's.
-		await sourceHost.appendOpenEntry({ type: 'event', event: event('r_b'), files: { 'views/11111111-1111-4111-8111-111111111111.view.json': missing } })
-		expect(await copyHostHistory(plan, { replace: false })).toMatchObject({ missingBlobs: [missing] })
-		expect(await lstat(join(plan.target.dir, 'objects', 'sha256', digest.slice(7, 9), digest.slice(7)))).toBeDefined()
-	})
-
-	it('copies a blob that only the target\'s artifact store keeps into the copied host history (Clause 01a11a5e-1e65, issue #253)', async () => {
-		const { base, workspace, home, run } = await setup()
-		await run('member', 'add', 'deviltea', '--preset', 'Owner', '--workspace', workspace)
-		const sourceHost = (await HostHistoryStore.open({ paths: hostHistoryPaths(home, workspace), create: true }))!
-		// A host version recorded on a Checkpoint before host history kept every blob its versions name.
-		const bytes = new TextEncoder().encode('{"view":"only in the artifact store"}\n')
-		const digest = blobDigest(bytes)
-		await sourceHost.writeVersion(hostVersion({ 'views/11111111-1111-4111-8111-111111111111.view.json': digest }))
-		const worktree = await initWorkspace(base, 'worktree')
-		await new FileNativePersistence({ root: worktree, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY }).artifacts.put(bytes)
-
-		const copied = await run('access', 'copy', '--from', workspace, '--workspace', worktree)
-		expect(copied.code, copied.err).toBe(0)
-		expect(copied.out).toContain(`Copied 1 blob(s) that copied versions name from the artifact store of ${worktree} into its host history.`)
-		expect(copied.err).not.toContain('missing')
-		const target = (await HostHistoryStore.open({ paths: hostHistoryPaths(home, worktree), create: false }))!
-		expect(await target.readBlob(digest)).toEqual(bytes)
-		// With the roster's permissions, like every copied file.
-		const tree = await historyTree(target.paths.dir)
-		const hex = digest.slice('sha256:'.length)
-		expect(tree[join('objects', 'sha256', hex.slice(0, 2), hex)]).toMatchObject({ directory: false, mode: 0o600 })
-		for (const directory of [join('objects'), join('objects', 'sha256'), join('objects', 'sha256', hex.slice(0, 2))])
-			expect(tree[directory]).toMatchObject({ directory: true, mode: 0o700 })
-		// The source is unchanged: only the copy owns the blob.
-		expect(await sourceHost.hasBlob(digest)).toBe(false)
-	})
-
-	it('reports, rather than stores, bytes from elsewhere that do not match the digest a copied version names', async () => {
-		const { base, workspace, home } = await setup()
-		const sourceHost = (await HostHistoryStore.open({ paths: hostHistoryPaths(home, workspace), create: true }))!
-		const digest = blobDigest(new TextEncoder().encode('{"view":"expected"}\n'))
-		await sourceHost.writeVersion(hostVersion({ 'views/11111111-1111-4111-8111-111111111111.view.json': digest }))
-		const worktree = await initWorkspace(base, 'worktree')
-		const plan = await planHostHistoryCopy(home, workspace, worktree)
-		expect(await copyHostHistory(plan, { replace: false, readBlobElsewhere: async () => new TextEncoder().encode('{"view":"other"}\n') })).toMatchObject({ missingBlobs: [digest], filledBlobs: [] })
-		const hex = digest.slice('sha256:'.length)
-		expect(await lstat(join(plan.target.dir, 'objects', 'sha256', hex.slice(0, 2), hex)).catch(() => undefined)).toBeUndefined()
-	})
-
 	it('dispatches the access commands from the installed CLI and lists them in --help', async () => {
 		const { home, workspace } = await setup()
 		const result = spawnSync(process.execPath, [CLI, 'member', 'add', 'mei', '--preset', 'Viewer', '--workspace', workspace], { encoding: 'utf8', env: { ...process.env, UIUX_HOME: home } })
 		expect(result.status).toBe(0)
-		expect(result.stdout).toContain('Added human member mei (Viewer, 3 keys)')
+		expect(result.stdout).toContain('Added human member mei (Viewer, 2 keys)')
 		const help = spawnSync(process.execPath, [CLI, '--help'], { encoding: 'utf8' }).stdout
 		for (const command of ['member add', '--preset <name>', '--all-keys', '--grant <k,...>', 'member list [--keys]', 'token create', 'invite create', 'session list', 'access copy'])
 			expect(help).toContain(command)
-		expect(help).toMatch(/Copy members, tokens and host history from another\s+Workspace path, once/u)
+		expect(help).toMatch(/Copy members and tokens from another Workspace path,\s+once/u)
 		expect(help).not.toContain('--lan')
 		expect(help).not.toContain('--role')
 	}, 30_000)
@@ -535,7 +291,7 @@ describe('uiux member on permission keys and Access presets (issue #142)', () =>
 		const unknown = await run('member', 'add', 'mei', '--preset', 'Translator', '--workspace', workspace)
 		expect(unknown).toMatchObject({ code: 1, err: expect.stringContaining('No Access preset named "Translator". The presets are Viewer, Reviewer, Editor, Owner.') })
 		expect(await lstat(accessStorePaths(home, workspace).file).catch(() => undefined)).toBeUndefined()
-		expect(await run('member', 'add', 'mei', '--preset', 'reviewer', '--workspace', workspace)).toMatchObject({ code: 0, out: expect.stringContaining('Added human member mei (Reviewer, 8 keys)') })
+		expect(await run('member', 'add', 'mei', '--preset', 'reviewer', '--workspace', workspace)).toMatchObject({ code: 0, out: expect.stringContaining('Added human member mei (Reviewer, 6 keys)') })
 		// The preset's keys are copied; the member records no reference to the preset (Rule 01a11c09-b8c6).
 		const [mei] = await storedMembers(home, workspace)
 		expect(mei).toEqual({ id: expect.any(String), nickname: 'mei', kind: 'human', keys: presetKeys('reviewer'), createdAt: expect.any(String) })
@@ -584,7 +340,7 @@ describe('uiux member on permission keys and Access presets (issue #142)', () =>
 		await run('member', 'add', 'mei', '--preset', 'Viewer', '--workspace', workspace)
 		await run('member', 'add', 'claude', '--kind', 'agent', '--preset', 'Editor', '--workspace', workspace)
 		// A host user restores a manager with --grant (Rule 01a11c09-b932).
-		expect(await run('member', 'set', 'mei', '--grant', 'members.manage', '--workspace', workspace)).toMatchObject({ code: 0, out: expect.stringContaining('Updated mei: human, Custom, 4 keys.') })
+		expect(await run('member', 'set', 'mei', '--grant', 'members.manage', '--workspace', workspace)).toMatchObject({ code: 0, out: expect.stringContaining('Updated mei: human, Custom, 3 keys.') })
 		expect(await run('member', 'set', 'deviltea', '--revoke', 'members.manage', '--workspace', workspace)).toMatchObject({ code: 0 })
 		expect(await run('member', 'set', 'mei', '--revoke', 'members.manage', '--workspace', workspace)).toMatchObject({ code: 1, err: expect.stringContaining('last human holder of `members.manage`') })
 		expect(await run('member', 'set', 'claude', '--grant', 'reviews.resolve', '--workspace', workspace)).toMatchObject({ code: 1, err: expect.stringContaining('humanOnly') })
@@ -594,7 +350,7 @@ describe('uiux member on permission keys and Access presets (issue #142)', () =>
 		// A preset, then an adjustment, in one write; a revoke of a key not held only warns.
 		const adjusted = await run('member', 'set', 'claude', '--preset', 'Reviewer', '--grant', 'locales.write', '--revoke', 'reviews.promote,flows.write', '--nickname', 'claude-l10n', '--workspace', workspace)
 		expect(adjusted).toMatchObject({ code: 0, err: 'uiux: warning: claude-l10n did not hold flows.write; nothing to revoke there.' })
-		expect((await storedMembers(home, workspace))[2]).toMatchObject({ nickname: 'claude-l10n', keys: ['workspace.read', 'history.read', 'product-kit.source.read', 'reviews.write', 'reviews.submit', 'locales.write', 'checkpoints.create'] })
+		expect((await storedMembers(home, workspace))[2]).toMatchObject({ nickname: 'claude-l10n', keys: ['workspace.read', 'product-kit.source.read', 'reviews.write', 'reviews.submit', 'locales.write'] })
 	})
 
 	it('applies a service key edit to the roster read under the lock, keeping a CLI change it has not refreshed', async () => {
@@ -624,13 +380,13 @@ describe('uiux member on permission keys and Access presets (issue #142)', () =>
 		const roster = JSON.parse(await readFile(rosterFile, 'utf8')) as { members: { nickname: string; keys: string[] }[] }
 		roster.members.find(member => member.nickname === 'mei')!.keys.push('future.capability')
 		await writeFile(rosterFile, `${JSON.stringify(roster, null, 2)}\n`)
-		expect(await run('member', 'set', 'mei', '--grant', 'reviews.write,future.capability', '--workspace', workspace)).toMatchObject({ code: 0, out: expect.stringContaining('Updated mei: human, Custom, 5 keys.') })
+		expect(await run('member', 'set', 'mei', '--grant', 'reviews.write,future.capability', '--workspace', workspace)).toMatchObject({ code: 0, out: expect.stringContaining('Updated mei: human, Custom, 4 keys.') })
 		expect((await storedMembers(home, workspace))[1]!.keys).toEqual([...presetKeys('viewer'), 'reviews.write', 'future.capability'])
 		const list = await run('member', 'list', '--workspace', workspace)
-		expect(list.out).toMatch(/deviltea\s+human\s+Owner\s+0\s+0\s+23$/mu)
-		expect(list.out).toMatch(/mei\s+human\s+Custom\s+0\s+0\s+5$/mu)
+		expect(list.out).toMatch(/deviltea\s+human\s+Owner\s+0\s+0\s+19$/mu)
+		expect(list.out).toMatch(/mei\s+human\s+Custom\s+0\s+0\s+4$/mu)
 		const full = await run('member', 'list', '--keys', '--workspace', workspace)
-		expect(full.out).toMatch(/mei\s+human\s+Custom\s+0\s+0\s+workspace\.read, history\.read, product-kit\.source\.read, reviews\.write, future\.capability \(unknown\)$/mu)
+		expect(full.out).toMatch(/mei\s+human\s+Custom\s+0\s+0\s+workspace\.read, product-kit\.source\.read, reviews\.write, future\.capability \(unknown\)$/mu)
 		expect(full.out).toMatch(new RegExp(`deviltea\\s+human\\s+Owner\\s+0\\s+0\\s+${PERMISSION_KEYS.join(', ').replaceAll('.', '\\.')}$`, 'mu'))
 	})
 
@@ -643,12 +399,12 @@ describe('uiux member on permission keys and Access presets (issue #142)', () =>
 		roster.members.find(member => member.nickname === 'mei')!.keys.push('future.key')
 		await writeFile(rosterFile, `${JSON.stringify(roster, null, 2)}\n`)
 		// The preset replaces only the keys this version knows.
-		expect(await run('member', 'set', 'mei', '--preset', 'Viewer', '--workspace', workspace)).toMatchObject({ code: 0, out: expect.stringContaining('Updated mei: human, Custom, 4 keys.') })
+		expect(await run('member', 'set', 'mei', '--preset', 'Viewer', '--workspace', workspace)).toMatchObject({ code: 0, out: expect.stringContaining('Updated mei: human, Custom, 3 keys.') })
 		expect((await storedMembers(home, workspace))[1]!.keys).toEqual([...presetKeys('viewer'), 'future.key'])
-		expect((await run('member', 'list', '--workspace', workspace)).out).toMatch(/mei\s+human\s+Custom\s+0\s+0\s+4$/mu)
+		expect((await run('member', 'list', '--workspace', workspace)).out).toMatch(/mei\s+human\s+Custom\s+0\s+0\s+3$/mu)
 		// --grant and --revoke of known keys keep it too.
-		expect(await run('member', 'set', 'mei', '--grant', 'reviews.write', '--revoke', 'history.read', '--workspace', workspace)).toMatchObject({ code: 0 })
-		expect((await storedMembers(home, workspace))[1]!.keys).toEqual(['workspace.read', 'product-kit.source.read', 'reviews.write', 'future.key'])
+		expect(await run('member', 'set', 'mei', '--grant', 'reviews.write', '--revoke', 'product-kit.source.read', '--workspace', workspace)).toMatchObject({ code: 0 })
+		expect((await storedMembers(home, workspace))[1]!.keys).toEqual(['workspace.read', 'reviews.write', 'future.key'])
 	})
 
 	it('says a humanOnly key revoked from an Agent was never granted to it, not that it was not held', async () => {

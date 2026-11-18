@@ -19,7 +19,7 @@ const TEMPORARY_FILE_MAX_AGE_MS = 60_000
 /**
  * The host-local thumbnail cache of one Workspace (Clause 01a19b99-cbd0-7076-b286-a6cee12af0f3):
  * `<thumbnails>/<viewId>/<digest>.png`, directories 0700 and files 0600. It sits beside the roster
- * and host history under `$UIUX_HOME`, which `uiux dev` keeps outside the Workspace, so nothing here
+ * under `$UIUX_HOME`, which `uiux dev` keeps outside the Workspace, so nothing here
  * is ever committed (Rule 01a19b99-d05d-7c24-9ec7-899038e134b6). Nothing in it is canonical: deleting
  * it loses only pixels.
  */

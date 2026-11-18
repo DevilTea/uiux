@@ -53,11 +53,6 @@ export function liveAssetContentUrl(assetId: string, contentDigest: string): str
 	return `/api/assets/${encodeURIComponent(assetId)}/content?digest=${contentDigest}`
 }
 
-/** The content URL of an Asset as a version records it: the version blob of its content digest. */
-export function versionAssetContentUrl(contentDigest: string): string {
-	return `/api/history/blobs/${contentDigest}`
-}
-
 /**
  * Resolves the Asset one binding names, independently of the field it is bound in: a missing, corrupt or
  * inconsistent Asset is blocked with its diagnostics, and a valid one yields its runtime value. Nothing

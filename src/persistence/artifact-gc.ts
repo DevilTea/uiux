@@ -1,17 +1,12 @@
 import { createHash } from 'node:crypto'
-import * as fs from 'node:fs/promises'
 
 import { canonicalJsonStringify } from '../domain/canonical-json'
 import { CHECKS_RUN_KIND } from '../domain/evidence/checks-run'
 import { validateFormalEvidenceRecord, type FormalEvidenceRecord } from '../domain/evidence/schema'
-import type { HostVersionRecord, VersionRecord } from '../domain/history/schema'
 import { validateReviewThread, type ReviewSubmission } from '../domain/reviews/schema'
 import { isFullUuid, isRecord } from '../domain/validation'
 import { REVIEW_FILE_SUFFIX, viewRelativePath, WORKSPACE_DATA_DIRECTORY } from './paths'
 import { revisionForResourceFiles, type FileNativePersistence } from './file-native'
-import { CheckpointStore } from './history/checkpoint-store'
-import { HostHistoryStore, type HostHistoryPaths, type OpenAutosaveEntry } from './history/host-store'
-import { referencedDigests } from './history/snapshot'
 import { readActiveServerHold } from './server-hold'
 
 /**
@@ -19,39 +14,33 @@ import { readActiveServerHold } from './server-hold'
  * derived-artifact store, run only by `uiux artifacts gc` (Clause 01a14e30-30de-70c3-888f-63e8982353d7).
  *
  * The roots (Rule 01a14e30-31c0-7289-a944-74af9556eabf) are the Evidence records that a Review
- * submission references, the blobs that a Checkpoint, a host history version or the open autosave
- * references (Clause 01a11a5e-1e65-7deb-a89e-6ad021248fe0), and, for each View and render context,
- * the latest Evidence record. Handoff blobs are not roots. Owner decisions of 2026-10-18
- * (https://github.com/DevilTea/uiux/discussions/241#discussioncomment-19019221):
+ * submission references and, for each View and render context, the latest Evidence record. Handoff
+ * blobs are not roots. Owner decisions of 2026-10-18
+ * (https://github.com/DevilTea/uiux/discussions/241#discussioncomment-19019221), as amended by
+ * Discussion #491 P1 (UIUX keeps no version history, so no timeline orders the records):
  *
  * - A `checks_run` record names no View, so it has no "latest" per View: the CHECKS_RUN_RETENTION
  *   records with the newest `executionContext.ranAt` are roots, and an older one is collectable unless
- *   a Review submission, a Checkpoint, a host version or the open autosave references it (owner ruling
- *   of 2026-10-26, https://github.com/DevilTea/uiux/discussions/241#discussioncomment-19197851, item 1;
- *   no time window).
- * - "Latest" follows the version timeline, never a file time: an Evidence record names the View
- *   revision it shows, and that revision's place is the latest time a Checkpoint, a host version
- *   (or one of its write events), the open autosave or a Review submission records it; the View's
- *   current revision is newer than all of them. Among the records of one Evidence kind and
- *   execution context, the ones at the newest place are kept. When that cannot be decided (a
- *   record whose View revision the timeline does not show, unless the newest is the current one;
- *   two revisions at the newest place; a context naming no View), every record of the group is kept.
+ *   a Review submission references it (owner ruling of 2026-10-26,
+ *   https://github.com/DevilTea/uiux/discussions/241#discussioncomment-19197851, item 1; no time window).
+ * - "Latest" is the record that names the View's current revision, never a file time. Among the
+ *   records of one Evidence kind and execution context, the ones naming the current revision are kept.
+ *   When that cannot be decided (no record of the group names the current revision, a record names
+ *   no single revision of its View, or the context names no View), every record of the group is kept.
  * - A kept blob that is JSON is scanned conservatively: every `sha256:<64 hex>` identity anywhere in
  *   it (a key or a string value, whole or in part) is kept too, and so on through every kept JSON
  *   blob. For a valid Evidence record this includes its `artifactRefs` and `evidenceRefs`; a JSON
  *   blob that is not a valid Evidence record is followed the same way.
- * - Conservative on anything it cannot read: a Review thread, a Checkpoint, a host version or the
- *   open autosave journal that is not a valid record, a host history directory that cannot be
- *   opened, or a stored blob whose bytes do not match its identity, refuses the whole run before
- *   anything is deleted, because that record could name any blob.
+ * - Conservative on anything it cannot read: a Review thread that is not a valid record, or a stored
+ *   blob whose bytes do not match its identity, refuses the whole run before anything is deleted,
+ *   because that record could name any blob.
  * - Only regular files at `artifacts/sha256/<2>/<64>` whose name is their identity's hexadecimal
  *   digest, under the shard of its first two characters, are candidates. Every other entry of the
  *   store directory (a symbolic link among them) is left alone.
  * - A blob is deleted only after every other doomed blob that references it, so a run that fails
  *   part way never leaves an Evidence record (or any kept JSON blob) whose referenced blobs are gone.
  * - It never rewrites a canonical record (Rule 01a115cd-c23e-7143-bd1e-7ffd9fcaa6f2): it reads
- *   Review threads, Checkpoints and host history, and only removes candidate blobs, each with one
- *   atomic unlink.
+ *   Review threads, and only removes candidate blobs, each with one atomic unlink.
  */
 /** How many of the newest `checks_run` records (by `ranAt`) a cleanup keeps; Clause 01a178bb-cffc-7de1-93da-18431060d9b1 owns the value. */
 export const CHECKS_RUN_RETENTION = 20
@@ -68,11 +57,6 @@ export type ArtifactGcResult = Readonly<{
 
 export type ArtifactGcOptions = Readonly<{
 	dryRun: boolean
-	/**
-	 * The selected Workspace's host history (Clause 01a11a5e-1e65-7deb-a89e-6ad021248fe0) under
-	 * `$UIUX_HOME`; when its directory does not exist, this host has no history for the Workspace.
-	 */
-	hostHistory: HostHistoryPaths
 	/** Called with each blob once it is deleted (never on a dry run), so a caller can report progress. */
 	onDeleted?: (blob: ArtifactGcBlob) => void
 }>
@@ -113,7 +97,7 @@ export async function collectArtifactGarbage(persistence: FileNativePersistence,
 	return persistence.withLock(async () => {
 		await refuseWhileServed(persistence)
 		await persistence.assertWritableUnlocked()
-		const plan = await planArtifactGarbageUnlocked(persistence, options.hostHistory)
+		const plan = await planArtifactGarbageUnlocked(persistence)
 		if (options.dryRun) return plan.result
 		const deleted: ArtifactGcBlob[] = []
 		for (const blob of plan.deletionOrder) {
@@ -151,22 +135,13 @@ export type ArtifactGcPlan = Readonly<{
 }>
 
 /** The mark and the plan of the sweep; the caller holds the exclusive persistence lock. */
-export async function planArtifactGarbageUnlocked(persistence: FileNativePersistence, hostHistory: HostHistoryPaths): Promise<ArtifactGcPlan> {
+export async function planArtifactGarbageUnlocked(persistence: FileNativePersistence): Promise<ArtifactGcPlan> {
 	const store = await scanStoreUnlocked(persistence)
 	const submissions = await reviewSubmissionsUnlocked(persistence)
-	const checkpoints = await checkpointsUnlocked(persistence)
-	const host = await hostHistoryUnlocked(hostHistory)
-	const timeline = new RevisionTimeline()
-	for (const record of [...checkpoints, ...host.versions]) timeline.addVersion(record)
-	for (const event of host.openEvents) timeline.addEvent(event)
-	for (const submission of submissions) timeline.addSubmission(submission)
 
 	const roots = new Set<string>([
 		...submissions.flatMap(submission => submission.evidenceRefs.map(ref => ref.evidence)),
-		...referencedDigests(checkpoints.flatMap(record => record.resources)),
-		...referencedDigests(host.versions.flatMap(record => record.resources)),
-		...host.openFiles,
-		...await latestEvidenceUnlocked(persistence, store.values(), timeline),
+		...await latestEvidenceUnlocked(persistence, store.values()),
 	])
 	const marked = new Set<string>()
 	const pending = [...roots]
@@ -271,44 +246,6 @@ function identitiesIn(value: unknown): Set<string> {
 	return found
 }
 
-/**
- * Where each View revision sits on the version timeline: the latest instant a version, a write
- * event or a Review submission records it.
- */
-class RevisionTimeline {
-	private readonly revisions = new Map<string, Map<string, number>>()
-
-	addVersion(record: VersionRecord): void {
-		for (const resource of record.resources)
-			if (resource.kind === 'view') this.add(resource.key, resource.revision, record.at)
-		if (record.type !== 'checkpoint') for (const event of record.events) this.addEvent(event)
-	}
-
-	addEvent(event: HostVersionRecord['events'][number]): void {
-		if (event.resource.kind === 'view' && event.afterRevision !== null) this.add(event.resource.key, event.afterRevision, event.at)
-	}
-
-	addSubmission(submission: ReviewSubmission): void {
-		for (const resource of submission.resources) {
-			const viewId = viewIdOf(resource.identity)
-			if (viewId !== undefined) this.add(viewId, resource.revision, submission.at)
-		}
-	}
-
-	/** The latest instant recorded for `revision` of `viewId`, or undefined when the timeline does not show it. */
-	place(viewId: string, revision: string): number | undefined {
-		return this.revisions.get(viewId)?.get(revision)
-	}
-
-	private add(viewId: string, revision: string, at: string): void {
-		const instant = Date.parse(at)
-		if (Number.isNaN(instant)) return
-		const places = this.revisions.get(viewId) ?? new Map<string, number>()
-		places.set(revision, Math.max(places.get(revision) ?? Number.NEGATIVE_INFINITY, instant))
-		this.revisions.set(viewId, places)
-	}
-}
-
 function viewIdOf(identity: unknown): string | undefined {
 	return isRecord(identity) && identity.type === 'view' && typeof identity.id === 'string' ? identity.id : undefined
 }
@@ -330,11 +267,11 @@ export function keptChecksRuns(records: readonly Readonly<{ identity: string; ra
 }
 
 /**
- * For each Evidence kind and execution context, the records whose View revision is the newest on
- * the timeline, or every record of the group when that cannot be decided; for `checks_run`, the
- * newest CHECKS_RUN_RETENTION records by `ranAt`.
+ * For each Evidence kind and execution context, the records that name the View's current revision,
+ * or every record of the group when that cannot be decided; for `checks_run`, the newest
+ * CHECKS_RUN_RETENTION records by `ranAt`.
  */
-async function latestEvidenceUnlocked(persistence: FileNativePersistence, blobs: Iterable<StoredBlob>, timeline: RevisionTimeline): Promise<string[]> {
+async function latestEvidenceUnlocked(persistence: FileNativePersistence, blobs: Iterable<StoredBlob>): Promise<string[]> {
 	const groups = new Map<string, { viewId?: string; records: { identity: string; revision?: string }[] }>()
 	const checksRuns: { identity: string; ranAt: unknown }[] = []
 	for (const blob of blobs) {
@@ -361,16 +298,10 @@ async function latestEvidenceUnlocked(persistence: FileNativePersistence, blobs:
 		}
 		if (!current.has(viewId)) current.set(viewId, await currentViewRevisionUnlocked(persistence, viewId))
 		const now = current.get(viewId)
-		const placed = records.map(record => ({
-			...record,
-			place: record.revision === undefined ? undefined : record.revision === now ? Number.POSITIVE_INFINITY : timeline.place(viewId, record.revision),
-		}))
-		const newest = Math.max(...placed.map(record => record.place ?? Number.NEGATIVE_INFINITY))
-		const atNewest = placed.filter(record => record.place === newest)
-		const decided = placed.every(record => record.revision !== undefined)
-			&& (newest === Number.POSITIVE_INFINITY || placed.every(record => record.place !== undefined))
-			&& new Set(atNewest.map(record => record.revision)).size === 1
-		kept.push(...(decided ? atNewest : records).map(record => record.identity))
+		// Decidable only when every record names one revision of the View and one of them is the current revision.
+		const atCurrent = now === undefined ? [] : records.filter(record => record.revision === now)
+		const decided = records.every(record => record.revision !== undefined) && atCurrent.length > 0
+		kept.push(...(decided ? atCurrent : records).map(record => record.identity))
 	}
 	return kept
 }
@@ -402,63 +333,6 @@ async function reviewSubmissionsUnlocked(persistence: FileNativePersistence): Pr
 		submissions.push(...validation.value.submissions)
 	}
 	return submissions
-}
-
-/** Every Checkpoint; a checkpoint file that is not a valid record refuses the run. */
-async function checkpointsUnlocked(persistence: FileNativePersistence) {
-	const listing = await new CheckpointStore(persistence).listUnlocked()
-	const invalid = listing.invalid[0]
-	if (invalid)
-		throw new ArtifactGcRefusal(`${invalid.file} is not a valid Checkpoint record (${describe(invalid.diagnostics)}), so the blobs it references cannot be read; nothing was deleted.`)
-	return listing.records
-}
-
-type HostHistoryRoots = Readonly<{
-	versions: readonly HostVersionRecord[]
-	openEvents: readonly Extract<OpenAutosaveEntry, { type: 'event' }>['event'][]
-	/** Every blob the open autosave's events name. */
-	openFiles: readonly string[]
-}>
-
-/**
- * This host's history of the Workspace: its versions and the open autosave. No history directory
- * means none; a directory that cannot be opened, a version file that is not a valid record or a
- * journal that cannot be read refuses the run.
- */
-async function hostHistoryUnlocked(paths: HostHistoryPaths): Promise<HostHistoryRoots> {
-	const refuse = (detail: string): never => {
-		throw new ArtifactGcRefusal(`The host history at ${paths.dir} ${detail}, so the blobs its versions reference cannot be read; nothing was deleted.`)
-	}
-	const message = (error: unknown) => error instanceof Error ? error.message : String(error)
-	let store: HostHistoryStore | undefined
-	try { store = await HostHistoryStore.open({ paths }) }
-	catch (error) { return refuse(`cannot be opened (${message(error)})`) }
-	if (!store) {
-		// A partial history directory (versions without the rest) is not "no history".
-		const present = await fs.lstat(paths.dir).then(() => true, (error: NodeJS.ErrnoException) => error.code === 'ENOENT' ? false : refuse(`cannot be read (${message(error)})`))
-		if (present) refuse('is incomplete')
-		return { versions: [], openEvents: [], openFiles: [] }
-	}
-	let versions: readonly HostVersionRecord[]
-	try {
-		const listing = await store.listVersions()
-		const invalid = listing.invalid[0]
-		if (invalid) return refuse(`holds ${invalid.file}, which is not a valid version record (${describe(invalid.diagnostics)})`)
-		versions = listing.records
-	}
-	catch (error) {
-		if (error instanceof ArtifactGcRefusal) throw error
-		return refuse(`cannot be listed (${message(error)})`)
-	}
-	let entries: readonly OpenAutosaveEntry[]
-	try { entries = (await store.readOpenJournal())?.entries ?? [] }
-	catch (error) { return refuse(`holds an open.json that cannot be read (${message(error)})`) }
-	const openEvents: Extract<OpenAutosaveEntry, { type: 'event' }>[] = entries.filter((entry): entry is Extract<OpenAutosaveEntry, { type: 'event' }> => entry.type === 'event')
-	return {
-		versions,
-		openEvents: openEvents.map(entry => entry.event),
-		openFiles: openEvents.flatMap(entry => Object.values(entry.files).filter((digest): digest is string => digest !== null)),
-	}
 }
 
 /**

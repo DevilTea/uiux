@@ -1,7 +1,7 @@
 import { renderInputDigest } from '../evidence/render-input-digest'
 import { adapterFreshnessContext } from '../evidence/adapter-provenance'
 import { evaluateEvidenceStaleness, type EvidenceStalenessContext } from '../evidence/staleness'
-import { resourceIdentityKey } from '../history/summary'
+import { resourceIdentityKey } from '../resource-identity'
 import type { ImpactWorkspace } from './model'
 
 /**

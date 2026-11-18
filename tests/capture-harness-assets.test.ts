@@ -21,17 +21,17 @@ function watch() {
 }
 
 describe('bound Asset network watch', () => {
-	it('knows both URL forms', () => {
+	it('knows the Asset content URL', () => {
 		expect(isBoundAssetPath('/api/assets/abc/content')).toBe(true)
-		expect(isBoundAssetPath(`/api/history/blobs/${DIGEST}`)).toBe(true)
+		expect(isBoundAssetPath(`/api/history/blobs/${DIGEST}`)).toBe(false)
 		expect(isBoundAssetPath('/api/assets/abc')).toBe(false)
 		expect(isBoundAssetPath('/api/preview/assets')).toBe(false)
 	})
 
-	it('counts a non-2xx answer in either form, and a failed request', () => {
+	it('counts a non-2xx answer, and a failed request', () => {
 		const { failures, respond, fail } = watch()
 		respond(`${BASE}/api/assets/abc/content?digest=${DIGEST}`, 409)
-		respond(`${BASE}/api/history/blobs/${DIGEST}`, 404)
+		respond(`${BASE}/api/assets/abc/content`, 404)
 		fail(`${BASE}/api/assets/abc/content?digest=${DIGEST}`, 'net::ERR_CONNECTION_RESET')
 		expect(failures()).toBe(3)
 	})

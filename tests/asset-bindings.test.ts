@@ -9,7 +9,6 @@ import {
 	collectBoundAssetIds,
 	liveAssetContentUrl,
 	resolveAssetTarget,
-	versionAssetContentUrl,
 	type AssetResolutionTable,
 } from '../src/assets'
 import { createViewAssetBindingCheck } from '../src/application/services/asset-bindings'
@@ -141,13 +140,11 @@ describe('the Assets a View binds', () => {
 })
 
 describe('resolving an Asset for execution', () => {
-	it('yields the runtime value with the URL form asked for, or blocks a missing Asset', async () => {
+	it('yields the runtime value with the URL asked for, or blocks a missing Asset', async () => {
 		const resource: AuthoredAssetResource = { metadata: { id: ASSET_ID, name: 'Logo', contentFilename: 'logo.png', mediaType: 'image/png' }, content: PNG }
 		const digest = `sha256:${createHash('sha256').update(PNG).digest('hex')}`
 		const live = await resolveAssetTarget({ assetId: ASSET_ID, lookup: { read: async () => ({ resource, diagnostics: [] }) }, url: liveAssetContentUrl })
 		expect(live).toEqual({ state: 'ready', value: { url: `/api/assets/${ASSET_ID}/content?digest=${digest}`, mediaType: 'image/png', contentDigest: digest } })
-		const version = await resolveAssetTarget({ assetId: ASSET_ID, lookup: { read: async () => ({ resource, diagnostics: [] }) }, url: (_id, contentDigest) => versionAssetContentUrl(contentDigest) })
-		expect(version).toMatchObject({ state: 'ready', value: { url: `/api/history/blobs/${digest}` } })
 		const missing = await resolveAssetTarget({ assetId: ASSET_ID, lookup: { read: async () => undefined }, url: liveAssetContentUrl })
 		expect(missing).toMatchObject({ state: 'blocked', diagnostics: [{ code: 'asset.missing_reference' }] })
 	})

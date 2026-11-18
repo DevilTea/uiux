@@ -15,7 +15,8 @@ import { startWorkbenchServer, type WorkbenchServer } from './support/workbench-
  *   holding it without the rest of the Owner set reaches them (P2 review note F5);
  * - an authoring page follows its own write key and names the missing one (Rule 01a11485-eba3);
  * - "Release lock" follows `locks.force-release` (Rule 01a11485-f118);
- * - the Activity timeline and the View history panel follow `history.read`, and Resolve, Submit
+ * - the changes since the Git base, in Activity and the View history panel, need only `workspace.read`
+ *   (Feature 01a1ece7-8d4e-763c-8897-2c35ef129a4d), and Resolve, Submit
  *   for review and Reopen follow `reviews.resolve` and `reviews.submit`, in the Reviews inbox and in
  *   the canvas thread bubble alike (Rule 01a116f0-8fd3).
  */
@@ -228,41 +229,22 @@ describe('lock release follows `locks.force-release`', () => {
 	}, 90_000)
 })
 
-describe('history and Review actions follow their keys', () => {
-	it('names `history.read` instead of the timeline for a member without it', async () => {
-		const { context, page } = await open('/?tab=activity', await memberCookie(['workspace.read', 'reviews.write']))
+describe('the changes view and Review actions follow their keys', () => {
+	it('shows the changes since the Git base to a member holding only `workspace.read`, in Activity and in the View history panel', async () => {
+		const activity = await open('/?tab=activity', await memberCookie(['workspace.read']))
 		try {
-			const notice = page.locator('[data-access-notice="history"]')
-			await notice.waitFor({ timeout: 15_000 })
-			expect(await notice.innerText()).toContain('Requires the permission key history.read.')
-			expect(await page.locator('[data-version-timeline]').count()).toBe(0)
+			await activity.page.locator('[data-changes-since]').waitFor({ timeout: 15_000 })
+			expect(await activity.page.locator('[data-access-notice]').count()).toBe(0)
+			expect(await activity.page.locator('[data-changes-base]').count()).toBe(1)
 		}
-		finally { await context.close() }
+		finally { await activity.context.close() }
 
-		const reader = await open('/?tab=activity', await memberCookie(VIEWER))
+		const panel = await open(`/views/${VIEW_ID}?panel=history`, await memberCookie(['workspace.read']))
 		try {
-			await reader.page.locator('[data-version-timeline]').waitFor({ timeout: 15_000 })
-			expect(await reader.page.locator('[data-access-notice="history"]').count()).toBe(0)
+			await panel.page.locator('[data-view-history] [data-changes-since]').waitFor({ timeout: 15_000 })
+			expect(await panel.page.locator('[data-view-history] [data-access-notice]').count()).toBe(0)
 		}
-		finally { await reader.context.close() }
-	}, 60_000)
-
-	it('names `history.read` instead of the View history panel for a member without it', async () => {
-		const { context, page } = await open(`/views/${VIEW_ID}?panel=history`, await memberCookie(['workspace.read', 'reviews.write']))
-		try {
-			const notice = page.locator('[data-view-history] [data-access-notice="history"]')
-			await notice.waitFor({ timeout: 15_000 })
-			expect(await notice.innerText()).toContain('Requires the permission key history.read.')
-			expect(await page.locator('[data-view-history] [data-version-timeline]').count()).toBe(0)
-		}
-		finally { await context.close() }
-
-		const reader = await open(`/views/${VIEW_ID}?panel=history`, await memberCookie(VIEWER))
-		try {
-			await reader.page.locator('[data-view-history] [data-version-timeline]').waitFor({ timeout: 15_000 })
-			expect(await reader.page.locator('[data-view-history] [data-access-notice="history"]').count()).toBe(0)
-		}
-		finally { await reader.context.close() }
+		finally { await panel.context.close() }
 	}, 60_000)
 
 	it('offers the canvas bubble\'s Resolve only with `reviews.resolve`, and Submit and Reopen only with `reviews.submit`', async () => {

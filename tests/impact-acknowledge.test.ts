@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import { IMPACT_CATEGORIES } from '../src/domain/impact'
 import { classifyAcknowledgedWriteAnswer, DELETE_ROUTES, failureOf } from '../app/utils/impact-acknowledge'
-import { groupImpacts } from '../app/utils/version-restore'
+import { groupImpacts } from '../app/utils/impact-list'
 
 /** The Workbench's reading of a write that may need the caller's acknowledgement (issue #75, Clause 01a172ce-bdef-7cf6-bf8c-770dc9dd5e34). */
 describe('classifyAcknowledgedWriteAnswer', () => {

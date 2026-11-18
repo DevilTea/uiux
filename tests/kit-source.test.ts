@@ -46,7 +46,7 @@ const REGISTRY: ProductKit['components'] = {
 }
 
 const AGENT = testMember({ nickname: 'claude', kind: 'agent', preset: 'editor', credential: 'token' })
-const NO_SOURCE_AGENT = testMember({ nickname: 'reader', kind: 'agent', credential: 'token', keys: ['workspace.read', 'history.read'] })
+const NO_SOURCE_AGENT = testMember({ nickname: 'reader', kind: 'agent', credential: 'token', keys: ['workspace.read', 'reviews.write'] })
 const NO_SOURCE_HUMAN = testMember({ nickname: 'nora', kind: 'human', credential: 'session', keys: ['workspace.read'] })
 const SOURCE_HUMAN = testMember({ nickname: 'vera', kind: 'human', credential: 'session', keys: ['workspace.read', 'product-kit.source.read'] })
 

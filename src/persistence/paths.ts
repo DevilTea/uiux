@@ -36,13 +36,13 @@ const FLOW_FILE_SUFFIX = '.flow.json'
 export const REVIEW_FILE_SUFFIX = '.review.json'
 const ASSET_METADATA_FILENAME = 'asset.json'
 
-/** The identity of one versioned resource: Version history records Contract 01a11a5e-1fc4-7bf0-a402-61c345f454c2. */
+/** The identity of one canonical resource: its kind and key. */
 export type VersionedResourceIdentity = Readonly<{ kind: string; key: string }>
 
 /**
  * Where a Workspace keeps its files: the one seam every path that depends on the Workspace layout
- * goes through (the manifest, the derived-artifact store, Checkpoints, the transaction journal,
- * the persistence lock, the server hold, and the versioned files history reads and writes).
+ * goes through (the manifest, the derived-artifact store, the transaction journal, the persistence
+ * lock, the server hold, and the canonical files).
  * Callers ask the layout instead of building path literals. There is one layout, {@link V5_LAYOUT}.
  *
  * Every path is Workspace-relative and `/`-separated.
@@ -57,7 +57,7 @@ export type VersionedResourceIdentity = Readonly<{ kind: string; key: string }>
  * - `versionedRoots` lists the versioned files and the versioned directories (with a trailing
  *   `/`), per Clause 01a11a5e-1eba-78ae-a204-52e286a95ddb.
  * - `excluded` lists the directories next to them that are never versioned (`reviews/`, the
- *   runtime, artifact and history directories, and `kit/`).
+ *   runtime and artifact directories, and `kit/`).
  * - `isCanonicalPath` is true exactly for the paths canonical writes and transactions may touch:
  *   the `canonicalFiles` and the resource files of the data directories. Nothing under `codeDir`
  *   is canonical.
@@ -73,7 +73,6 @@ export type WorkspaceLayout = Readonly<{
 	accessPresetsPath: string
 	codeDir: string
 	artifactsDir: string
-	checkpointsDir: string
 	transactionsDir: string
 	lockPath: string
 	serverHoldPath: string
@@ -82,7 +81,6 @@ export type WorkspaceLayout = Readonly<{
 	excluded: readonly string[]
 	/** A runtime file directly inside `metadataDir` (lock candidates, the server hold's temporary file). */
 	metadataFilePath(filename: string): string
-	checkpointRelativePath(id: string): string
 	artifactRelativePath(identity: string): string
 	isCanonicalPath(path: string): boolean
 	classifyVersionedPath(path: string): VersionedResourceIdentity | undefined
@@ -93,7 +91,6 @@ export const V5_MANIFEST_PATH = 'workspace.json'
 /** Clause 01a11bb1-8dcc-7d24-99de-52ca7778fd50: the only code directory. */
 export const V5_CODE_DIRECTORY = 'kit'
 const V5_ARTIFACTS_DIRECTORY = 'artifacts'
-const V5_CHECKPOINTS_DIRECTORY = 'history/checkpoints'
 const PRODUCT_KIT_RESOURCE: VersionedResourceIdentity = Object.freeze({ kind: PRODUCT_KIT_RESOURCE_KIND, key: PRODUCT_KIT_RESOURCE_KEY })
 const ACCESS_PRESETS_RESOURCE: VersionedResourceIdentity = Object.freeze({ kind: ACCESS_PRESETS_RESOURCE_KIND, key: ACCESS_PRESETS_RESOURCE_KEY })
 
@@ -102,7 +99,7 @@ const ACCESS_PRESETS_RESOURCE: VersionedResourceIdentity = Object.freeze({ kind:
  * 01a1144e-5508-…, 01a1144e-551f-…, 01a11a5e-1e0e-… and 01a11c09-a855-…); its name records the
  * `schemaVersion` that introduced it. The Workspace root, usually a `.uiux/` directory, holds the
  * manifest `workspace.json`, the Product Kit file, the Access presets file `access-presets.json`,
- * the data directories, `artifacts/`, `history/`, the code directory `kit/` and the runtime files,
+ * the data directories, `artifacts/`, the code directory `kit/` and the runtime files,
  * all directly under the root.
  */
 export const V5_LAYOUT: WorkspaceLayout = Object.freeze({
@@ -113,7 +110,6 @@ export const V5_LAYOUT: WorkspaceLayout = Object.freeze({
 	accessPresetsPath: ACCESS_PRESETS_FILENAME,
 	codeDir: V5_CODE_DIRECTORY,
 	artifactsDir: V5_ARTIFACTS_DIRECTORY,
-	checkpointsDir: V5_CHECKPOINTS_DIRECTORY,
 	transactionsDir: '.transactions',
 	lockPath: '.persistence.lock',
 	serverHoldPath: '.server-hold.json',
@@ -130,16 +126,11 @@ export const V5_LAYOUT: WorkspaceLayout = Object.freeze({
 	excluded: Object.freeze([
 		`${WORKSPACE_DATA_DIRECTORY.reviews}/`,
 		`${V5_ARTIFACTS_DIRECTORY}/`,
-		'history/',
 		'.transactions/',
 		`${V5_CODE_DIRECTORY}/`,
 	]),
 	metadataFilePath(filename: string): string {
 		return filename
-	},
-	checkpointRelativePath(id: string): string {
-		assertUuidIdentity(id, 'Checkpoint')
-		return `${V5_CHECKPOINTS_DIRECTORY}/${id}.json`
 	},
 	artifactRelativePath(identity: string): string {
 		return `${V5_ARTIFACTS_DIRECTORY}/${artifactShardRelativePath(identity)}`
@@ -208,7 +199,7 @@ function classifyDataVersionedPath(path: string): VersionedResourceIdentity | un
 
 /**
  * The canonical resource a committed file belongs to: a versioned resource of the layout, or a
- * Review thread (`reviews/<uuid>.review.json`, which version history excludes). The change-event
+ * Review thread (`reviews/<uuid>.review.json`, which is not a versioned resource). The change-event
  * stream (Clause 01a114ec-e839-7b11-957c-41c88b692e12) names resources by this identity.
  */
 export function classifyCanonicalResourcePath(layout: WorkspaceLayout, path: string): VersionedResourceIdentity | undefined {

@@ -7,18 +7,14 @@
  * The dogfood Workspace `.uiux/` is authored in a `git worktree` (docs/dogfood-worktree.md). A pull
  * request that changes it must carry only canonical resources and the Evidence blobs they reach:
  *
- * 1. History guard: the PR adds or changes no `.uiux/history/**` file (the worktree's Baseline
- *    Checkpoint and host history are local state; only the owner's host commits one).
- * 2. Blob guard: `uiux artifacts gc --dry-run`, run against an export of the PR head's committed
+ * 1. Blob guard: `uiux artifacts gc --dry-run`, run against an export of the PR head's committed
  *    `.uiux/` with an empty `UIUX_HOME`, lists none of the blobs the PR adds (an added blob that
  *    gc would collect is unreferenced, so nothing in the PR needs it).
- * 3. Kit guard: the PR adds or changes nothing at `.uiux/kit/node_modules` (a directory, a symlink or
+ * 2. Kit guard: the PR adds or changes nothing at `.uiux/kit/node_modules` (a directory, a symlink or
  *    a file). A worktree that links it to the repository's `node_modules` for the kit build has a
  *    symlink there, which Git treats as a file and the `kit/node_modules/` ignore rule does not match.
  *
- * Usage: node scripts/dogfood-guard.mjs [--base <ref>] [--head <ref>] [--allow-history]
- * `--allow-history` skips the history guard only (the owner's host legitimately commits Baseline
- * Checkpoints and history; CI passes it for a PR labeled `dogfood-history`, which only the owner applies).
+ * Usage: node scripts/dogfood-guard.mjs [--base <ref>] [--head <ref>]
  * The blob guard and the kit guard have no escape hatch.
  * `--head` defaults to HEAD. `--base` defaults to `origin/$GITHUB_BASE_REF` in a CI pull request,
  * else `origin/main`, else `main`. The PR's changes are `merge-base(base, head)..head`. The guards
@@ -34,7 +30,6 @@ import { parseArgs } from 'node:util'
 import { fileURLToPath } from 'node:url'
 
 export const DOGFOOD_DIR = '.uiux'
-export const HISTORY_DIR = `${DOGFOOD_DIR}/history`
 export const BLOB_DIR = `${DOGFOOD_DIR}/artifacts/sha256`
 export const KIT_NODE_MODULES = `${DOGFOOD_DIR}/kit/node_modules`
 const BLOB_PATH = /^\.uiux\/artifacts\/sha256\/[0-9a-f]{2}\/([0-9a-f]{64})$/
@@ -87,17 +82,12 @@ export function changedPaths(repo, from, to, filter, pathspec) {
 	return git(repo, ['diff', '--no-renames', `--diff-filter=${filter}`, '--name-only', '-z', from, to, '--', pathspec]).split('\0').filter(Boolean)
 }
 
-/** Guard 1: the history paths the PR adds or changes (deleting one is not a violation). */
-export function checkHistory(repo, { from, to }) {
-	return changedPaths(repo, from, to, 'AMT', HISTORY_DIR)
-}
-
 /** True for `.uiux/kit/node_modules` and anything under it. */
 export function isKitNodeModules(path) {
 	return path === KIT_NODE_MODULES || path.startsWith(`${KIT_NODE_MODULES}/`)
 }
 
-/** Guard 3: the `.uiux/kit/node_modules` paths the PR adds or changes, a symlink included (deleting one is not a violation). */
+/** Guard 2: the `.uiux/kit/node_modules` paths the PR adds or changes, a symlink included (deleting one is not a violation). */
 export function checkKitNodeModules(repo, { from, to }) {
 	return changedPaths(repo, from, to, 'AMT', KIT_NODE_MODULES)
 }
@@ -199,26 +189,12 @@ export function collectableTrackedBlobs(repo, ref = 'HEAD', { uiuxBin } = {}) {
 }
 
 /** Runs the guards; returns `{ ok, lines }` for the caller to print. */
-/** @param {string} repo @param {{ base?: string, head?: string, env?: Record<string, string | undefined>, uiuxBin?: string, allowHistory?: boolean }} [options] */
-export function runGuard(repo, { base, head = 'HEAD', env, uiuxBin, allowHistory = false } = {}) {
+/** @param {string} repo @param {{ base?: string, head?: string, env?: Record<string, string | undefined>, uiuxBin?: string }} [options] */
+export function runGuard(repo, { base, head = 'HEAD', env, uiuxBin } = {}) {
 	const baseRef = resolveBase(repo, { base, env })
 	const from = mergeBase(repo, baseRef, head)
 	const lines = [`dogfood guard: ${baseRef} (merge base ${from.slice(0, 9)}) .. ${head}`]
 	let ok = true
-
-	const history = checkHistory(repo, { from, to: head })
-	if (allowHistory) {
-		lines.push(`SKIP  history: skipped because --allow-history was given (CI: the PR carries the dogfood-history label, applied only by the owner); the PR adds or changes ${history.length} ${HISTORY_DIR}/ file(s). The blob guard still runs.`)
-	}
-	else if (history.length === 0) {
-		lines.push(`ok    history: the PR adds or changes no ${HISTORY_DIR}/ file`)
-	}
-	else {
-		ok = false
-		lines.push(`FAIL  history: the PR adds or changes ${history.length} ${HISTORY_DIR}/ file(s); history and the worktree's Baseline Checkpoint are never committed:`)
-		for (const path of history) lines.push(`        ${path}`)
-		lines.push(`      Remove them from the PR, for example: git rm --cached -- <path> (an added file) or git checkout ${from.slice(0, 9)} -- <path> (a changed one).`)
-	}
 
 	const kitModules = checkKitNodeModules(repo, { from, to: head })
 	if (kitModules.length === 0) {
@@ -247,14 +223,14 @@ export function runGuard(repo, { base, head = 'HEAD', env, uiuxBin, allowHistory
 async function main() {
 	let values
 	try {
-		values = parseArgs({ options: { base: { type: 'string' }, head: { type: 'string' }, 'allow-history': { type: 'boolean' } }, allowPositionals: false, strict: true }).values
+		values = parseArgs({ options: { base: { type: 'string' }, head: { type: 'string' } }, allowPositionals: false, strict: true }).values
 	}
 	catch (error) {
-		console.error(`dogfood guard: ${error.message}\nUsage: node scripts/dogfood-guard.mjs [--base <ref>] [--head <ref>] [--allow-history]`)
+		console.error(`dogfood guard: ${error.message}\nUsage: node scripts/dogfood-guard.mjs [--base <ref>] [--head <ref>]`)
 		return 2
 	}
 	try {
-		const { ok, lines } = runGuard(git(resolve('.'), ['rev-parse', '--show-toplevel']).trim(), { ...(values.base ? { base: values.base } : {}), ...(values.head ? { head: values.head } : {}), ...(values['allow-history'] ? { allowHistory: true } : {}) })
+		const { ok, lines } = runGuard(git(resolve('.'), ['rev-parse', '--show-toplevel']).trim(), { ...(values.base ? { base: values.base } : {}), ...(values.head ? { head: values.head } : {}) })
 		console.log(lines.join('\n'))
 		return ok ? 0 : 1
 	}

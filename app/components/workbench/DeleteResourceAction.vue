@@ -6,7 +6,7 @@ import { useUiuxClient } from '../../composables/useUiuxClient'
 import { useWorkbench } from '../../composables/useWorkbench'
 import { describeFetchError, type FetchErrorDetails } from '../../utils/fetch-error'
 import { classifyAcknowledgedWriteAnswer, DELETE_ROUTES, failureOf, type DeletableKind } from '../../utils/impact-acknowledge'
-import type { ReceivedImpact } from '../../utils/version-restore'
+import type { ReceivedImpact } from '../../utils/impact-list'
 import ImpactList from './ImpactList.vue'
 import WbErrorDescription from './WbErrorDescription.vue'
 

@@ -280,7 +280,7 @@ describe('roster invariants on write', () => {
 		const held = v2Member('mei', 'human', ['workspace.read', 'future.capability'])
 		const file = v2Roster('/work/design', [v2Member('deviltea', 'human', presetKeys('owner')), held])
 		// Keys unknown to this version that the member holds are kept, after the catalog keys.
-		expect(setMember(file, 'mei', { keys: ['future.capability', 'workspace.read', 'history.read'] }).result.keys).toEqual(['workspace.read', 'history.read', 'future.capability'])
+		expect(setMember(file, 'mei', { keys: ['future.capability', 'workspace.read', 'product-kit.source.read'] }).result.keys).toEqual(['workspace.read', 'product-kit.source.read', 'future.capability'])
 		expectAccessError(() => setMember(file, 'mei', { keys: ['workspace.read', 'future.capability', 'future.other'] }), 'access.unknown_key', /`future\.other`/u)
 
 		// The store refuses a new unknown key whatever the mutation, and the service's key input too.
@@ -295,8 +295,8 @@ describe('roster invariants on write', () => {
 		await expect(service.setMember(store.data.members[0]!.id, { keys: [...presetKeys('owner'), 'future.capability'] })).rejects.toMatchObject({ code: 'access.unknown_key' })
 		expect(await readFile(paths.file, 'utf8')).toBe(before)
 		// The member that holds it keeps it through a write of its own keys.
-		await service.setMember(store.data.members[1]!.id, { keys: ['workspace.read', 'history.read', 'future.capability'] })
-		expect(store.data.members[1]!.keys).toEqual(['workspace.read', 'history.read', 'future.capability'])
+		await service.setMember(store.data.members[1]!.id, { keys: ['workspace.read', 'product-kit.source.read', 'future.capability'] })
+		expect(store.data.members[1]!.keys).toEqual(['workspace.read', 'product-kit.source.read', 'future.capability'])
 	})
 
 	it('refuses any write that leaves no human holding members.manage (Scenario 01a118a1-d128)', () => {
@@ -317,7 +317,7 @@ describe('roster invariants on write', () => {
 		const forge = (change: (member: StoredMember) => StoredMember) => store.update(file => ({ file: { ...file, members: file.members.map(change) }, result: undefined }))
 		await expect(forge(member => member.nickname === 'deviltea' ? { ...member, keys: ['workspace.read'] } : member)).rejects.toMatchObject({ code: 'access.last_manager' })
 		await expect(forge(member => member.nickname === 'claude' ? { ...member, keys: ['workspace.read', 'locks.force-release'] } : member)).rejects.toMatchObject({ code: 'access.store_invalid' })
-		await expect(forge(member => member.nickname === 'claude' ? { ...member, keys: ['history.restore'] } : member)).rejects.toMatchObject({ code: 'access.key_requires' })
+		await expect(forge(member => member.nickname === 'claude' ? { ...member, keys: ['reviews.submit'] } : member)).rejects.toMatchObject({ code: 'access.key_requires' })
 		expect(await readFile(paths.file, 'utf8')).toBe(before)
 	})
 })
@@ -328,7 +328,7 @@ describe('a roster file edited by hand never grants more than the rules allow', 
 		await writeRoster(workspace, home, v2Roster(workspace, [v2Member('deviltea', 'human', presetKeys('owner')), v2Member('claude', 'agent', presetKeys('owner'))]))
 		const opened = AccessStore.open({ workspaceRoot: workspace, home })
 		await expect(opened).rejects.toMatchObject({ code: 'access.store_invalid' })
-		await expect(AccessStore.open({ workspaceRoot: workspace, home })).rejects.toThrow(/Agent member "claude" holds the humanOnly keys reviews\.resolve, decisions\.decide, checkpoints\.delete, locks\.force-release, presets\.manage, members\.manage/u)
+		await expect(AccessStore.open({ workspaceRoot: workspace, home })).rejects.toThrow(/Agent member "claude" holds the humanOnly keys reviews\.resolve, decisions\.decide, locks\.force-release, presets\.manage, members\.manage/u)
 	})
 
 	it('refuses malformed key lists at load: not key names, repeated keys, a missing list, or a version 2 member carrying only a role', async () => {
@@ -394,6 +394,31 @@ describe('a roster file edited by hand never grants more than the rules allow', 
 	})
 })
 
+describe('a roster that still holds a key Discussion #491 P1 removed (Rule 01a11c09-b7ec-786f-9723-eda32404d421)', () => {
+	const REMOVED = ['history.read', 'history.restore', 'checkpoints.create', 'checkpoints.delete']
+
+	it('keeps the removed keys as unknown keys that grant nothing and are never offered', () => {
+		for (const key of REMOVED) expect((PERMISSION_KEYS as readonly string[]).includes(key), key).toBe(false)
+		const held = v2Member('mei', 'human', ['workspace.read', 'reviews.write', ...REMOVED])
+		const principal = memberPrincipal(held, 'session', 'aaaaaaaaaa')
+		// Only the catalog keys take effect; the removed ones grant nothing.
+		expect(principal.keys).toEqual(['workspace.read', 'reviews.write'])
+		expect(effectiveKeys(principal)).toEqual(['workspace.read', 'reviews.write'])
+		for (const key of REMOVED) expect(BUILT_IN_ACCESS_PRESETS.some(preset => (preset.keys as readonly string[]).includes(key)), key).toBe(false)
+		// Held beside the Viewer keys they do not make a Viewer, and an Agent never gets a removed humanOnly key either.
+		expect(memberPrincipal(v2Member('viewer', 'human', [...presetKeys('viewer'), ...REMOVED]), 'session', 'aaaaaaaaaa').label).toEqual({ custom: true })
+		expect(memberPrincipal(v2Member('bot', 'agent', ['workspace.read', ...REMOVED]), 'token', 'aaaaaaaaaa').keys).toEqual(['workspace.read'])
+	})
+
+	it('keeps them through a write of the member\'s own keys, and refuses to grant one to anyone who does not hold it', () => {
+		const held = v2Member('mei', 'human', ['workspace.read', ...REMOVED])
+		const file = v2Roster('/work/design', [v2Member('deviltea', 'human', presetKeys('owner')), held])
+		expect(setMember(file, 'mei', { keys: ['reviews.write', 'workspace.read', 'history.read'] }).result.keys).toEqual(['workspace.read', 'reviews.write', 'history.read'])
+		expectAccessError(() => setMember(file, 'deviltea', { keys: [...presetKeys('owner'), 'history.read'] }), 'access.unknown_key', /`history\.read`/u)
+		expectAccessError(() => addMember(file, { nickname: 'rui', keys: ['workspace.read', 'checkpoints.create'] }), 'access.unknown_key', /`checkpoints\.create`/u)
+	})
+})
+
 describe('principals from stored keys', () => {
 	it('never gives a live Agent principal a humanOnly key, even from stored keys that list them', () => {
 		// Built by hand: the store refuses such a member at load, and the principal refuses it again.
@@ -410,9 +435,9 @@ describe('principals from stored keys', () => {
 	})
 
 	it('resolves exactly the stored catalog keys for a human member, labeled from them', () => {
-		const mei = v2Member('mei', 'human', ['workspace.read', 'reviews.write', 'checkpoints.delete'])
+		const mei = v2Member('mei', 'human', ['workspace.read', 'reviews.write', 'locks.force-release'])
 		const principal = memberPrincipal(mei, 'session', 'aaaaaaaaaa')
-		expect(principal.keys).toEqual(['workspace.read', 'reviews.write', 'checkpoints.delete'])
+		expect(principal.keys).toEqual(['workspace.read', 'reviews.write', 'locks.force-release'])
 		expect(principal.label).toEqual({ custom: true })
 		expect(memberPrincipal(v2Member('lead', 'human', presetKeys('owner')), 'session', 'aaaaaaaaaa').label).toEqual({ preset: { id: 'owner', name: 'Owner' } })
 	})
@@ -439,7 +464,7 @@ describe('labels from the built-in presets (below schemaVersion 6)', () => {
 		const presets = [
 			{ id: 'a', name: 'A', keys: ['workspace.read', 'future.capability'] },
 			{ id: 'b', name: 'B', keys: ['workspace.read', 'reviews.write', 'reviews.resolve'] },
-			{ id: 'c', name: 'C', keys: ['workspace.read', 'reviews.write', 'checkpoints.delete', 'history.read'] },
+			{ id: 'c', name: 'C', keys: ['workspace.read', 'reviews.write', 'locks.force-release', 'product-kit.source.read'] },
 			{ id: 'd', name: 'D', keys: ['workspace.read', 'reviews.write', 'members.manage'] },
 		]
 		expect(memberLabel({ kind: 'agent', keys: ['workspace.read', 'reviews.write'] }, presets)).toEqual({ preset: { id: 'b', name: 'B' } })

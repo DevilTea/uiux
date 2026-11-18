@@ -8,9 +8,5 @@
  *
  * The global default stays 5 s so every other suite still fails fast; only these suites opt in, and
  * 20 s is several times the observed worst case, so a real hang still fails.
- *
- * `history-restore.test.ts` uses it too: each test starts a history recorder, writes Checkpoints and
- * fsynced host versions and restores through the full write path (one also assesses Handoff
- * readiness), taking 0.7 to 2.5 s alone and about 5.5 s for the readiness test.
  */
 export const HEAVY_SERVER_SUITE_TIMEOUT_MS = 20_000

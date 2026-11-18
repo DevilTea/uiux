@@ -6,7 +6,7 @@ import {
 	type ProductKitDesignSystemProvenance,
 	type ProductKitProvenance,
 } from '../domain/product-kit/provenance'
-import { isRecord, type JsonObject } from '../domain/validation'
+import type { JsonObject } from '../domain/validation'
 import { parseKitBuildDeclaration } from './kit-build-declaration'
 import { KIT_PACKAGE_FILENAME } from './kit-dependencies'
 import { resolveKitPackage } from './kit-packages'
@@ -21,23 +21,12 @@ import {
 	type KitFileDigestOutcome,
 	type KitTreeScan,
 } from './kit-source-files'
-import { diagnostics } from '../logging/diagnostics'
 
 /**
  * The most kit files one digest of Product Kit provenance covers. A kit with more has no provenance
  * computed: a digest over part of the files would claim more than it covers.
  */
 export const MAX_PROVENANCE_FILES = 50_000
-
-/**
- * The longest a caller that holds the persistence lock (a version or Checkpoint record) waits for
- * the kit file digests: well below the observer hook bound (`OBSERVER_HOOK_TIMEOUT_MS`, 5 s), which
- * the rest of the record also needs. With the digests cached and the kit unchanged the wait is
- * a stat of each kit entry; a cold or much changed kit can take longer, and then the record goes
- * without `productKit`, with a log line ({@link provenanceBudgetMessage}), while the digests finish
- * outside the lock for the next record.
- */
-export const IN_LOCK_PROVENANCE_BUDGET_MS = 2_000
 
 /** How many kit files are digested at a time. */
 const HASH_CONCURRENCY = 8
@@ -248,101 +237,4 @@ async function designSystems(project: KitProject, names: unknown): Promise<Produ
 			: { package: name, linked: false })
 	}
 	return entries
-}
-
-/** The parts of the file-native persistence that Product Kit provenance reads. */
-export type ProductKitProvenanceSource = Readonly<{
-	root: string
-	layout: Readonly<{ productKitPath?: string; codeDir?: string }>
-	readOptionalBytesUnlocked(relativePath: string): Promise<Uint8Array | undefined>
-}>
-
-/** Where a caller that holds the persistence lock logs a record left without `productKit`. */
-export type ProvenanceLog = (message: string) => void
-
-/** What a caller that holds the persistence lock passes: the wait for the kit digests, and where a record left without them is logged. */
-export type InLockProvenanceOptions = Readonly<{
-	budgetMilliseconds?: number
-	/** One absolute deadline (`Date.now()` milliseconds, {@link inLockProvenanceDeadline}) shared by every in-lock step of one record; it replaces `budgetMilliseconds`. */
-	deadlineAt?: number
-	log?: ProvenanceLog
-}>
-
-/** The deadline of one record's in-lock provenance steps, `budgetMilliseconds` from now, shared so the steps never stack their budgets under the persistence lock. */
-export function inLockProvenanceDeadline(budgetMilliseconds: number = IN_LOCK_PROVENANCE_BUDGET_MS): number {
-	return Date.now() + budgetMilliseconds
-}
-
-/** What is left of the in-lock budget: until `deadlineAt` when one is shared, otherwise `budgetMilliseconds` or the default. */
-export function remainingInLockBudget(options: InLockProvenanceOptions, defaultMilliseconds: number = IN_LOCK_PROVENANCE_BUDGET_MS): number {
-	if (options.deadlineAt !== undefined) return Math.max(0, options.deadlineAt - Date.now())
-	return options.budgetMilliseconds ?? defaultMilliseconds
-}
-
-/** The log line of a record left without `productKit` because its digests outlasted the budget. It names no host path. */
-export function provenanceBudgetMessage(milliseconds: number): string {
-	return `uiux: the Product Kit provenance was not computed within ${milliseconds} ms under the persistence lock; this history record goes without productKit, and the kit digests finish outside the lock for the next record.`
-}
-
-export const EXPIRED: unique symbol = Symbol('expired')
-
-/** `work`'s result (`undefined` when it fails), or {@link EXPIRED} once `milliseconds` pass first; `work` then goes on, and a later failure of it is dropped. */
-export async function withinBudget<Result>(work: Promise<Result>, milliseconds: number): Promise<Result | undefined | typeof EXPIRED> {
-	let timer: ReturnType<typeof setTimeout> | undefined
-	const expired = new Promise<typeof EXPIRED>((resolve) => {
-		timer = setTimeout(resolve, milliseconds, EXPIRED)
-	})
-	try {
-		return await Promise.race([work.catch(() => undefined), expired])
-	}
-	finally {
-		clearTimeout(timer)
-	}
-}
-
-/**
- * The Product Kit provenance of the Workspace `persistence` selects, for a caller that holds its
- * persistence lock (a version or Checkpoint record): the Product Kit file read under that lock, and
- * the kit digests awaited for at most `budgetMilliseconds` ({@link IN_LOCK_PROVENANCE_BUDGET_MS}).
- * `undefined` when the Product Kit file is missing or not a JSON object, or when the provenance is not known within the budget. When the
- * budget runs out, `log` is told ({@link provenanceBudgetMessage}; `diagnostics.error` without one, as
- * the history recorder logs), so the missing `productKit` does not go unnoticed (issue #211).
- */
-export async function workspaceProductKitProvenanceUnlocked(persistence: ProductKitProvenanceSource, options: InLockProvenanceOptions = {}): Promise<ProductKitProvenance | undefined> {
-	const budgetMilliseconds = remainingInLockBudget(options)
-	const { productKitPath, codeDir } = persistence.layout
-	if (!productKitPath || !codeDir) return undefined
-	const bytes = await persistence.readOptionalBytesUnlocked(productKitPath)
-	if (!bytes) return undefined
-	let parsed: unknown
-	try {
-		parsed = JSON.parse(new TextDecoder().decode(bytes))
-	}
-	catch {
-		return undefined
-	}
-	if (!isRecord(parsed)) return undefined
-	// Only the kit (code, not canonical Workspace data) is read after this point, so a digest that
-	// outlasts the budget, and with it the lock, reads nothing the lock guards.
-	const provenance = await withinBudget(computeProductKitProvenance({ root: persistence.root, codeDirectoryName: codeDir, productKit: parsed as JsonObject }), budgetMilliseconds)
-	if (provenance !== EXPIRED) return provenance
-	const log = options.log ?? (message => diagnostics.error(message))
-	log(provenanceBudgetMessage(options.budgetMilliseconds ?? IN_LOCK_PROVENANCE_BUDGET_MS))
-	return undefined
-}
-
-/**
- * The `productKit` member of a version or Checkpoint record (Clause 01a11bb1-b6ae-7cf7-9838-
- * 9628757d1190), for a caller that holds the persistence lock: `{ productKit }`, or `{}` when the
- * Workspace has none or it cannot be computed within the budget, so recording a version never fails
- * or overstays the lock for it. A record left without it because the budget ran out is logged.
- */
-export async function productKitRecordFieldUnlocked(persistence: ProductKitProvenanceSource, options: InLockProvenanceOptions = {}): Promise<Readonly<{ productKit?: JsonObject }>> {
-	try {
-		const productKit = await workspaceProductKitProvenanceUnlocked(persistence, options)
-		return productKit ? { productKit: productKit as unknown as JsonObject } : {}
-	}
-	catch {
-		return {}
-	}
 }

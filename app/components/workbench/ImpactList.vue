@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from '#imports'
-import { useHistoryLabels } from '../../composables/useHistoryLabels'
-import { groupImpacts, shortId, type ImpactGroup, type ReceivedImpact } from '../../utils/version-restore'
+import { useChangeLabels } from '../../composables/useChangeLabels'
+import { groupImpacts, shortId, type ImpactGroup, type ReceivedImpact } from '../../utils/impact-list'
 
 /**
  * The impact list of a change that would leave references dangling, grouped as the confirmation
@@ -13,7 +13,7 @@ import { groupImpacts, shortId, type ImpactGroup, type ReceivedImpact } from '..
 const props = defineProps<{ impacts: readonly ReceivedImpact[] }>()
 
 const { t } = useI18n()
-const labels = useHistoryLabels()
+const labels = useChangeLabels()
 const groups = computed(() => groupImpacts(props.impacts))
 
 function viewName(id: unknown): string {

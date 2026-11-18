@@ -13,10 +13,9 @@
  *
  * `select` (run after authoring, with the server stopped) lists what to commit: every changed
  * canonical resource under `.uiux/`, and only the Evidence blobs that survive `uiux artifacts gc
- * --dry-run` with an empty `UIUX_HOME` against the worktree's `.uiux/` as it would be committed (its
- * `history/` replaced by the one in HEAD). It never selects `.uiux/history/**` (the worktree's
- * Baseline Checkpoint and host history), an unreferenced blob or `.uiux/kit/node_modules` (a symlink
- * to the repository's, which the `kit/node_modules/` ignore rule does not match), prints the exact `git add` list
+ * --dry-run` with an empty `UIUX_HOME` against the worktree's `.uiux/` as it would be committed. It never
+ * selects an unreferenced blob or `.uiux/kit/node_modules` (a symlink to the repository's, which the
+ * `kit/node_modules/` ignore rule does not match), prints the exact `git add` list
  * (and runs it with `--stage`), and changes nothing else.
  *
  * After a recapture it also lists the deletions of tracked blobs that the same gc dry-run would
@@ -37,7 +36,7 @@ import { dirname, join, relative, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
 import { fileURLToPath } from 'node:url'
 
-import { BLOB_DIR, DOGFOOD_DIR, GuardError, HISTORY_DIR, KIT_NODE_MODULES, blobPath, exportCommitted, git, isKitNodeModules, listGarbageBlobs, makeScratch } from './dogfood-guard.mjs'
+import { BLOB_DIR, DOGFOOD_DIR, GuardError, KIT_NODE_MODULES, blobPath, exportCommitted, git, isKitNodeModules, listGarbageBlobs, makeScratch } from './dogfood-guard.mjs'
 import { planSupersededCaptures } from './dogfood-superseded.mjs'
 
 const BLOB_PATH = /^\.uiux\/artifacts\/sha256\/[0-9a-f]{2}\/([0-9a-f]{64})$/
@@ -116,13 +115,13 @@ export function dogfoodStatus(repo) {
 /**
  * Builds in `destRoot` the `.uiux/` the worktree would commit: HEAD's, then the working-tree changes
  * in `entries` that would be staged (an added or changed file is copied, a deletion is removed).
- * History and a changed or deleted tracked blob keep HEAD's version.
+ * A changed or deleted tracked blob keeps HEAD's version.
  */
 function buildCommittable(repo, destRoot, entries) {
 	if (git(repo, ['ls-tree', '-r', '--name-only', 'HEAD', '--', DOGFOOD_DIR]).trim() !== '') exportCommitted(repo, 'HEAD', destRoot)
 	for (const { status, path } of entries) {
 		const isBlob = BLOB_PATH.test(path)
-		if (path.startsWith(`${HISTORY_DIR}/`) || (isBlob && status !== '??' && status !== 'A ')) continue
+		if (isBlob && status !== '??' && status !== 'A ') continue
 		const source = join(repo, path)
 		const target = join(destRoot, path)
 		if (!existsSync(source)) {
@@ -136,8 +135,8 @@ function buildCommittable(repo, destRoot, entries) {
 }
 
 /**
- * Classifies the changes under `.uiux/` for committing. Returns `{ add, history, kitNodeModules, collectable, damaged }`:
- * `add` the paths to stage (deletions included), `history` the skipped history paths, `kitNodeModules`
+ * Classifies the changes under `.uiux/` for committing. Returns `{ add, kitNodeModules, collectable, damaged }`:
+ * `add` the paths to stage (deletions included), `kitNodeModules`
  * the skipped `.uiux/kit/node_modules` paths, `collectable`
  * the skipped unreferenced new blobs, `damaged` the tracked blobs that were modified or deleted, and
  * `remove` the tracked blobs gc would collect from the as-committed tree (deletions to stage; a blob
@@ -152,15 +151,13 @@ export async function select(repo, { uiuxBin, readFreshness = defaultReadFreshne
 	const kitNodeModules = status.filter(({ path }) => isKitNodeModules(path)).map(({ path }) => path)
 	const entries = status.filter(({ path }) => !isKitNodeModules(path))
 	const add = []
-	const history = []
 	const damaged = []
 	const newBlobs = []
 	const trackedBlobs = new Set(git(repo, ['ls-tree', '-r', '--name-only', 'HEAD', '--', BLOB_DIR]).split('\n').filter(path => BLOB_PATH.test(path)))
 	const deleted = new Map()
 	for (const { status, path } of entries) {
 		const blob = BLOB_PATH.exec(path)
-		if (path.startsWith(`${HISTORY_DIR}/`)) history.push(path)
-		else if (blob && status.includes('D') && trackedBlobs.has(path)) deleted.set(path, status)
+		if (blob && status.includes('D') && trackedBlobs.has(path)) deleted.set(path, status)
 		else if (blob && status !== '??' && status !== 'A ') damaged.push(path)
 		else if (blob) newBlobs.push({ path, hex: blob[1] })
 		else add.push(path)
@@ -209,7 +206,7 @@ export async function select(repo, { uiuxBin, readFreshness = defaultReadFreshne
 		bytes: supersededPaths.bytes,
 		contexts: supersededPaths.contexts ?? 0,
 	}
-	return { add: [...add, ...blobs.map(blob => blob.path)].sort(), resources: add.length, blobs: blobs.length, history, kitNodeModules, collectable, damaged, remove, superseded }
+	return { add: [...add, ...blobs.map(blob => blob.path)].sort(), resources: add.length, blobs: blobs.length, kitNodeModules, collectable, damaged, remove, superseded }
 }
 
 /** The freshness of the formal captures of the Workspace at `root`, by the same judgement as `dogfood:check` (it serves a copy; the packaged server must be built). */
@@ -228,7 +225,6 @@ const shellQuote = path => `'${path.replaceAll('\'', '\'\\\'\'')}'`
 
 export function formatSelection(result) {
 	const lines = [`${result.add.length} path(s) to commit: ${result.resources} canonical resource change(s), ${result.blobs} Evidence blob(s) they reach.`]
-	if (result.history.length > 0) lines.push(`Skipped ${result.history.length} ${HISTORY_DIR}/ path(s): history and the Baseline Checkpoint are never committed.`)
 	if (result.kitNodeModules.length > 0) lines.push(`Skipped ${result.kitNodeModules.length} ${KIT_NODE_MODULES} path(s): a local link or install of the kit's dependencies is never committed (a symlink is not covered by the kit/node_modules/ ignore rule).`)
 	if (result.collectable.length > 0) lines.push(`Skipped ${result.collectable.length} new blob(s) that gc --dry-run (empty UIUX_HOME) would delete: no committed resource reaches them.`)
 	if (result.damaged.length > 0) {

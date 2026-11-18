@@ -2,7 +2,7 @@
 import { nextTick, useTemplateRef } from 'vue'
 import { useI18n } from '#imports'
 import KitButton from '~/components/kit/ui/Button.vue'
-import type { ReceivedImpact } from '../../utils/version-restore'
+import type { ReceivedImpact } from '../../utils/impact-list'
 import ImpactList from './ImpactList.vue'
 
 /**

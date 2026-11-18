@@ -1,4 +1,4 @@
-import type { ReceivedImpact } from './version-restore'
+import type { ReceivedImpact } from './impact-list'
 
 /**
  * What a write that may need the caller's acknowledgement of its reference impact answered (Clause

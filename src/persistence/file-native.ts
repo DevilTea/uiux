@@ -1,4 +1,3 @@
-import { AsyncLocalStorage } from 'node:async_hooks'
 import { createHash, randomUUID } from 'node:crypto'
 import { constants } from 'node:fs'
 import * as fs from 'node:fs/promises'
@@ -19,7 +18,6 @@ import { validateWorkspaceManifest, type WorkspaceManifest } from '../domain/wor
 import { currentBootId, isFromEarlierBoot, recordedOnAnotherHost } from './boot-staleness'
 import { PersistenceError } from './errors'
 import { readJudgedLock, removeJudgedLock, sweepLockLeftoversOccasionally, type JudgedLock } from './stale-lock'
-import { currentDesignWriteContext, type DesignWriteContext } from './history/write-context'
 import {
 	assetMetadataRelativePath,
 	assetDirectoryRelativePath,
@@ -64,60 +62,8 @@ export type FileNativePersistenceOptions = Readonly<{
 	schemaPolicy: WorkspaceSchemaPolicy
 	fault?: PersistenceFaultHook
 	lockWaitMilliseconds?: number
-	/** The history observer (recorder seam 6); it can also be attached later with `setWriteObserver`. */
-	writeObserver?: CanonicalWriteObserver
-	/** How long one observer hook may hold the lock before it is abandoned; defaults to {@link OBSERVER_HOOK_TIMEOUT_MS}. */
-	observerTimeoutMilliseconds?: number
 	/** The Workspace layout; omitted, it is {@link V5_LAYOUT}, the only one. */
 	layout?: WorkspaceLayout
-}>
-
-/** The revision of one versioned resource a design write is about to change (`null` when it does not exist yet). */
-export type CanonicalResourceBefore = Readonly<{ resource: VersionedResourceIdentity; revision: ResourceRevision | null }>
-
-/** One committed versioned file: `bytes` are exactly the bytes written, or `null` when the file was removed. */
-export type CanonicalFileChange = Readonly<{ path: string; bytes: Uint8Array | null }>
-
-/**
- * One versioned resource a committed design write changed. The revisions are the ones persistence
- * reports for the resource's files before and after the write (`null` when the resource did not
- * exist on that side); `files` lists only the files the write changed.
- */
-export type CanonicalResourceChange = Readonly<{
-	resource: VersionedResourceIdentity
-	beforeRevision: ResourceRevision | null
-	afterRevision: ResourceRevision | null
-	files: readonly CanonicalFileChange[]
-}>
-
-/**
- * Observer hooks the history recorder attaches to persistence. Both are called only while a
- * design-write context is set and only for writes that change versioned files (Review files are
- * not versioned, so Review writes never call them), always under the exclusive persistence lock:
- *
- * - `beforeCanonicalWrite` runs after every check of the write passed, before any byte changes,
- *   with the current revision of each versioned resource the write changes.
- * - `afterCanonicalCommit` runs once the write has committed (for multi-file writes, once the
- *   transaction journal is committed), with exactly the committed bytes. It runs only when
- *   `beforeCanonicalWrite` succeeded for the same write: a boundary the `before` hook failed to
- *   close must not receive the write's event, so the write stays unrecorded and flagged instead.
- *
- * A hook must not call this instance's `withLock` or `withReadLock` (that is refused); use the
- * `*Unlocked` helpers instead. Do not start a lock acquisition fire-and-forget inside a hook
- * either: it is refused too, and nothing observes the rejection. Defer such work until the hook
- * has returned (a timer), when the lock can be taken again. A hook failure never fails the write:
- * it is logged and sets `recordingGap`.
- *
- * `beforeCanonicalWrite` can run without a following `afterCanonicalCommit` when the write itself
- * then fails or decides not to write. Each hook may hold the lock for at most the observer timeout
- * ({@link OBSERVER_HOOK_TIMEOUT_MS} unless configured): a hook still running then is abandoned
- * (the write goes on and `recordingGap` is set) and keeps running without the lock: its `signal` is
- * aborted then, after which it must not read the Workspace or consume the gap, and an observer must
- * refuse to start new work until its abandoned work settles.
- */
-export type CanonicalWriteObserver = Readonly<{
-	beforeCanonicalWrite?(context: DesignWriteContext, resources: readonly CanonicalResourceBefore[], signal: AbortSignal): void | Promise<void>
-	afterCanonicalCommit?(context: DesignWriteContext, changes: readonly CanonicalResourceChange[], signal: AbortSignal): void | Promise<void>
 }>
 
 /**
@@ -135,16 +81,6 @@ export type CommittedResourceChange = Readonly<{ kind: string; key: string; revi
  * the write.
  */
 export type CanonicalCommitListener = (changes: readonly CommittedResourceChange[]) => void
-
-/**
- * The longest one observer hook may hold the exclusive lock (issue #132 B3, review finding L4).
- * A write runs at most two hooks, so a stalled history store adds at most 10 s to a write: two
- * thirds of the 15 s lock wait budget (`MAX_LOCK_WAIT_MS`), which leaves a writer queued behind it
- * time to get the lock instead of failing with `persistence.lock_busy`. A healthy hook (a journal
- * append, or a version write plus a rescan of the versioned files) takes milliseconds to a few
- * hundred milliseconds, far below the bound.
- */
-export const OBSERVER_HOOK_TIMEOUT_MS = 5_000
 
 export type InspectedResource<Resource> = Readonly<{
 	resource: Resource
@@ -279,32 +215,14 @@ export class FileNativePersistence {
 		this.locales = new LocaleFileRepository(this)
 		this.assets = new AuthoredAssetFileRepository(this)
 		this.artifacts = new ImmutableArtifactStore(this)
-		observerStates.set(this, { observer: options.writeObserver, recordingGap: false, timeoutMilliseconds: options.observerTimeoutMilliseconds ?? OBSERVER_HOOK_TIMEOUT_MS, commitListeners: new Set() })
-	}
-
-	/** Attaches (or with `undefined`, detaches) the history observer. */
-	setWriteObserver(observer: CanonicalWriteObserver | undefined): void {
-		observerState(this).observer = observer
+		commitListeners.set(this, new Set())
 	}
 
 	/** Adds a listener for committed canonical writes; returns its removal. */
 	onCanonicalCommit(listener: CanonicalCommitListener): () => void {
-		const listeners = observerState(this).commitListeners
+		const listeners = commitListenersOf(this)
 		listeners.add(listener)
 		return () => { listeners.delete(listener) }
-	}
-
-	/** True once an observer hook failed (or could not be prepared) since the flag was last consumed. */
-	get recordingGap(): boolean {
-		return observerState(this).recordingGap
-	}
-
-	/** Returns the recording-gap flag and clears it, so the next history boundary can record the gap once. */
-	consumeRecordingGap(): boolean {
-		const state = observerState(this)
-		const gap = state.recordingGap
-		state.recordingGap = false
-		return gap
 	}
 
 	/** Reports policy state without changing the Workspace or its authored files. */
@@ -381,7 +299,7 @@ export class FileNativePersistence {
 				{ path: reviewPath, bytes: serializedReview },
 				{ path: viewPath, bytes: serializedView },
 			]
-			// Only the View part is versioned; the observer never sees the Review file.
+			// One transaction commits the Review file and the View file together.
 			await commitCanonicalWrite(this, changes, () => this.applyFileTransaction(changes, 'decision-promotion'))
 
 			return {
@@ -397,7 +315,6 @@ export class FileNativePersistence {
 	 * processes. Waiting longer than the lock wait budget throws `persistence.lock_busy`.
 	 */
 	async withLock<Result>(operation: () => Promise<Result>): Promise<Result> {
-		assertOutsideObserver(this)
 		// Read before the wait budget starts: the first read of a process may take a moment.
 		const bootId = await currentBootId()
 		const deadline = Date.now() + this.lockWaitMilliseconds
@@ -425,7 +342,6 @@ export class FileNativePersistence {
 	 * new readers from joining, so writes are not starved. The operation must not write.
 	 */
 	async withReadLock<Result>(operation: () => Promise<Result>): Promise<Result> {
-		assertOutsideObserver(this)
 		// Read before the wait budget starts: the first read of a process may take a moment.
 		const bootId = await currentBootId()
 		const deadline = Date.now() + this.lockWaitMilliseconds
@@ -542,11 +458,6 @@ export class FileNativePersistence {
 			: []
 		const diagnostics = [...validationDiagnostics, ...extraDiagnostics]
 		return { resource: resource as WorkspaceManifest, revision: revisionForBytes(bytes), inspection, diagnostics }
-	}
-
-	/** The `workspaceSchemaVersion` of a history record taken from this Workspace now. */
-	async readRecordSchemaVersionUnlocked(): Promise<number> {
-		return this.readDecodeSchemaVersionUnlocked()
 	}
 
 	/**
@@ -1438,7 +1349,7 @@ export class WorkspaceFileRepository implements MutableResourceRepository<'works
 
 /**
  * The Product Kit file `product-kit.json` (Clause 01a11bb1-8e31-7b25-b6b8-da667b201670), one
- * single-file resource of kind and key `product-kit`. Writes are canonical design writes like the manifest's (versioned, observed by history); validating the content is the
+ * single-file resource of kind and key `product-kit`. Validating the content is the
  * authoring operation's job, as for the other repositories.
  */
 export class ProductKitFileRepository implements MutableResourceRepository<'product-kit', ProductKit> {
@@ -1500,7 +1411,7 @@ export class ProductKitFileRepository implements MutableResourceRepository<'prod
 /**
  * The Access presets file `access-presets.json` (Clause 01a11c09-a855-7d7e-93ec-cd9a85fdb65e), one
  * single-file resource of kind and key `access-presets`. Writes need the current schema like every
- * mutation, and are canonical design writes (versioned, observed by history). Reads report the file's diagnostics on
+ * mutation. Reads report the file's diagnostics on
  * disk (Rule 01a11c09-cb08-7007-bcdd-8a04e54d02b5); refusing a write is the authoring operation's job.
  */
 export class AccessPresetsFileRepository {
@@ -1792,7 +1703,7 @@ export class AuthoredAssetFileRepository implements MutableResourceRepository<st
 				{ path: metadataPath, bytes: candidate.metadataBytes },
 				{ path: `${directory}/${resource.metadata.contentFilename}`, bytes: resource.content },
 			]
-			// applyFileTransaction returns only once its journal is committed, so the observer sees a committed Asset.
+			// applyFileTransaction returns only once its journal is committed, so the commit listeners see a committed Asset.
 			await commitCanonicalWrite(this.persistence, changes, () => this.persistence.applyFileTransaction(changes, 'asset'))
 			return assetRevision(candidate.metadataBytes, [{ filename: resource.metadata.contentFilename, bytes: resource.content }])
 		})
@@ -2088,53 +1999,27 @@ export class ImmutableArtifactStore {
 	}
 }
 
-type ObserverState = { observer?: CanonicalWriteObserver; recordingGap: boolean; readonly timeoutMilliseconds: number; readonly commitListeners: Set<CanonicalCommitListener> }
+/** Per-instance commit listeners, private to this module so only `commitCanonicalWrite` calls them. */
+const commitListeners = new WeakMap<FileNativePersistence, Set<CanonicalCommitListener>>()
 
-/** Per-instance observer state, private to this module so only `commitCanonicalWrite` calls the hooks. */
-const observerStates = new WeakMap<FileNativePersistence, ObserverState>()
-/**
- * Marks the asynchronous call chain of a running observer hook, which must not re-enter the lock.
- * The mark is cleared when the hook settles, so work the hook schedules for later (a timer that
- * closes an idle autosave) inherits a cleared mark and may take the lock then.
- */
-const observerScope = new AsyncLocalStorage<{ running: boolean; persistence: FileNativePersistence }>()
-
-function observerState(persistence: FileNativePersistence): ObserverState {
-	const state = observerStates.get(persistence)
-	if (!state) throw new TypeError('FileNativePersistence observer state is missing.')
-	return state
+function commitListenersOf(persistence: FileNativePersistence): Set<CanonicalCommitListener> {
+	const listeners = commitListeners.get(persistence)
+	if (!listeners) throw new TypeError('FileNativePersistence commit listeners are missing.')
+	return listeners
 }
 
-/** Refuses only re-entry into the instance whose hook is running; other instances lock as usual. */
-function assertOutsideObserver(persistence: FileNativePersistence): void {
-	const mark = observerScope.getStore()
-	if (mark?.running && mark.persistence === persistence)
-		throw new PersistenceError('persistence.lock_busy', 'A history observer hook runs under the exclusive persistence lock and cannot take it again; use the *Unlocked helpers.')
-}
-
-type ResourceFilesBefore = Readonly<{ resource: VersionedResourceIdentity; files: Map<string, Uint8Array>; changes: FileChange[] }>
-
 /**
- * The one funnel every canonical design write commits through (Clause and Rule references in
- * `CanonicalWriteObserver`). `changes` are the files `write` changes; `write` resolves `false`
- * when it decided not to write after all (a lost create race). Only versioned files count: with
- * no design-write context, no observer, or no versioned file among `changes`, this is exactly
- * `write()`. Otherwise the resources' files are read first, `beforeCanonicalWrite` runs, then the
- * write, then (when the `before` hook succeeded) `afterCanonicalCommit` with the committed bytes.
- * Observer failures never fail the write; they set `recordingGap`. Called with the exclusive
+ * The one funnel every canonical write commits through. `changes` are the files `write` changes;
+ * `write` resolves `false` when it decided not to write after all (a lost create race). Once it
+ * has written, the commit listeners hear which resources changed. Called with the exclusive
  * persistence lock held.
- *
- * When the resources cannot be read first, neither hook runs and the gap is flagged only once the
- * write is done: a `before` hook that closed an autosave at that point would consume the flag
- * before the change it stands for exists, attributing the missed write to the previous boundary
- * instead of the next one (Rule 01a11a5e-03c9-745e-b23a-bb06b600377d).
  */
 async function commitCanonicalWrite<Written extends boolean | void>(
 	persistence: FileNativePersistence,
 	changes: readonly FileChange[],
 	write: () => Promise<Written>,
 ): Promise<Written> {
-	const written = await commitObservedWrite(persistence, changes, write)
+	const written = await write()
 	if (written !== false) await notifyCommitListeners(persistence, changes)
 	return written
 }
@@ -2145,7 +2030,7 @@ async function commitCanonicalWrite<Written extends boolean | void>(
  * directory, so it is read back (still under the lock) only when someone listens.
  */
 async function notifyCommitListeners(persistence: FileNativePersistence, changes: readonly FileChange[]): Promise<void> {
-	const listeners = observerState(persistence).commitListeners
+	const listeners = commitListenersOf(persistence)
 	if (listeners.size === 0) return
 	const committed: CommittedResourceChange[] = []
 	try {
@@ -2173,55 +2058,6 @@ async function notifyCommitListeners(persistence: FileNativePersistence, changes
 	}
 }
 
-/** The history observer's part of {@link commitCanonicalWrite}. */
-async function commitObservedWrite<Written extends boolean | void>(
-	persistence: FileNativePersistence,
-	changes: readonly FileChange[],
-	write: () => Promise<Written>,
-): Promise<Written> {
-	const state = observerState(persistence)
-	const observer = state.observer
-	const context = observer ? currentDesignWriteContext() : undefined
-	const versioned = observer && context ? changes.filter(change => persistence.layout.classifyVersionedPath(change.path)) : []
-	if (!observer || !context || versioned.length === 0) return write()
-	let before: readonly ResourceFilesBefore[]
-	try {
-		before = await readResourceFilesBeforeWrite(persistence, versioned)
-	}
-	catch (error) {
-		try {
-			return await write()
-		}
-		finally {
-			reportObserverFailure(state, 'could not read the resources before a design write', error)
-		}
-	}
-	const ready = await invokeObserver(persistence, state, 'beforeCanonicalWrite', async signal => observer.beforeCanonicalWrite?.(context, before.map(resourceBeforeWrite), signal))
-	const written = await write()
-	if (written === false || !ready) return written
-	await invokeObserver(persistence, state, 'afterCanonicalCommit', async signal => observer.afterCanonicalCommit?.(context, before.map(resourceChangeAfterCommit), signal))
-	return written
-}
-
-function resourceBeforeWrite(entry: ResourceFilesBefore): CanonicalResourceBefore {
-	return { resource: entry.resource, revision: revisionForResourceFiles(entry.resource.kind, entry.files) ?? null }
-}
-
-async function readResourceFilesBeforeWrite(persistence: FileNativePersistence, changes: readonly FileChange[]): Promise<readonly ResourceFilesBefore[]> {
-	const byResource = new Map<string, ResourceFilesBefore>()
-	for (const change of changes) {
-		const resource = persistence.layout.classifyVersionedPath(change.path)!
-		const identity = `${resource.kind}\0${resource.key}`
-		let entry = byResource.get(identity)
-		if (!entry) {
-			entry = { resource, files: await readVersionedResourceFilesUnlocked(persistence, resource, change.path), changes: [] }
-			byResource.set(identity, entry)
-		}
-		entry.changes.push(change)
-	}
-	return [...byResource.values()].sort((left, right) => compareCodeUnits(left.resource.kind, right.resource.kind) || compareCodeUnits(left.resource.key, right.resource.key))
-}
-
 /** Every current file of one versioned resource: an Asset's whole directory, otherwise its one file. */
 async function readVersionedResourceFilesUnlocked(persistence: FileNativePersistence, resource: VersionedResourceIdentity, path: string): Promise<Map<string, Uint8Array>> {
 	const files = new Map<string, Uint8Array>()
@@ -2244,63 +2080,6 @@ async function readVersionedResourceFilesUnlocked(persistence: FileNativePersist
 			files.set(relativePath, Uint8Array.from(await persistence.readBytesUnlocked(relativePath)))
 	}
 	return files
-}
-
-function resourceChangeAfterCommit(entry: ResourceFilesBefore): CanonicalResourceChange {
-	const after = new Map(entry.files)
-	const files: CanonicalFileChange[] = []
-	for (const change of [...entry.changes].sort((left, right) => compareCodeUnits(left.path, right.path))) {
-		if (change.bytes === undefined) after.delete(change.path)
-		else after.set(change.path, change.bytes)
-		files.push({ path: change.path, bytes: change.bytes === undefined ? null : Uint8Array.from(change.bytes) })
-	}
-	return {
-		resource: entry.resource,
-		beforeRevision: revisionForResourceFiles(entry.resource.kind, entry.files) ?? null,
-		afterRevision: revisionForResourceFiles(entry.resource.kind, after) ?? null,
-		files,
-	}
-}
-
-/**
- * Runs one hook under the observer mark and the observer timeout; true when it settled in time
- * without throwing. A hook still running at the timeout is abandoned: its signal is aborted (it no
- * longer holds the lock, so it must not read the Workspace or consume the gap), the write goes on,
- * the gap is flagged, and a later rejection of the abandoned hook is only logged.
- */
-async function invokeObserver(persistence: FileNativePersistence, state: ObserverState, hook: keyof CanonicalWriteObserver, call: (signal: AbortSignal) => Promise<unknown>): Promise<boolean> {
-	const mark = { running: true, persistence }
-	const abandon = new AbortController()
-	let timer: ReturnType<typeof setTimeout> | undefined
-	try {
-		const pending = observerScope.run(mark, () => call(abandon.signal))
-		const timedOut = new Promise<'timeout'>((resolve) => {
-			timer = setTimeout(resolve, state.timeoutMilliseconds, 'timeout')
-			timer.unref?.()
-		})
-		if (await Promise.race([pending.then(() => 'settled' as const), timedOut]) === 'timeout') {
-			abandon.abort()
-			pending.catch((error: unknown) => diagnostics.error(`uiux: abandoned history ${hook} failed later: ${error instanceof Error ? error.message : String(error)}`))
-			reportObserverFailure(state, `${hook} did not finish within ${state.timeoutMilliseconds} ms and was abandoned`, undefined)
-			return false
-		}
-		return true
-	}
-	catch (error) {
-		reportObserverFailure(state, `${hook} failed`, error)
-		return false
-	}
-	finally {
-		clearTimeout(timer)
-		mark.running = false
-	}
-}
-
-/** Rule 01a11a5e-036d-7955-aa27-4ec036b55938: the write stands, the failure is logged and flagged. */
-function reportObserverFailure(state: ObserverState, what: string, error: unknown): void {
-	state.recordingGap = true
-	const detail = error === undefined ? '' : `: ${error instanceof Error ? error.message : String(error)}`
-	diagnostics.error(`uiux: history ${what}; the write was kept and the gap is recorded at the next history boundary${detail}`)
 }
 
 function compareCodeUnits(left: string, right: string): number {

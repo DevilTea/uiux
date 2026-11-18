@@ -20,7 +20,6 @@ import {
 	ACCESS_OPERATIONS,
 	authorizeLeaseAcquire,
 	authorizeOperation,
-	authorizeRestore,
 	effectiveKeys,
 	type AccessOperation,
 	type ScopeDenied,
@@ -28,7 +27,6 @@ import {
 import { MEMBER_KINDS, principalActor, type MemberPrincipal, type Principal, type SystemPrincipal } from '../src/application/access/principal'
 import { resolutionRefusal } from '../src/application/access/scoped-session'
 import { uiuxMcpInstructions } from '../src/mcp/server'
-import { RESTORABLE_RESOURCE_KINDS } from '../src/domain/history/constants'
 import type { ViewSpecContent } from '../src/application/services/view-authoring'
 import { createWorkspaceApplicationSession } from '../src/application/services/workspace-session'
 import { FileNativePersistence } from '../src/persistence'
@@ -119,10 +117,10 @@ const ROLE_MATRIX: Readonly<Record<AccessOperation, Readonly<{ min: AccessRole; 
 	listViewThumbnails: { min: 'viewer' },
 	requestViewThumbnails: { min: 'viewer' },
 	readAccessPresets: { min: 'viewer' },
-	diffVersions: { min: 'viewer' },
-	listVersions: { min: 'viewer' },
-	readVersion: { min: 'viewer' },
-	readVersionForPreview: { min: 'viewer' },
+	// Added with the read-only changes view (Feature 01a1ece7-8d4e-763c-8897-2c35ef129a4d): `workspace.read`, and no system credential.
+	listChanges: { min: 'viewer' },
+	readChangeDiff: { min: 'viewer' },
+	readChangeBlob: { min: 'viewer' },
 	readSession: { min: 'viewer', S: true },
 	endSession: { min: 'viewer', S: true },
 	createReviewThread: { min: 'reviewer' },
@@ -140,7 +138,6 @@ const ROLE_MATRIX: Readonly<Record<AccessOperation, Readonly<{ min: AccessRole; 
 	editReviewMessage: { min: 'reviewer' },
 	retractReviewThread: { min: 'reviewer' },
 	resolveReviewThread: { min: 'reviewer', H: true, S: true },
-	createCheckpoint: { min: 'reviewer' },
 	createView: { min: 'editor' },
 	updateViewSpec: { min: 'editor' },
 	updateViewStructure: { min: 'editor' },
@@ -171,11 +168,9 @@ const ROLE_MATRIX: Readonly<Record<AccessOperation, Readonly<{ min: AccessRole; 
 	// Added with the Product Kit Checks (issue #141 Part 14): `evidence.capture`, Workbench sessions only.
 	runProductKitChecks: { min: 'editor', S: true },
 	exportHandoff: { min: 'editor' },
-	restoreResourceVersion: { min: 'editor' },
 	acquireLeases: { min: 'editor' },
 	releaseLeases: { min: 'editor' },
 	forceReleaseLease: { min: 'owner', H: true, S: true },
-	deleteCheckpoint: { min: 'owner', H: true, S: true },
 	administerAccess: { min: 'owner', H: true, S: true },
 	updateAccessPresets: { min: 'owner', H: true, S: true },
 }
@@ -188,20 +183,16 @@ function roleMatrixAllows(principal: Principal, operation: AccessOperation): boo
 }
 
 /**
- * One authorization request: the operation, whose role-matrix decision is the baseline (a restore
- * was also checked against the authoring operation of the restored kind, which needed Editor too),
- * and the key decision.
+ * One authorization request: the operation, whose role-matrix decision is the baseline, and the key
+ * decision.
  */
 type ParityCase = Readonly<{ label: string; operation: AccessOperation; decide: (principal: Principal) => ScopeDenied | undefined }>
-
-const RESTORABLE_KINDS = ['view', 'flow', 'locale', 'asset', 'workspace', 'product-kit'] as const
 
 const PARITY_CASES: readonly ParityCase[] = [
 	// An acquire always names at least one resource, so it is decided per requested kind below.
 	...(Object.keys(ACCESS_OPERATIONS) as AccessOperation[]).filter(operation => operation !== 'acquireLeases').map(operation => ({ label: operation, operation, decide: (principal: Principal) => authorizeOperation(principal, operation) })),
 	...LOCKABLE_KINDS.map(kind => ({ label: `acquireLeases(${kind})`, operation: 'acquireLeases' as const, decide: (principal: Principal) => authorizeLeaseAcquire(principal, [kind]) })),
 	{ label: 'acquireLeases(every kind)', operation: 'acquireLeases', decide: principal => authorizeLeaseAcquire(principal, LOCKABLE_KINDS) },
-	...RESTORABLE_KINDS.map(kind => ({ label: `restoreResourceVersion(${kind})`, operation: 'restoreResourceVersion' as const, decide: (principal: Principal) => authorizeRestore(principal, kind) })),
 ]
 
 /**
@@ -229,8 +220,8 @@ describe('parity: role-derived keys decide as the role matrix did', () => {
 				if ((denied === undefined) !== before) changed.push(`${id}: ${before ? 'allowed' : 'refused'} → ${denied ? 'refused' : 'allowed'}`)
 			}
 		}
-		// 70 operations, 7 lease acquires and 6 restores, for 16 members and the system credential.
-		expect(compared).toBe(83 * 17)
+		// The operations and 7 lease acquires, for 16 members and the system credential.
+		expect(compared).toBe((Object.keys(ACCESS_OPERATIONS).length - 1 + 7) * 17)
 		expect(changed.sort()).toEqual([...INTENDED_CHANGES].sort())
 	})
 
@@ -256,17 +247,16 @@ describe('parity: role-derived keys decide as the role matrix did', () => {
  * built-in Access presets in order, each with the keys it adds to the one before it.
  */
 const PRESET_STEPS: readonly Readonly<{ id: AccessRole; name: string; adds: readonly string[] }>[] = [
-	{ id: 'viewer', name: 'Viewer', adds: ['workspace.read', 'history.read', 'product-kit.source.read'] },
-	{ id: 'reviewer', name: 'Reviewer', adds: ['reviews.write', 'reviews.submit', 'reviews.promote', 'reviews.resolve', 'checkpoints.create'] },
-	{ id: 'editor', name: 'Editor', adds: ['views.write', 'flows.write', 'locales.write', 'assets.write', 'settings.write', 'product-kit.write', 'product-kit.compose', 'evidence.capture', 'handoff.export', 'history.restore'] },
-	{ id: 'owner', name: 'Owner', adds: ['decisions.decide', 'checkpoints.delete', 'locks.force-release', 'presets.manage', 'members.manage'] },
+	{ id: 'viewer', name: 'Viewer', adds: ['workspace.read', 'product-kit.source.read'] },
+	{ id: 'reviewer', name: 'Reviewer', adds: ['reviews.write', 'reviews.submit', 'reviews.promote', 'reviews.resolve'] },
+	{ id: 'editor', name: 'Editor', adds: ['views.write', 'flows.write', 'locales.write', 'assets.write', 'settings.write', 'product-kit.write', 'product-kit.compose', 'evidence.capture', 'handoff.export'] },
+	{ id: 'owner', name: 'Owner', adds: ['decisions.decide', 'locks.force-release', 'presets.manage', 'members.manage'] },
 ]
 
 describe('the permission key catalog (Clauses 01a11c09-a26e, 01a11c09-a200, 01a11c09-a2db, 01a11c09-a930, 01a11c09-a42a)', () => {
 	it('records the catalog in order, with its humanOnly keys', () => {
 		expect(PERMISSION_KEYS).toEqual([
 			'workspace.read',
-			'history.read',
 			'product-kit.source.read',
 			'reviews.write',
 			'reviews.submit',
@@ -282,14 +272,11 @@ describe('the permission key catalog (Clauses 01a11c09-a26e, 01a11c09-a200, 01a1
 			'product-kit.compose',
 			'evidence.capture',
 			'handoff.export',
-			'checkpoints.create',
-			'history.restore',
-			'checkpoints.delete',
 			'locks.force-release',
 			'presets.manage',
 			'members.manage',
 		])
-		expect(HUMAN_ONLY_PERMISSION_KEYS).toEqual(['reviews.resolve', 'decisions.decide', 'checkpoints.delete', 'locks.force-release', 'presets.manage', 'members.manage'])
+		expect(HUMAN_ONLY_PERMISSION_KEYS).toEqual(['reviews.resolve', 'decisions.decide', 'locks.force-release', 'presets.manage', 'members.manage'])
 	})
 
 	it('accepts only `<domain>.<capability>` key names, every segment starting with a lowercase letter', () => {
@@ -304,7 +291,6 @@ describe('the permission key catalog (Clauses 01a11c09-a26e, 01a11c09-a200, 01a1
 		const requirements = Object.fromEntries(PERMISSION_KEYS.map(key => [key, keyRequirements(key)]))
 		expect(requirements).toEqual({
 			'workspace.read': [],
-			'history.read': ['workspace.read'],
 			'product-kit.source.read': ['workspace.read'],
 			'reviews.write': ['workspace.read'],
 			'reviews.submit': ['reviews.write'],
@@ -320,9 +306,6 @@ describe('the permission key catalog (Clauses 01a11c09-a26e, 01a11c09-a200, 01a1
 			'product-kit.compose': ['product-kit.write'],
 			'evidence.capture': ['workspace.read'],
 			'handoff.export': ['workspace.read'],
-			'checkpoints.create': ['history.read'],
-			'history.restore': ['history.read'],
-			'checkpoints.delete': ['history.read'],
 			'locks.force-release': ['workspace.read'],
 			'presets.manage': ['workspace.read'],
 			'members.manage': ['workspace.read'],
@@ -379,9 +362,7 @@ describe('authorization by permission keys', () => {
 		expect(authorizeLeaseAcquire(owner, [])).toMatchObject({ code: 'auth.scope_denied', requiredKeys: [] })
 		expect(authorizeLeaseAcquire(owner, ['view', 'review'])).toMatchObject({ code: 'auth.scope_denied', requiredKeys: [] })
 		expect(authorizeLeaseAcquire(owner, ['view'])).toBeUndefined()
-		for (const kind of ['review', '', '__proto__']) expect(authorizeRestore(owner, kind), kind).toMatchObject({ code: 'auth.scope_denied', requiredKeys: [] })
-		// Every kind a restore can write has a write key.
-		for (const kind of RESTORABLE_RESOURCE_KINDS) expect(writeKeyForKind(kind), kind).toBeDefined()
+		for (const kind of ['review', '', '__proto__']) expect(writeKeyForKind(kind), kind).toBeUndefined()
 	})
 
 	it('checks only the operation\'s own keys: no key implies another', () => {
@@ -393,7 +374,7 @@ describe('authorization by permission keys', () => {
 	})
 
 	it('names every missing key in catalog order', () => {
-		expect(authorizeRestore(member(['workspace.read']), 'view')).toMatchObject({ code: 'auth.scope_denied', requiredKeys: ['views.write', 'history.restore'] })
+		expect(authorizeLeaseAcquire(member(['workspace.read']), ['view', 'flow'])).toMatchObject({ code: 'auth.scope_denied', requiredKeys: ['views.write', 'flows.write'] })
 		expect(authorizeLeaseAcquire(member(['locales.write']), ['view', 'locale', 'flow', 'view'])).toMatchObject({ requiredKeys: ['views.write', 'flows.write'] })
 	})
 
@@ -423,13 +404,12 @@ describe('authorization by permission keys', () => {
 		}
 	})
 
-	it('gives the system credential no key and only its allowlist (Clauses 01a114ec-ea96, 01a11c09-a3bb, 01a11485-f978)', () => {
+	it('gives the system credential no key and only its allowlist (Clauses 01a114ec-ea96 and 01a11c09-a3bb)', () => {
 		expect(effectiveKeys(CAPTURE)).toEqual([])
 		const allowed = (Object.keys(ACCESS_OPERATIONS) as AccessOperation[]).filter(operation => authorizeOperation(CAPTURE, operation) === undefined)
 		expect(allowed.sort()).toEqual(['listEvidence', 'listPointResources', 'readArtifact', 'readAssetContent', 'readPointResource', 'readPreview', 'searchPointResources'])
-		for (const operation of ['diffVersions', 'listVersions', 'readVersion', 'readVersionForPreview', 'createCheckpoint', 'deleteCheckpoint'] as const)
+		for (const operation of ['listChanges', 'readChangeDiff', 'readChangeBlob'] as const)
 			expect(authorizeOperation(CAPTURE, operation), operation).toMatchObject({ code: 'auth.scope_denied', requiredKeys: ACCESS_OPERATIONS[operation].requiredKeys })
-		expect(authorizeRestore(CAPTURE, 'view')).toMatchObject({ code: 'auth.scope_denied' })
 		expect(authorizeLeaseAcquire(CAPTURE, ['view'])).toMatchObject({ code: 'auth.scope_denied' })
 	})
 

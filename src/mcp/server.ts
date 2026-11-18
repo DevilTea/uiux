@@ -12,11 +12,8 @@ import { LOCKABLE_KINDS, MAX_ACQUIRE_RESOURCES, type LeaseManager } from '../app
 import { memberLabelName } from '../application/access/labels'
 import type { Principal } from '../application/access/principal'
 import { effectiveKeys } from '../application/access/policy'
-import { createScopedWorkspaceSession, type ScopedSessionOptions, type ScopedWorkspaceSession } from '../application/access/scoped-session'
+import { createScopedWorkspaceSession, type ScopedWorkspaceSession } from '../application/access/scoped-session'
 import type { ViewSpecContent } from '../application/services/view-authoring'
-import { VERSION_DIFF_DETAILS } from '../application/services/history-diff'
-import { DEFAULT_VERSION_LIST_LIMIT, MAX_VERSION_LIST_LIMIT } from '../application/services/history-service'
-import { HISTORY_VERSION_TYPES } from '../domain/history/constants'
 import type { ViewResource } from '../domain/views/schema'
 import type { FlowStep } from '../domain/flows/schema'
 import { REVIEW_RESOLUTIONS, type ReviewAnchor, type ReviewDisplayHint, type ReviewEvidenceRef, type ReviewRenderContext, type ReviewResourceRevision } from '../domain/reviews/schema'
@@ -24,8 +21,7 @@ import { CHANGE_DOMAINS } from '../domain/reviews/change-domains'
 import type { ThemeEntry, ViewportPreset } from '../domain/workspace/schema'
 import type { RequirementsSetting } from '../domain/requirements/schema'
 import type { ProductKitComponent, ProductKitWidgetMapping } from '../domain/product-kit/schema'
-import { ACCESS_PRESETS_RESOURCE_KIND } from '../domain/access-presets/schema'
-import { isFullUuid, isSha256Digest, type JsonObject, type JsonValue } from '../domain/validation'
+import { isSha256Digest, type JsonObject, type JsonValue } from '../domain/validation'
 import type { ResolvedRenderContext } from '../domain/render-context/schema'
 import type { HandoffRoot } from '../domain/handoff/schema'
 import { isPersistenceBusyError, persistenceBusyResult } from '../persistence/busy'
@@ -82,7 +78,7 @@ const updateViewSpecSchema = z.object({
 	spec: viewSpecContentSchema,
 }).strict()
 
-// Clause 01a172ce-bdef-7cf6-bf8c-770dc9dd5e34: restore-shaped acknowledgement of the reference impact.
+// Clause 01a172ce-bdef-7cf6-bf8c-770dc9dd5e34: the acknowledgement of the reference impact.
 const ACKNOWLEDGE_IMPACT_DESCRIPTION = 'Set true to write after reviewing the impacts an earlier call returned with impact_acknowledgement_required.'
 
 const updateViewStructureSchema = z.object({
@@ -499,50 +495,6 @@ const exportHandoffSchema = z.object({
 	roots: z.array(handoffRootSchema).min(1),
 }).strict()
 
-// Clause 01a11a5e-2710-70b7-b63b-82f27236b1cd.
-const getVersionDiffSchema = z.object({
-	from: z.string().describe('The ID of the version to compare from.'),
-	to: z.string().optional().describe('A version ID, or "current" for the Workspace\'s current files (the default).'),
-	resources: z.array(z.object({
-		kind: z.string().min(1),
-		key: z.string().min(1),
-	}).strict()).optional().describe('Compare only these resources, each { kind, key } such as { kind: "view", key: <View ID> } or { kind: "workspace", key: "workspace" }; omit to compare every resource.'),
-	detail: z.enum(VERSION_DIFF_DETAILS).optional().describe('"summary" (the default) for per-resource statuses only, or "semantic" to add the semantic changes.'),
-}).strict()
-
-// Clause 01a11a5e-265d-7f71-80a3-5dae7f788ae1.
-const createCheckpointSchema = z.object({
-	name: z.string().describe('A descriptive name, 1 to 120 characters after trimming (stored trimmed). Names need not be unique.'),
-	note: z.string().optional().describe('Optional plain-text note of at most 2,000 characters.'),
-}).strict()
-
-// Clause 01a11a5e-26b9-7dfd-b619-a7e4113809f5.
-const listVersionsSchema = z.object({
-	resource: z.object({
-		kind: z.string().min(1),
-		key: z.string().min(1),
-	}).strict().optional().describe('List only the versions in which this resource changed, such as { kind: "view", key: <View ID> } or { kind: "workspace", key: "workspace" }.'),
-	types: z.array(z.enum(HISTORY_VERSION_TYPES)).min(1).optional().describe('List only these version types.'),
-	limit: z.number().int().min(1).max(MAX_VERSION_LIST_LIMIT).optional().describe(`Page size, 1 to ${MAX_VERSION_LIST_LIMIT} (default ${DEFAULT_VERSION_LIST_LIMIT}).`),
-	cursor: z.string().min(1).optional().describe('The nextCursor of the previous page.'),
-}).strict()
-
-// Clause 01a11a5e-2768-76ad-b02a-e15f50f91268.
-const restoreResourceVersionSchema = z.object({
-	versionId: z.string().describe('The ID of the version to restore the resource from.'),
-	resource: z.object({
-		kind: z.string().min(1),
-		key: z.string().min(1),
-	}).strict().describe('The one resource to restore: { kind: "view" | "flow" | "locale" | "asset", key } or { kind: "workspace", key: "workspace" } for the Workspace settings, or { kind: "product-kit", key: "product-kit" } for the Product Kit.'),
-	expectedRevision: z.string().min(1).nullable().describe('The resource\'s current revision, as read now (not the version\'s). Use null to re-create a resource that no longer exists; null requires that it not exist.'),
-	acknowledgeImpact: z.boolean().optional().describe('Set true to write after reviewing the impacts an earlier call returned with impact_acknowledgement_required.'),
-}).strict()
-
-/** The URI of the read-only version Resource (Clause 01a11a5e-27c1-77d1-b60d-45a5ccfc1ee7 leaves its grammar to the implementation). */
-export function versionResourceUri(id: string): string {
-	return `uiux://version/${encodeURIComponent(id)}`
-}
-
 const leaseResourcesSchema = z.array(z.object({
 	kind: z.enum(LOCKABLE_KINDS),
 	key: z.string().min(1),
@@ -564,14 +516,8 @@ export function uiuxMcpInstructions(principal: Principal): string {
 	const identity = principal.type === 'member'
 		? `Authenticated as ${principal.nickname} (${principal.kind}, ${memberLabelName(principal.label)}). Your effective permission keys: ${keys.length > 0 ? keys.join(', ') : 'none'}.`
 		: `Authenticated as ${principal.id}.`
-	return `${identity} Actors and times on Review records are stamped by the server from this identity; do not send actor or at. Tools your permission keys do not allow refuse with auth.scope_denied naming the missing keys (requiredKeys). Resolving Review threads is human-only, in the UIUX Workbench. You may edit your own Review messages (until a later submission or resolution) and retract your own brand-new threads nobody has engaged with. ${LEASE_RECIPE} ${CHECKPOINT_RECOMMENDATION}`
+	return `${identity} Actors and times on Review records are stamped by the server from this identity; do not send actor or at. Tools your permission keys do not allow refuse with auth.scope_denied naming the missing keys (requiredKeys). Resolving Review threads is human-only, in the UIUX Workbench. You may edit your own Review messages (until a later submission or resolution) and retract your own brand-new threads nobody has engaged with. ${LEASE_RECIPE}`
 }
-
-/**
- * Clause 01a11a5e-2821-7d36-baea-66507ff1f399, verbatim. Advice only (Rule
- * 01a11a5e-1ca3-740d-8235-01106d8ffc25): no Tool requires a Checkpoint before `release_lock`.
- */
-export const CHECKPOINT_RECOMMENDATION = 'When you finish a meaningful task that changed design resources, call `create_checkpoint` with a descriptive name, then `release_lock`.'
 
 export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 	const server = mapPersistenceBusy(new McpServer({ name: '@deviltea/uiux', version: packageJson.version }, { instructions: uiuxMcpInstructions(app.principal) }))
@@ -669,23 +615,6 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 					contents: [{ uri: uri.href, mimeType: 'application/octet-stream', blob: Buffer.from(bytes).toString('base64') }],
 				}
 			}
-		},
-	)
-
-	// Clause 01a11a5e-27c1-77d1-b60d-45a5ccfc1ee7: each version is a read-only Resource holding its
-	// record (its file map and, for an autosave, external or system version, its events). `parent` is
-	// its predecessor on the merged timeline, as in list_versions.
-	server.registerResource(
-		'version',
-		new ResourceTemplate('uiux://version/{id}', { list: undefined }),
-		{ title: 'UIUX Workspace version (read-only)', mimeType: 'application/json' },
-		async (uri, { id }) => {
-			const idStr = typeof id === 'string' ? decodeURIComponent(id) : String(id)
-			if (!isFullUuid(idStr)) throw new ProtocolError(ProtocolErrorCode.InvalidParams, `Invalid version ID: ${idStr}`)
-			const outcome = await app.readVersion(idStr)
-			if (outcome.status === 'not_found') throw new ResourceNotFoundError(uri.href, `UIUX version not found: ${idStr}`)
-			if (outcome.status !== 'found') throw new ProtocolError(ProtocolErrorCode.InternalError, `${outcome.code}: ${outcome.message}`, outcome)
-			return { contents: [{ uri: uri.href, mimeType: 'application/json', text: JSON.stringify(outcome) }] }
 		},
 	)
 
@@ -1442,108 +1371,6 @@ export function createUiuxMcpServer(app: ScopedWorkspaceSession): McpServer {
 	)
 
 	server.registerTool(
-		'get_version_diff',
-		{
-			title: 'Compare UIUX versions',
-			description: 'Compare a version of the Workspace timeline with another version or with the current files. Returns { status: "compared", from, to, summary }, where summary lists each resource as added, removed, modified or unchanged; with detail "semantic" it adds changes, one semantic diff per resource that is not unchanged (Widgets by id, Variants, Spec items and Decisions for a View; steps for a Flow; message keys for a Locale; settings members for the Workspace, never schemaVersion; metadata and content digest for an Asset; JSON pointers otherwise). Refusals: history.invalid_comparison, history.record_missing (unknown version), workspace.schema_unsupported (a version recorded under a schemaVersion other than the current one, or a current Workspace at another schemaVersion).',
-			inputSchema: getVersionDiffSchema,
-			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-		},
-		async (input) => {
-			const outcome = await app.diffVersions({
-				from: input.from,
-				...(input.to === undefined ? {} : { to: input.to }),
-				...(input.resources === undefined ? {} : { resources: input.resources }),
-				...(input.detail === undefined ? {} : { detail: input.detail }),
-			})
-			return {
-				content: [{ type: 'text' as const, text: JSON.stringify(outcome) }],
-				structuredContent: outcome,
-				...(outcome.status === 'compared' ? {} : { isError: true }),
-			}
-		},
-	)
-
-	server.registerTool(
-		'list_versions',
-		{
-			title: 'List UIUX versions',
-			description: 'List the Workspace version timeline (autosaves, Checkpoints, changes made outside UIUX as external versions, and system versions), newest first. Each version has id, type, name (Checkpoints), actor, at, parent (the ID of the version just before it on the full timeline, null for the first; it does not change with the filters) and summary, the resources whose revision differs from parent ({ kind, key, status }). Call get_version_diff with from set to a row\'s parent and to set to its id to see what that version changed, the same comparison the Workbench shows. Each version is also the read-only Resource uiux://version/{id}. Page with nextCursor. Refusals: history.invalid_listing, history.invalid_cursor.',
-			inputSchema: listVersionsSchema,
-			annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-		},
-		async (input) => {
-			const outcome = await app.listVersions({
-				...(input.resource === undefined ? {} : { resource: input.resource }),
-				...(input.types === undefined ? {} : { types: input.types }),
-				...(input.limit === undefined ? {} : { limit: input.limit }),
-				...(input.cursor === undefined ? {} : { cursor: input.cursor }),
-			})
-			const output = outcome.status === 'listed'
-				? { ...outcome, versions: outcome.versions.map(version => ({ ...version, resourceUri: versionResourceUri(version.id) })) }
-				: outcome
-			return {
-				content: [{ type: 'text' as const, text: JSON.stringify(output) }],
-				structuredContent: output,
-				...(outcome.status === 'listed' ? {} : { isError: true }),
-			}
-		},
-	)
-
-	server.registerTool(
-		'create_checkpoint',
-		{
-			title: 'Create UIUX Checkpoint',
-			description: `Name the current state of the Workspace as a Checkpoint, a version kept until a human deletes it. Needs no edit lease and changes no design file; the open autosave closes first, and changes made outside UIUX are recorded before it. A Checkpoint is immutable: to correct one, create another. Returns { status: "created", versionId, at, resources }, resources being the number of resources it records. Refusals: history.invalid_checkpoint_name, history.invalid_checkpoint_note, workspace.schema_unsupported, history.boundary_failed (retryable). ${CHECKPOINT_RECOMMENDATION}`,
-			inputSchema: createCheckpointSchema,
-			annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
-		},
-		async (input) => {
-			const outcome = await app.createCheckpoint({ name: input.name, ...(input.note === undefined ? {} : { note: input.note }) })
-			const output = outcome.status === 'created' ? { ...outcome, resourceUri: versionResourceUri(outcome.versionId) } : outcome
-			return {
-				content: [{ type: 'text' as const, text: JSON.stringify(output) }],
-				structuredContent: output,
-				...(outcome.status === 'created' ? {} : { isError: true }),
-			}
-		},
-	)
-
-	server.registerTool(
-		'restore_resource_version',
-		{
-			title: 'Restore a UIUX resource from a version',
-			description: 'Write one design resource (a View, Flow, Locale, Asset, the Workspace settings or the Product Kit) back to its content in an earlier version, as a new current revision; history is never rewritten and there is no whole-version revert. It is a write of that resource: your edit lease is checked or taken, and expectedRevision is the resource\'s current revision (null to re-create a removed one). A View keeps its current Decisions; the settings keep the current schemaVersion. The content is validated like an authoring write. Before writing, the impact is analyzed (Review threads whose Widget anchor would become invalid or valid again, dangling $i18n and $asset references, UX Flow steps whose Widgets would disappear, ready-for-review submissions whose revision would stop or start being current, and for the settings removed viewport and theme keys and formal Evidence that would become stale); when it is not empty nothing is written and the result is impact_acknowledgement_required with impacts: call again with acknowledgeImpact true to write. The restore is recorded as its own version naming restoredFrom. Returns { status: "updated" | "created", kind, key, revision, restoredFrom, impacts, diagnostics, changeSummary }. Refusals: conflict (with currentRevision, null when the resource does not exist), locked, invalid (history.invalid_restore, history.restore_unsupported_kind, history.restore_invalid_content), impact_acknowledgement_required, not_found (history.record_missing, history.resource_not_in_version), blocked (workspace.schema_unsupported).',
-			inputSchema: restoreResourceVersionSchema,
-			annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
-		},
-		async (input) => {
-			// Rule 01a11c09-cbea-7341-9d5a-01719e9c5d94: the Access presets are changed over HTTP only.
-			if (input.resource.kind === ACCESS_PRESETS_RESOURCE_KIND) {
-				const message = 'The Access presets are read and changed over HTTP only, in the UIUX Workbench; MCP cannot restore them.'
-				const refused = { status: 'invalid', kind: input.resource.kind, key: input.resource.key, code: 'history.restore_unsupported_kind', message, diagnostics: [{ code: 'history.restore_unsupported_kind', path: '/resource/kind', message }] }
-				return { content: [{ type: 'text' as const, text: JSON.stringify(refused) }], structuredContent: refused, isError: true }
-			}
-			const outcome = await app.restoreResourceVersion({
-				versionId: input.versionId,
-				resource: input.resource,
-				expectedRevision: input.expectedRevision,
-				...(input.acknowledgeImpact === undefined ? {} : { acknowledgeImpact: input.acknowledgeImpact }),
-			})
-			const written = outcome.status === 'created' || outcome.status === 'updated'
-			// As for every authoring tool, a written result adds the restored resource's URI.
-			const output = outcome.status === 'created' || outcome.status === 'updated'
-				? { ...outcome, resourceUri: outcome.kind === 'product-kit' ? PRODUCT_KIT_RESOURCE_URI : outcome.kind === ACCESS_PRESETS_RESOURCE_KIND ? undefined : pointResourceUri({ kind: outcome.kind, key: outcome.key }) }
-				: outcome
-			return {
-				content: [{ type: 'text' as const, text: JSON.stringify(output) }],
-				structuredContent: output,
-				...(written ? {} : { isError: true }),
-			}
-		},
-	)
-
-	server.registerTool(
 		'export_handoff',
 		{
 			title: 'Export Handoff Bundle',
@@ -1663,11 +1490,11 @@ export function principalAuthInfo(principal: Principal): AuthInfo {
  * principal through `fetch(request, { authInfo })`; a request without one is answered 401 here
  * too, so no code path can reach a tool unauthenticated.
  */
-export function createUiuxMcpHttpHandler(app: WorkspaceApplicationSession, options: Readonly<{ leases: LeaseManager; history?: ScopedSessionOptions['history'] }>): McpHttpHandler {
+export function createUiuxMcpHttpHandler(app: WorkspaceApplicationSession, options: Readonly<{ leases: LeaseManager }>): McpHttpHandler {
 	const inner = createMcpHandler((ctx) => {
 		const principal = principalFromAuthInfo(ctx.authInfo)
 		if (!principal || principal.type !== 'member') throw new Error('MCP request reached the server factory without an authenticated member.')
-		return createUiuxMcpServer(createScopedWorkspaceSession(app, principal, { transport: 'mcp', leases: options.leases, ...(options.history ? { history: options.history } : {}) }))
+		return createUiuxMcpServer(createScopedWorkspaceSession(app, principal, { transport: 'mcp', leases: options.leases }))
 	})
 	return {
 		...inner,

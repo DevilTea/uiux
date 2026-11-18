@@ -1,6 +1,6 @@
 import type { CurrentAdapterProvenance } from '../evidence/adapter-provenance'
 import type { FormalEvidenceRecord } from '../evidence/schema'
-import { resourceIdentityKey } from '../history/summary'
+import { resourceIdentityKey } from '../resource-identity'
 
 /**
  * The read-only picture of a Workspace that reference-impact analysis compares (issue #132 B6,

@@ -9,8 +9,6 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest'
 
 import metadataRoute from '../server/api/views/[id]/metadata.put'
 import { createLeaseManager } from '../src/application/access/leases'
-import { createHistoryRecorder, type HistoryRecorder, type HistoryRecorderClock } from '../src/application/services/history-recorder'
-import type { VersionListing } from '../src/application/services/history-service'
 import type { ViewSpecContent } from '../src/application/services/view-authoring'
 import { createWorkspaceApplicationSession, type WorkspaceApplicationSession } from '../src/application/services/workspace-session'
 import type { FormalEvidenceRecord } from '../src/domain/evidence/schema'
@@ -22,7 +20,6 @@ import { canonicalJsonBytes, FileNativePersistence } from '../src/persistence'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { createAccessGuardHandler } from '../src/server/access/http'
 import { mapAuthoringResultToHttpStatus, updateViewMetadataForHttp } from '../src/server/authoring-http'
-import { createHistoryStoreFactory } from '../src/server/history-stores'
 import { createLoopbackGuardHandler } from '../src/server/loopback-guard'
 import { closeSelectedWorkspaceServerRuntime, getSelectedWorkspaceServerRuntime } from '../src/server/selected-workspace'
 import { bearer, connectMcp, provisionToken, scoped, testMember } from './support/access'
@@ -42,7 +39,6 @@ const VIEW_ID = '11111111-1111-4111-8111-111111111111'
 const OTHER_VIEW_ID = '22222222-2222-4222-8222-222222222222'
 const MISSING_VIEW_ID = '33333333-3333-4333-8333-333333333333'
 const DECISION_ID = '55555555-5555-4555-8555-555555555555'
-const START = Date.parse('2026-10-19T00:00:00.000Z')
 
 const OWNER = testMember({ memberId: 'owner-1', nickname: 'mei', kind: 'human', preset: 'owner', credential: 'session' })
 const AGENT = testMember({ memberId: 'agent-1', nickname: 'claude', kind: 'agent', preset: 'editor', credential: 'token' })
@@ -57,9 +53,7 @@ const MANIFEST = {
 } satisfies WorkspaceManifest
 
 const cleanup: string[] = []
-const running: HistoryRecorder[] = []
 afterEach(async () => {
-	await Promise.all(running.splice(0).map(recorder => recorder.stop()))
 	await Promise.all(cleanup.splice(0).map(path => rm(path, { recursive: true, force: true })))
 })
 
@@ -86,37 +80,23 @@ const VIEW: ViewResource = {
 	},
 }
 
-function manualClock(): HistoryRecorderClock {
-	return { now: () => START, setTimeout: () => Symbol('timer'), clearTimeout: () => undefined }
-}
+type Fixture = Readonly<{ persistence: FileNativePersistence; app: WorkspaceApplicationSession }>
 
-type Fixture = Readonly<{ persistence: FileNativePersistence; app: WorkspaceApplicationSession; recorder: HistoryRecorder }>
-
-/** A started Workspace with one tagged View carrying a Decision and a Variant, and a Locale. */
+/** A Workspace with one tagged View carrying a Decision and a Variant, and a Locale. */
 async function fixture(): Promise<Fixture> {
 	const root = await tempDir('uiux-view-metadata-ws-')
-	const home = join(await tempDir('uiux-view-metadata-home-'), 'home')
 	const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
 	await createCurrentWorkspace(persistence, MANIFEST)
 	await persistence.locales.create('en-US', { greeting: 'Hello' })
 	await persistence.views.create(VIEW_ID, VIEW)
-	const history = createHistoryStoreFactory({ workspaceRoot: root, persistence, home: () => home })
-	const recorder = createHistoryRecorder({ persistence, stores: () => history.open(), clock: manualClock(), log: () => undefined })
-	const app = createWorkspaceApplicationSession(persistence, { history, historyBoundary: () => recorder })
-	running.push(recorder)
-	expect(await recorder.start()).toMatchObject({ enabled: true })
-	return { persistence, app, recorder }
+	const app = createWorkspaceApplicationSession(persistence)
+	return { persistence, app }
 }
 
 async function readView(ctx: Fixture, key = VIEW_ID) {
 	const read = await ctx.persistence.views.read(key)
 	if (!read) throw new Error(`View ${key} is missing`)
 	return read
-}
-
-function listed(outcome: unknown): VersionListing {
-	expect((outcome as { status: string }).status, JSON.stringify(outcome)).toBe('listed')
-	return outcome as VersionListing
 }
 
 describe('updateViewMetadata (Clause 01a15379-d8f7)', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS }, () => {
@@ -181,10 +161,10 @@ describe('updateViewMetadata (Clause 01a15379-d8f7)', { timeout: HEAVY_SERVER_SU
 })
 
 describe('update_view_metadata over MCP', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS }, () => {
-	it('renames and retags a View for an Agent, takes the lease, and records an updateViewMetadata write event', async () => {
+	it('renames and retags a View for an Agent, and takes the lease', async () => {
 		const ctx = await fixture()
 		const leases = createLeaseManager()
-		const mcp = await connectMcp(ctx.app, AGENT, { leases, history: ctx.recorder })
+		const mcp = await connectMcp(ctx.app, AGENT, { leases })
 		try {
 			const tool = (await mcp.client.listTools()).tools.find(item => item.name === 'update_view_metadata')!
 			expect(Object.keys(tool.inputSchema.properties ?? {}).sort()).toEqual(['expectedRevision', 'feature', 'name', 'viewId'])
@@ -203,12 +183,6 @@ describe('update_view_metadata over MCP', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_
 		finally {
 			await mcp.close()
 		}
-		const autosave = listed(await ctx.app.listVersions({})).versions.find(version => version.type === 'autosave')
-		expect(autosave).toBeDefined()
-		const read = await ctx.app.readVersion(autosave!.id)
-		if (read.status !== 'found' || read.version.type === 'checkpoint') throw new Error(JSON.stringify(read))
-		expect(read.version.events.map(event => [event.operation, event.source, event.resource.key])).toEqual([['updateViewMetadata', 'mcp', VIEW_ID]])
-		expect(read.version.events[0]!.actor).toEqual({ type: 'agent', id: `member:${AGENT.memberId}`, displayName: 'claude' })
 	})
 
 	it('refuses a stale revision as conflict carrying the current revision, and the name is unchanged (Scenario 01a1537a-6135)', async () => {
