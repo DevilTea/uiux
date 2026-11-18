@@ -35,32 +35,32 @@ function describeImpact(item: ReceivedImpact): string {
 	const anchor = (value.anchor ?? {}) as Readonly<Record<string, unknown>>
 	switch (item.category) {
 		case 'review_anchor_invalidated':
-			return t('history.restore.impact.item.anchorInvalidated', { thread: shortId(text(value.reviewId)), widget: text(anchor.widgetId), view: viewName(anchor.viewId) })
+			return t('impact.item.anchorInvalidated', { thread: shortId(text(value.reviewId)), widget: text(anchor.widgetId), view: viewName(anchor.viewId) })
 		case 'review_anchor_revalidated':
-			return t('history.restore.impact.item.anchorRevalidated', { thread: shortId(text(value.reviewId)), widget: text(anchor.widgetId), view: viewName(anchor.viewId) })
+			return t('impact.item.anchorRevalidated', { thread: shortId(text(value.reviewId)), widget: text(anchor.widgetId), view: viewName(anchor.viewId) })
 		case 'review_variant_stale':
-			return t('history.restore.impact.item.variantStale', { thread: shortId(text(value.reviewId)), variants: Array.isArray(value.variantNames) ? value.variantNames.join(t('common.listSeparator')) : '', view: viewName(value.viewId) }, Array.isArray(value.variantNames) ? value.variantNames.length : 1)
+			return t('impact.item.variantStale', { thread: shortId(text(value.reviewId)), variants: Array.isArray(value.variantNames) ? value.variantNames.join(t('common.listSeparator')) : '', view: viewName(value.viewId) }, Array.isArray(value.variantNames) ? value.variantNames.length : 1)
 		case 'i18n_reference_dangling':
-			return t('history.restore.impact.item.textKey', { key: text(value.i18nKey), view: viewName(value.viewId) })
+			return t('impact.item.textKey', { key: text(value.i18nKey), view: viewName(value.viewId) })
 		case 'asset_reference_dangling':
-			return t('history.restore.impact.item.asset', { asset: labels.resourceName({ kind: 'asset', key: text(value.assetId) }), view: viewName(value.viewId) })
+			return t('impact.item.asset', { asset: labels.resourceName({ kind: 'asset', key: text(value.assetId) }), view: viewName(value.viewId) })
 		case 'flow_step_widget_missing':
-			return t('history.restore.impact.item.flowStep', { flow: flowName(value.flowId), step: text(value.stepId), widgets: Array.isArray(value.widgetIds) ? value.widgetIds.join(t('common.listSeparator')) : '', view: viewName(value.viewId) })
+			return t('impact.item.flowStep', { flow: flowName(value.flowId), step: text(value.stepId), widgets: Array.isArray(value.widgetIds) ? value.widgetIds.join(t('common.listSeparator')) : '', view: viewName(value.viewId) })
 		case 'flow_step_target_missing':
 			return value.missing === 'variant'
-				? t('history.restore.impact.item.flowTargetVariant', { flow: flowName(value.flowId), step: text(value.stepId), variant: text(value.variantName), view: viewName(value.viewId) })
-				: t('history.restore.impact.item.flowTargetView', { flow: flowName(value.flowId), step: text(value.stepId), view: viewName(value.viewId) })
+				? t('impact.item.flowTargetVariant', { flow: flowName(value.flowId), step: text(value.stepId), variant: text(value.variantName), view: viewName(value.viewId) })
+				: t('impact.item.flowTargetView', { flow: flowName(value.flowId), step: text(value.stepId), view: viewName(value.viewId) })
 		case 'view_reference_dangling':
 			return value.missing === 'variant'
-				? t('history.restore.impact.item.referenceVariant', { view: viewName(value.viewId), variant: text(value.variantName), target: viewName(value.targetViewId) })
-				: t('history.restore.impact.item.referenceView', { view: viewName(value.viewId), target: viewName(value.targetViewId) })
+				? t('impact.item.referenceVariant', { view: viewName(value.viewId), variant: text(value.variantName), target: viewName(value.targetViewId) })
+				: t('impact.item.referenceView', { view: viewName(value.viewId), target: viewName(value.targetViewId) })
 		case 'view_decision_removed':
-			return t(`history.restore.impact.item.decision.${text(value.status)}`, { question: text(value.question), view: viewName(value.viewId) })
+			return t(`impact.item.decision.${text(value.status)}`, { question: text(value.question), view: viewName(value.viewId) })
 		case 'submission_revision_not_current':
 		case 'submission_revision_current': {
 			const resource = (value.resource ?? {}) as Readonly<Record<string, unknown>>
 			const named = { kind: text(resource.kind), key: text(resource.key) }
-			return t(item.category === 'submission_revision_current' ? 'history.restore.impact.item.submissionCurrent' : 'history.restore.impact.item.submissionNotCurrent', {
+			return t(item.category === 'submission_revision_current' ? 'impact.item.submissionCurrent' : 'impact.item.submissionNotCurrent', {
 				thread: shortId(text(value.reviewId)),
 				kind: labels.kindLabel(named.kind),
 				resource: labels.resourceName(named),
@@ -68,15 +68,15 @@ function describeImpact(item: ReceivedImpact): string {
 		}
 		case 'render_key_removed': {
 			const ids = Array.isArray(value.reviewIds) ? value.reviewIds : []
-			const key = value.dimension === 'theme' ? 'history.restore.impact.item.themeRemoved' : 'history.restore.impact.item.viewportRemoved'
-			return `${t(key, { key: text(value.key) })} ${ids.length ? t('history.restore.impact.item.namedBy', { threads: threads(ids) }, ids.length) : t('history.restore.impact.item.namedByNone')}`
+			const key = value.dimension === 'theme' ? 'impact.item.themeRemoved' : 'impact.item.viewportRemoved'
+			return `${t(key, { key: text(value.key) })} ${ids.length ? t('impact.item.namedBy', { threads: threads(ids) }, ids.length) : t('impact.item.namedByNone')}`
 		}
 		case 'evidence_stale':
 			return typeof value.viewId === 'string'
-				? t('history.restore.impact.item.evidenceForView', { evidence: shortId(text(value.evidence)), view: viewName(value.viewId) })
-				: t('history.restore.impact.item.evidence', { evidence: shortId(text(value.evidence)) })
+				? t('impact.item.evidenceForView', { evidence: shortId(text(value.evidence)), view: viewName(value.viewId) })
+				: t('impact.item.evidence', { evidence: shortId(text(value.evidence)) })
 		default:
-			return t('history.restore.impact.item.other', { category: item.category })
+			return t('impact.item.other', { category: item.category })
 	}
 }
 
@@ -88,7 +88,7 @@ function impactIds(item: ReceivedImpact): string | undefined {
 }
 
 function groupLabel(group: ImpactGroup): string {
-	return t(`history.restore.impact.group.${group}`)
+	return t(`impact.group.${group}`)
 }
 </script>
 

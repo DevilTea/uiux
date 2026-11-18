@@ -46,7 +46,7 @@ function focusCancel(event: Event): void {
           {{ body }}
         </p>
         <p class="text-xs font-medium text-muted">
-          {{ t('history.restore.impact.count', impacts.length) }}
+          {{ t('impact.count', impacts.length) }}
         </p>
         <ImpactList :impacts="impacts" />
       </div>

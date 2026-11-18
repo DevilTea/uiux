@@ -197,7 +197,7 @@ async function remove(acknowledgeImpact: boolean): Promise<void> {
               {{ t('deleteResource.impact.body', { name }) }}
             </p>
             <p class="text-xs font-medium text-muted">
-              {{ t('history.restore.impact.count', impacts.length) }}
+              {{ t('impact.count', impacts.length) }}
             </p>
             <ImpactList :impacts="impacts" />
           </template>
