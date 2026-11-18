@@ -407,6 +407,21 @@ describe('uiux member on permission keys and Access presets (issue #142)', () =>
 		expect((await storedMembers(home, workspace))[1]!.keys).toEqual(['workspace.read', 'reviews.write', 'future.key'])
 	})
 
+	it('applies the known keys of a presets file written before Discussion #491 P1 and grants nothing for the removed ones (known interim effect)', async () => {
+		const { home, workspace, run } = await setup()
+		// A Workspace that predates P1 still lists the four removed keys in its presets, as the dogfood Workspace does.
+		const removed = ['history.read', 'history.restore', 'checkpoints.create', 'checkpoints.delete']
+		const presets = { presets: [{ id: 'old-editor', name: 'Old editor', keys: ['workspace.read', 'history.read', 'reviews.write', 'history.restore', 'checkpoints.create', 'checkpoints.delete'] }] }
+		await writeFile(join(workspace, 'access-presets.json'), `${JSON.stringify(presets, null, 2)}\n`)
+		const added = await run('member', 'add', 'mei', '--preset', 'Old editor', '--workspace', workspace)
+		expect(added.code).toBe(0)
+		// The preset applies its known keys; the removed ones are named as not applied and grant nothing.
+		expect(added.out + added.err).toContain(`The Old editor preset holds ${removed.join(', ')}, unknown to this UIUX version; they were not applied.`)
+		expect((await storedMembers(home, workspace))[0]!.keys).toEqual(['workspace.read', 'reviews.write'])
+		// A member made from it is labeled Custom, since no preset equals its keys.
+		expect((await run('member', 'list', '--workspace', workspace)).out).toMatch(/mei\s+human\s+Custom\s+0\s+0\s+2$/mu)
+	})
+
 	it('says a humanOnly key revoked from an Agent was never granted to it, not that it was not held', async () => {
 		const { workspace, run } = await setup()
 		await run('member', 'add', 'claude', '--kind', 'agent', '--preset', 'Editor', '--workspace', workspace)
