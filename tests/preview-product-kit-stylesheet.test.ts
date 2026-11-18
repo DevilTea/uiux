@@ -243,6 +243,29 @@ describe('Product Kit stylesheet bundling', () => {
 		expect((await readPreviewRuntimeFile(root, undefined, bundle.hash, 'runtime.css')).status).toBe(200)
 	})
 
+	it('caches every file of a bundle as immutable under its content hash, and nothing else', async () => {
+		const root = await createKitWorkspace()
+		const bundle = await validBundle(root)
+		const files = [...bundle.files.keys()]
+		expect(files.some(file => file.endsWith('.woff2'))).toBe(true)
+		expect(files).toEqual(expect.arrayContaining(['runtime.js', 'runtime.js.map', 'runtime.css', 'runtime.css.map']))
+		for (const file of files) {
+			const served = await readPreviewRuntimeFile(root, undefined, bundle.hash, file)
+			expect(served.status, file).toBe(200)
+			expect(served.status === 200 ? served.headers['Cache-Control'] : undefined, file).toBe('private, max-age=31536000, immutable')
+		}
+		const missing = await readPreviewRuntimeFile(root, undefined, bundle.hash, 'assets/missing.woff2')
+		expect(missing.status).toBe(404)
+		expect(missing).not.toHaveProperty('headers')
+		expect(await readPreviewRuntimeFile(root, undefined, '0123456789abcdef', 'runtime.js')).toMatchObject({ status: 404 })
+
+		// The URL names the bytes: the same bytes keep it across a cold cache, other bytes change it.
+		clearPreviewBundleCache()
+		expect((await validBundle(root)).hash).toBe(bundle.hash)
+		await writeFile(join(root, 'kit', 'styles', 'base.css'), '.uiux-kit-base { margin-top: 9px; }\n')
+		expect((await validBundle(root)).hash).not.toBe(bundle.hash)
+	})
+
 	// Nine real esbuild builds (the cache keeps eight, so the ninth evicts): about 1.2 s alone, 4.3 s under 12 CPU
 	// burners on 8 cores, past the 5 s default. A cheaper cache is not reachable: the limit is a constant and the
 	// cache key is the content hash of a finished build.

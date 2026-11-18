@@ -460,6 +460,28 @@ describe('preview adapter materialization transport', () => {
 		expect(bundle2.bundleJs).toContain('CountIs: ')
 	})
 
+	it('names a pinned bundle by the digest of its bytes, so output that differs under one pin gets another URL', async () => {
+		const root = await createTestWorkspace([{ moduleSpecifier: './adapters/counter.mjs' }])
+		await mkdir(join(root, 'kit', 'adapters'), { recursive: true })
+		await writeFile(join(root, 'kit', 'adapters', 'counter.mjs'), makeCounterAdapterSource())
+		const resolution = await resolveSelectedWorkspaceAdapters(root)
+		if (resolution.state !== 'valid') throw new Error('Expected valid resolution')
+		const build = () => buildWorkspacePreviewBundle({ workspaceRoot: root, set: resolution.set, pin: '1-0' })
+
+		const first = await build()
+		// The pinned generation stays in use while the process runs, even when its files change.
+		await writeFile(join(root, 'kit', 'adapters', 'counter.mjs'), makeCounterAdapterSource().replace('Value: ', 'CountIs: '))
+		expect((await build()).hash).toBe(first.hash)
+
+		// A restart numbers its generations again: other bytes under the same pin are another URL, the same bytes the same one.
+		clearPreviewBundleCache()
+		const other = await build()
+		expect(other.bundleJs).toContain('CountIs: ')
+		expect(other.hash).not.toBe(first.hash)
+		clearPreviewBundleCache()
+		expect((await build()).hash).toBe(other.hash)
+	})
+
 	it('serves preview adapters plan and runtime bundle through internal Nitro routes', async () => {
 		const root = await createTestWorkspace([{ moduleSpecifier: './adapters/counter.mjs' }])
 		await mkdir(join(root, 'kit', 'adapters'), { recursive: true })
@@ -773,6 +795,8 @@ describe('a current-schema Workspace resolves its Adapters from the Product Kit'
 		const built = await buildWorkspacePreviewBundle({ workspaceRoot: root, moduleBase: join(root, 'kit'), set: resolution.set })
 		const served = await readPreviewRuntimeFile(root, undefined, built.hash, 'runtime.js')
 		expect(served.status).toBe(409)
+		// A refusal names no bytes, so it carries no cache header.
+		expect(served).not.toHaveProperty('headers')
 		expect(served.status === 409 ? served.body.diagnostics : []).toContainEqual(expect.objectContaining({ code: 'adapter.runtime_widget_core_incompatible', path: pluginPath }))
 
 		// The Preview's own guard, run in a DOM on the same bundle, reports the same diagnostic.
