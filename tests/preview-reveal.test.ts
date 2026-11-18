@@ -99,10 +99,9 @@ describe('the Workbench sends geometry.reveal on an open stream', () => {
 })
 
 describe('geometry.reveal is a feature of a Workbench Preview', () => {
-	it('is declared for a Workbench Preview, and not for the formal capture harness or a version frame', () => {
-		expect(declaredRuntimeFeatures({ harness: false, version: false })).toContain(REVEAL_GEOMETRY_FEATURE)
-		expect(declaredRuntimeFeatures({ harness: true, version: false })).not.toContain(REVEAL_GEOMETRY_FEATURE)
-		expect(declaredRuntimeFeatures({ harness: false, version: true })).not.toContain(REVEAL_GEOMETRY_FEATURE)
+	it('is declared for a Workbench Preview, and not for the formal capture harness', () => {
+		expect(declaredRuntimeFeatures({ harness: false })).toContain(REVEAL_GEOMETRY_FEATURE)
+		expect(declaredRuntimeFeatures({ harness: true })).not.toContain(REVEAL_GEOMETRY_FEATURE)
 	})
 })
 

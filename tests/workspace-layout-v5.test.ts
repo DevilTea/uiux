@@ -4,10 +4,7 @@ import { join } from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { createHistoryRecorder, type HistoryRecorderClock } from '../src/application/services/history-recorder'
-import { createWorkspaceApplicationSession } from '../src/application/services/workspace-session'
 import { builtInAccessPresetsFile } from '../src/domain/access-presets/schema'
-import type { HostVersionRecord } from '../src/domain/history/schema'
 import { emptyProductKit, validateProductKit, type ProductKit } from '../src/domain/product-kit/schema'
 import { validateWorkspaceManifest } from '../src/domain/workspace/schema'
 import {
@@ -18,9 +15,8 @@ import {
 	V5_LAYOUT,
 	viewRelativePath,
 } from '../src/persistence'
-import { runWithDesignWriteContext, versionResourcesFromSnapshot } from '../src/persistence/history'
+import { resourcesFromSnapshot } from '../src/persistence/resource-files'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
-import { createHistoryStoreFactory } from '../src/server/history-stores'
 import { currentManifest, transactionsPath, v5Manifest, writeManifest } from './support/workspace-layout'
 
 /**
@@ -34,7 +30,6 @@ import { currentManifest, transactionsPath, v5Manifest, writeManifest } from './
 const VIEW_ID = '11111111-1111-4111-8111-111111111111'
 const CHECKPOINT_ID = '22222222-2222-4222-8222-222222222222'
 const HEX = 'cd'.repeat(32)
-const HUMAN = { type: 'human', id: 'member:m-owner', displayName: 'deviltea' } as const
 
 const roots: string[] = []
 afterEach(async () => {
@@ -93,22 +88,20 @@ async function v5Workspace(kit: ProductKit = emptyProductKit()): Promise<Readonl
 }
 
 describe('the schemaVersion 5 layout', () => {
-	it('keeps the manifest, Product Kit file, artifacts, Checkpoints and runtime files directly under the root', () => {
+	it('keeps the manifest, Product Kit file, artifacts and runtime files directly under the root', () => {
 		expect(V5_LAYOUT.metadataDir).toBe('')
 		expect(V5_LAYOUT.manifestPath).toBe('workspace.json')
 		expect(V5_LAYOUT.productKitPath).toBe('product-kit.json')
 		expect(V5_LAYOUT.codeDir).toBe('kit')
 		expect(V5_LAYOUT.artifactsDir).toBe('artifacts')
-		expect(V5_LAYOUT.checkpointsDir).toBe('history/checkpoints')
 		expect(V5_LAYOUT.transactionsDir).toBe('.transactions')
 		expect(V5_LAYOUT.lockPath).toBe('.persistence.lock')
 		expect(V5_LAYOUT.serverHoldPath).toBe('.server-hold.json')
 		expect(V5_LAYOUT.metadataFilePath('.server-hold-x.tmp')).toBe('.server-hold-x.tmp')
 		expect(V5_LAYOUT.artifactRelativePath(`sha256:${HEX}`)).toBe(`artifacts/sha256/cd/${HEX}`)
-		expect(V5_LAYOUT.checkpointRelativePath(CHECKPOINT_ID)).toBe(`history/checkpoints/${CHECKPOINT_ID}.json`)
 		expect(V5_LAYOUT.canonicalFiles).toEqual(['workspace.json', 'product-kit.json', 'access-presets.json'])
 		expect(V5_LAYOUT.versionedRoots).toEqual(['workspace.json', 'product-kit.json', 'access-presets.json', 'views/', 'flows/', 'i18n/', 'assets/'])
-		expect(V5_LAYOUT.excluded).toEqual(['reviews/', 'artifacts/', 'history/', '.transactions/', 'kit/'])
+		expect(V5_LAYOUT.excluded).toEqual(['reviews/', 'artifacts/', '.transactions/', 'kit/'])
 	})
 
 	it('classifies the manifest and the Product Kit file as their resources, and nothing in kit/ or the runtime directories', () => {
@@ -117,14 +110,14 @@ describe('the schemaVersion 5 layout', () => {
 		expect(classify('product-kit.json')).toEqual({ kind: 'product-kit', key: 'product-kit' })
 		expect(classify(viewRelativePath(VIEW_ID))).toEqual({ kind: 'view', key: VIEW_ID })
 		expect(classify('i18n/en-US.json')).toEqual({ kind: 'locale', key: 'en-US' })
-		for (const path of ['.uiux/workspace.json', 'kit/package.json', 'kit/src/button.vue', `kit/views/${VIEW_ID}.view.json`, `reviews/${VIEW_ID}.review.json`, `artifacts/sha256/cd/${HEX}`, `history/checkpoints/${CHECKPOINT_ID}.json`, '.server-hold.json'])
+		for (const path of ['.uiux/workspace.json', 'kit/package.json', 'kit/src/button.vue', `kit/views/${VIEW_ID}.view.json`, `reviews/${VIEW_ID}.review.json`, `artifacts/sha256/cd/${HEX}`, '.server-hold.json'])
 			expect(classify(path), path).toBeUndefined()
 	})
 
 	it('allows canonical writes only to the root files and the data directories (never kit/)', () => {
 		for (const path of ['workspace.json', 'product-kit.json', viewRelativePath(VIEW_ID), `reviews/${VIEW_ID}.review.json`, 'i18n/zh-TW.json', `assets/${VIEW_ID}/asset.json`, `assets/${VIEW_ID}/logo.png`])
 			expect(V5_LAYOUT.isCanonicalPath(path), path).toBe(true)
-		for (const path of ['.uiux/workspace.json', 'kit/package.json', 'kit/product-kit.json', `kit/views/${VIEW_ID}.view.json`, 'artifacts/x', 'history/checkpoints/x.json', '.persistence.lock', 'notes.txt'])
+		for (const path of ['.uiux/workspace.json', 'kit/package.json', 'kit/product-kit.json', `kit/views/${VIEW_ID}.view.json`, 'artifacts/x', '.persistence.lock', 'notes.txt'])
 			expect(V5_LAYOUT.isCanonicalPath(path), path).toBe(false)
 	})
 
@@ -191,7 +184,7 @@ describe('the Product Kit file and the versioned manifest shape', () => {
 })
 
 describe('persistence on a schemaVersion 5 root', () => {
-	it('reads and writes the manifest, Product Kit file, data, lock, transactions, artifacts, Checkpoints and server hold at the v5 paths', async () => {
+	it('reads and writes the manifest, Product Kit file, data, lock, transactions, artifacts and server hold at the v5 paths', async () => {
 		const root = await makeRoot()
 		const seen: string[] = []
 		const persistence = new FileNativePersistence({
@@ -270,8 +263,8 @@ describe('persistence on a schemaVersion 5 root', () => {
 		const canonical = await persistence.withReadLock(() => persistence.scanCanonicalSnapshotUnlocked())
 		expect([...canonical.keys()].sort()).toEqual(['access-presets.json', 'product-kit.json', viewRelativePath(VIEW_ID), 'workspace.json'])
 
-		const resources = versionResourcesFromSnapshot(versioned, persistence.layout).resources
-		expect(resources.map(resource => [resource.kind, resource.key, Object.keys(resource.files)])).toEqual([
+		const resources = resourcesFromSnapshot(versioned, persistence.layout)
+		expect(resources.map(resource => [resource.kind, resource.key, [...resource.files.keys()]])).toEqual([
 			['access-presets', 'access-presets', ['access-presets.json']],
 			['product-kit', 'product-kit', ['product-kit.json']],
 			['view', VIEW_ID, [viewRelativePath(VIEW_ID)]],
@@ -319,37 +312,5 @@ describe('persistence on a schemaVersion 5 root', () => {
 		expect(inspected).toMatchObject({ state: 'unsupported', version: 4 })
 		expect(inspected.diagnostics).toContainEqual(expect.objectContaining({ code: 'workspace.schema_unsupported', message: expect.stringMatching(/schemaVersion 4 .*uiux init/u) }))
 		await expect(metadataDir.views.create(VIEW_ID, view() as never)).rejects.toMatchObject({ code: 'workspace.schema_unsupported' })
-	})
-})
-
-describe('history on a schemaVersion 5 Workspace', () => {
-	const clock = (): HistoryRecorderClock => ({ now: () => Date.parse('2026-10-10T00:00:00.000Z'), setTimeout: () => Symbol('timer'), clearTimeout: () => undefined })
-
-	async function historyFixture(workspace = currentWorkspace) {
-		const { root, persistence } = await workspace({ ...emptyProductKit(), adapters: [{ moduleSpecifier: '@acme/uiux-adapter' }] })
-		const home = join(await makeRoot('uiux-layout-v5-home-'), 'home')
-		const history = createHistoryStoreFactory({ workspaceRoot: root, persistence, home: () => home })
-		const recorder = createHistoryRecorder({ persistence, stores: () => history.open(), clock: clock(), log: () => undefined })
-		const app = createWorkspaceApplicationSession(persistence, { history, historyBoundary: () => recorder })
-		return { root, home, persistence, history, recorder, app }
-	}
-
-	it('writes the Baseline under history/checkpoints/ at the current schemaVersion with the product-kit resource, and records Product Kit writes', async () => {
-		const ctx = await historyFixture()
-		const started = await ctx.recorder.start()
-		expect(await readdir(join(ctx.root, 'history', 'checkpoints'))).toEqual([`${started.baseline}.json`])
-		const baseline = JSON.parse(await readFile(join(ctx.root, 'history', 'checkpoints', `${started.baseline}.json`), 'utf8'))
-		expect(baseline).toMatchObject({ workspaceSchemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION })
-		expect(baseline.resources.map((resource: { kind: string }) => resource.kind)).toEqual(['access-presets', 'product-kit', 'workspace'])
-		expect(Object.keys(baseline.resources[1].files)).toEqual(['product-kit.json'])
-
-		const before = (await ctx.persistence.productKit.read())!
-		await runWithDesignWriteContext({ actor: HUMAN, source: 'workbench', operation: 'updateProductKit' }, () =>
-			ctx.persistence.productKit.compareAndSwap({ key: 'product-kit', expectedRevision: before.revision, resource: { ...before.resource, styles: ['./dist/kit.css'] } }))
-		await ctx.recorder.stop()
-		const versions = (await (await ctx.history.open()).host.listVersions()).records as HostVersionRecord[]
-		expect(versions).toHaveLength(1)
-		expect(versions[0]).toMatchObject({ type: 'autosave', workspaceSchemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION, events: [expect.objectContaining({ operation: 'updateProductKit' })] })
-		expect(versions[0]!.resources.find(resource => resource.kind === 'product-kit')?.revision).toBe(await ctx.persistence.productKit.readRevision())
 	})
 })

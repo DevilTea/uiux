@@ -319,7 +319,7 @@ describe('authentication on every surface', () => {
 		const client = new Client({ name: 'uiux-access-test', version: '1.0.0' }, { versionNegotiation: { mode: 'auto', probe: { timeoutMs: 2_000 } } })
 		try {
 			await client.connect(new StreamableHTTPClientTransport(new URL(`${origin}/mcp`), { requestInit: { headers: bearer(agentToken) } }))
-			expect(client.getInstructions()).toMatch(/^Authenticated as claude \(agent, Editor\)\. Your effective permission keys: workspace\.read, history\.read, /u)
+			expect(client.getInstructions()).toMatch(/^Authenticated as claude \(agent, Editor\)\. Your effective permission keys: workspace\.read, product-kit\.source\.read, /u)
 			const created = await client.callTool({ name: 'create_view', arguments: { id: VIEW_ID, name: 'Leased', spec } })
 			expect(created.isError).not.toBe(true)
 		}

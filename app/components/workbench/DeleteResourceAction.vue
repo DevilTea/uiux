@@ -6,7 +6,7 @@ import { useUiuxClient } from '../../composables/useUiuxClient'
 import { useWorkbench } from '../../composables/useWorkbench'
 import { describeFetchError, type FetchErrorDetails } from '../../utils/fetch-error'
 import { classifyAcknowledgedWriteAnswer, DELETE_ROUTES, failureOf, type DeletableKind } from '../../utils/impact-acknowledge'
-import type { ReceivedImpact } from '../../utils/version-restore'
+import type { ReceivedImpact } from '../../utils/impact-list'
 import ImpactList from './ImpactList.vue'
 import WbErrorDescription from './WbErrorDescription.vue'
 
@@ -197,7 +197,7 @@ async function remove(acknowledgeImpact: boolean): Promise<void> {
               {{ t('deleteResource.impact.body', { name }) }}
             </p>
             <p class="text-xs font-medium text-muted">
-              {{ t('history.restore.impact.count', impacts.length) }}
+              {{ t('impact.count', impacts.length) }}
             </p>
             <ImpactList :impacts="impacts" />
           </template>

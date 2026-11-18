@@ -8,7 +8,6 @@ import { useWorkbenchShell } from '../../composables/useWorkbenchShell'
 import { useMediaQuery, WORKBENCH_BREAKPOINTS } from '../../composables/useMediaQuery'
 import type { ViewPanelTab } from '../../composables/workbench-types'
 import { parseThread, parseViewPanel, parseViewRouteContext, sameQuery, viewQuery, VIEWS_LOCATION } from '../../utils/workbench-routes'
-import { parseHistoryAddress, type HistoryAddress } from '../../utils/version-history'
 import KitButton from '~/components/kit/ui/Button.vue'
 import PreviewCanvas from '../../components/workbench/PreviewCanvas.vue'
 import ViewRightPanel from '../../components/workbench/ViewRightPanel.vue'
@@ -17,9 +16,7 @@ import { provideCanvasComments } from '../../composables/useCanvasComments'
 import CommentsTab from '../../components/workbench/comments/CommentsTab.vue'
 import SpecDocument from '../../components/workbench/SpecDocument.vue'
 import ViewFlowUsage from '../../components/workbench/ViewFlowUsage.vue'
-import ViewHistoryPanel from '../../components/history/ViewHistoryPanel.vue'
-import VersionCanvas from '../../components/history/VersionCanvas.vue'
-import { useVersionCanvasAccess } from '../../composables/useVersionCanvasAccess'
+import ViewChangesPanel from '../../components/changes/ViewChangesPanel.vue'
 import { useReadiness } from '../../composables/useReadiness'
 
 /**
@@ -44,23 +41,14 @@ const viewId = computed(() => String(route.params.viewId ?? ''))
 
 const panelTab = ref<ViewPanelTab>(parseViewPanel(route.query) ?? 'comments')
 const thread = ref<string | undefined>(parseThread(route.query))
-/** The history panel's selection (`version`, `compare`, `canvas`), kept while the panel shows. */
-const historyAddress = ref<HistoryAddress>(parseHistoryAddress(route.query))
-/**
- * The canvas before/after comparison (issue #132, B9) replaces the live canvas while the history
- * panel's address selects a version and a `canvas` mode, on desktop and tablet only (Rule
- * 01a11a5e-1ba5-765e-966f-a681def5f472). Elsewhere the key stays in the address and shows nothing.
- */
-const canvasAccess = useVersionCanvasAccess()
-const canvasComparison = computed(() => canvasAccess.offered.value && panelTab.value === 'history' && !!historyAddress.value.version && !!historyAddress.value.canvas)
 const rightPanel = ref<InstanceType<typeof ViewRightPanel>>()
 // The canvas pins, composer and bubble, and the Comments tab, share one comments layer; the open
 // thread is the route's `thread`, so a deep link opens its pin and bubble.
 const comments = provideCanvasComments(thread)
 
 // Phones (brief a, section 6; DESIGN.md "Mobile"): one column switching between the Spec (the
-// default reading surface), the comment list, the read-only View and the View's history (the
-// timeline and diffs are offered on every layout, Rule 01a11a5e-1b52-7f6f-8244-65bb038ef6f8). A
+// default reading surface), the comment list, the read-only View and the View's history (its
+// changes since the Git base are offered on every layout, Rule 01a11a5e-1b52-7f6f-8244-65bb038ef6f8). A
 // thread opens in a bottom sheet over the View, so opening one from the list or the Spec shows the
 // View tab.
 type PhoneTab = 'spec' | 'comments' | 'view' | 'flows' | 'history'
@@ -68,7 +56,6 @@ function phoneTabFor(panel: ViewPanelTab | undefined): PhoneTab {
 	return panel === 'comments' ? 'comments' : panel === 'history' ? 'history' : panel === 'flows' ? 'flows' : 'spec'
 }
 const phoneTab = ref<PhoneTab>(thread.value ? 'view' : phoneTabFor(parseViewPanel(route.query)))
-// The history tab's selection rides in the address with `panel=history` on phones too.
 watch(phoneTab, (value) => {
 	if (value === 'history' || value === 'flows') panelTab.value = value
 	else if (panelTab.value === 'history' || panelTab.value === 'flows') panelTab.value = 'comments'
@@ -131,8 +118,6 @@ watch(() => [viewId.value, route.query] as const, ([id, query]) => {
 	const nextTab = parseViewPanel(query)
 	if (nextTab) panelTab.value = nextTab
 	if ((nextTab === 'history' || nextTab === 'flows') && isPhone.value) phoneTab.value = nextTab
-	const nextHistory = parseHistoryAddress(query)
-	if (JSON.stringify(nextHistory) !== JSON.stringify(historyAddress.value)) historyAddress.value = nextHistory
 	const nextThread = parseThread(query)
 	if (nextThread !== thread.value) thread.value = nextThread
 }, { immediate: true, deep: true })
@@ -146,7 +131,6 @@ const stateQuery = computed(() => viewQuery({
 	widget: selectedWidgetId.value,
 	thread: thread.value,
 	panel: panelTab.value === 'comments' ? undefined : panelTab.value,
-	history: historyAddress.value,
 }))
 // A replace lands a few tasks later (router guards and middleware run first). While one is in
 // flight, compare against what it asked for, not the committed route: state that returns to the
@@ -256,7 +240,7 @@ onBeforeUnmount(() => {
             <ViewFlowUsage />
           </template>
           <template #history>
-            <ViewHistoryPanel :active="phoneTab === 'history'" />
+            <ViewChangesPanel :active="phoneTab === 'history'" />
           </template>
         </UTabs>
       </main>
@@ -280,27 +264,7 @@ onBeforeUnmount(() => {
         >
           <!-- The page heading, the feature tag, the edit lease badge and the in-place rename. -->
           <ViewHeader :view-id="viewId" />
-          <VersionCanvas
-            v-if="canvasComparison"
-            :view-id="viewId"
-            :address="historyAddress"
-          >
-            <template #actions>
-              <UTooltip :text="isDesktop ? t('shell.togglePanel') : t('shell.openPanel')">
-                <KitButton
-                  variant="ghost"
-                  size="sm"
-                  :icon="isDesktop ? 'panel-right' : 'panel-right-open'"
-                  icon-only
-                  :label="isDesktop ? t('shell.togglePanel') : t('shell.openPanel')"
-                  :expanded="isDesktop ? !panelHidden : panelOpen"
-                  @click="togglePanel"
-                />
-              </UTooltip>
-            </template>
-          </VersionCanvas>
           <PreviewCanvas
-            v-else
             @open-panel="showPanel"
           >
             <template #actions>

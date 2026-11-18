@@ -7,7 +7,6 @@ import { resolveWorkspacePath } from '../persistence/paths'
 import type { WorkspaceSchemaPolicy } from '../persistence/schema-policy'
 import { selectWorkspace } from '../persistence/workspace-selection'
 import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../product/workspace-schema'
-import { assertHomeOutsideWorkspace, hostHistoryPaths, resolveUiuxHome, workspaceRealRoot } from '../server/access/store'
 import { writeStderrLine, writeStdoutLine } from './output'
 
 export const ARTIFACTS_USAGE = 'artifacts gc [--workspace <dir>] [--dry-run]'
@@ -20,8 +19,6 @@ export type ArtifactsCommandOptions = Readonly<{
 	stderr?: (line: string) => void
 	/** Test seam: the Workspace schema policy of the entry check (UIUX's own by default). */
 	schemaPolicy?: WorkspaceSchemaPolicy
-	/** `$UIUX_HOME`, whose host history of the Workspace holds roots; `resolveUiuxHome()` by default. */
-	home?: string
 }>
 
 /**
@@ -70,17 +67,10 @@ export async function runArtifactsCommand(options: ArtifactsCommandOptions): Pro
 	}
 
 	const persistence = new FileNativePersistence({ root: selection.root, schemaPolicy, layout: selection.layout })
-	const home = options.home ?? resolveUiuxHome()
 	const line = (blob: ArtifactGcBlob) => out(blob.identity)
 	const summary = (count: number, bytes: number) => `${count} blob${count === 1 ? '' : 's'}, ${bytes} byte${bytes === 1 ? '' : 's'}`
 	try {
-		// The host history of this Workspace on this host (Clause 01a11a5e-1e65-7deb-a89e-6ad021248fe0) holds roots.
-		const realRoot = workspaceRealRoot(selection.root)
-		try { assertHomeOutsideWorkspace(home, realRoot) }
-		catch (error) {
-			throw new ArtifactGcRefusal(`${error instanceof Error ? error.message : String(error)} Nothing was deleted.`)
-		}
-		const result = await collectArtifactGarbage(persistence, { dryRun, hostHistory: hostHistoryPaths(home, realRoot), onDeleted: line })
+		const result = await collectArtifactGarbage(persistence, { dryRun, onDeleted: line })
 		if (dryRun) {
 			for (const blob of result.blobs) line(blob)
 			out(`Would delete ${summary(result.blobs.length, result.totalBytes)} (--dry-run: nothing was deleted).`)

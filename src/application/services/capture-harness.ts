@@ -87,9 +87,9 @@ export const ASSET_LOAD_FAILED_DIAGNOSTIC = {
 	message: 'A bound Asset did not load in the Preview (a request for its content failed, or an image of it did not decode), so the context was not captured.',
 } as const
 
-/** Whether a same-origin URL path is a bound Asset's content, by the two forms of Clause 01a167f4-401d-7330-ac65-0a900adbccd6. */
+/** Whether a same-origin URL path is a bound Asset's content, by the form of Clause 01a167f4-401d-7330-ac65-0a900adbccd6. */
 export function isBoundAssetPath(pathname: string): boolean {
-	return /^\/api\/assets\/[^/]+\/content$/.test(pathname) || pathname.startsWith('/api/history/blobs/')
+	return /^\/api\/assets\/[^/]+\/content$/.test(pathname)
 }
 
 /**
@@ -119,12 +119,12 @@ export function trackBoundAssetFailures(page: Page, baseUrl: string): () => numb
 }
 
 /**
- * Runs in the Preview page: decodes every `<img>` that shows a bound Asset, by the two URL forms of
+ * Runs in the Preview page: decodes every `<img>` that shows a bound Asset, by the URL form of
  * Clause 01a167f4-401d-7330-ac65-0a900adbccd6, within `timeoutMs`, and returns how many did not decode.
  * A lazy one is loaded now, since the screenshot shows it. Other images are left alone.
  */
 export async function decodeBoundAssetImages(input: Readonly<{ timeoutMs: number }>): Promise<number> {
-	const prefixes = ['/api/assets/', '/api/history/blobs/']
+	const prefixes = ['/api/assets/']
 	const bound = Array.from(document.images).filter((image) => {
 		const source = image.currentSrc || image.src
 		if (!source) return false

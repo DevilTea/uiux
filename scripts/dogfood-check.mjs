@@ -520,7 +520,7 @@ function toolchainLines() {
 }
 
 /**
- * Makes the directory `root` the Git work tree that holds a Workspace and its `.spec/`: the `spec` requirements
+ * Makes the directory `root` the Git work tree that holds a Workspace and its `.spec/`. The server needs one (`workspace.git_required`), and the `spec` requirements
  * provider reads only a `.spec/` inside the Git work tree of the Workspace (Clause 01a18120-f49d-7b42-bad5-69d727f6a33a),
  * so a copy outside this checkout needs a work tree of its own. Nothing is committed.
  */
@@ -627,6 +627,8 @@ export async function readFormalCaptureFreshness({ workspaceRoot: sourceRoot }) 
 	try {
 		const workspaceRoot = scratch.workspaceRoot
 		copyWorkspace(join(sourceRoot, '.uiux'), join(workspaceRoot, '.uiux'))
+		// The server refuses a Workspace outside a Git work tree (workspace.git_required), so the copy gets one of its own.
+		makeProviderWorkTree(workspaceRoot)
 		const modules = await loadRepositoryModules(scratch.base)
 		if (!existsSync(join(REPOSITORY, '.output', 'server', 'index.mjs')))
 			throw new CheckError('The packaged server is not built (.output/server/index.mjs): run pnpm build in the worktree.')

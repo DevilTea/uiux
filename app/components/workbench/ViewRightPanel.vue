@@ -11,7 +11,7 @@ import ReadinessTab from '../readiness/ReadinessTab.vue'
 import WidgetInspector from './WidgetInspector.vue'
 import SpecDocument from './SpecDocument.vue'
 import ViewFlowUsage from './ViewFlowUsage.vue'
-import ViewHistoryPanel from '../history/ViewHistoryPanel.vue'
+import ViewChangesPanel from '../changes/ViewChangesPanel.vue'
 
 /**
  * The View page's right panel: Comments, Inspect, Spec, Readiness and History (brief e). Comments
@@ -95,7 +95,7 @@ function commentOn(widgetId: string): void {
       <ViewFlowUsage />
     </template>
     <template #history>
-      <ViewHistoryPanel :active="tab === 'history'" />
+      <ViewChangesPanel :active="tab === 'history'" />
     </template>
   </UTabs>
 </template>

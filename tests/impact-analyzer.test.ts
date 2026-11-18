@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { renderInputDigest } from '../src/domain/evidence/render-input-digest'
 import type { FormalEvidenceRecord } from '../src/domain/evidence/schema'
 import { RENDER_INPUT_CHANGED_REASON } from '../src/domain/evidence/staleness'
-import { resourceIdentityKey } from '../src/domain/history/summary'
+import { resourceIdentityKey } from '../src/domain/resource-identity'
 import { analyzeImpact, bindingReferences, variantImpact, withResource, widgetIds, type ImpactWorkspace } from '../src/domain/impact'
 
 /**

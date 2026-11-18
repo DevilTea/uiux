@@ -40,11 +40,6 @@ export function artifactShardsPath(root: string, layout: WorkspaceLayout = CURRE
 	return absolute(root, `${layout.artifactsDir}/sha256`)
 }
 
-/** The absolute path of the Checkpoints directory. */
-export function checkpointsPath(root: string, layout: WorkspaceLayout = CURRENT_TEST_LAYOUT): string {
-	return absolute(root, layout.checkpointsDir)
-}
-
 /** The absolute path of the persistence transaction directory. */
 export function transactionsPath(root: string, layout: WorkspaceLayout = CURRENT_TEST_LAYOUT): string {
 	return absolute(root, layout.transactionsDir)

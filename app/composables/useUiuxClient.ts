@@ -4,8 +4,6 @@ import type { AssetResolutionTable } from '../../src/assets/bindings'
 import type { DescribedWidgetCatalog } from '../../src/preview/widget-catalog'
 import { MAX_RESOURCE_DISCOVERY_LIMIT } from '../../src/application/dto/resource-discovery'
 
-export type VersionResourceRead<T> = Readonly<{ versionId: string; kind: string; key: string; revision: string; workspaceSchemaVersion: number; resource: T }>
-
 type ResourceListPage<T> = Readonly<{ items: readonly T[]; nextCursor?: string }>
 
 /** A View's current render-input digest (Clause 01a14e30-2d4a-…) and the revision it was read at. */
@@ -55,22 +53,6 @@ export function useUiuxClient() {
 		catch (cause) {
 			const error = cause as { status?: number; statusCode?: number }
 			if (error?.status === 404 || error?.statusCode === 404) return undefined
-			throw cause
-		}
-	}
-
-	/**
-	 * One resource as a version records it, for Preview's read-only version mode (Rule
-	 * 01a11a5e-1232-777c-a76d-26a6d5cbcfc0): `workspace`, `view` or `locale`, already upgraded to the
-	 * current schema by the server. `undefined` when the version does not hold it.
-	 */
-	async function readVersionResource<T>(versionId: string, kind: string, key: string): Promise<VersionResourceRead<T> | undefined> {
-		try {
-			return await $fetch<VersionResourceRead<T>>(`/api/history/versions/${encodeURIComponent(versionId)}/resources/${encodeURIComponent(kind)}/${encodeURIComponent(key)}`, { cache: 'no-store' }) as VersionResourceRead<T>
-		}
-		catch (cause) {
-			const error = cause as { status?: number; statusCode?: number; data?: { code?: string } }
-			if ((error?.status === 404 || error?.statusCode === 404) && error.data?.code === 'history.resource_missing') return undefined
 			throw cause
 		}
 	}
@@ -130,12 +112,11 @@ export function useUiuxClient() {
 
 	/**
 	 * The server's resolution of the Assets a Preview's View binds (Rule 01a167f4-472f-7ae9-8ebb-3075216ad94c):
-	 * the current Assets, or with `versionId` the Assets as that version records them. No ID asks nothing.
+	 * the current Assets. No ID asks nothing.
 	 */
-	async function previewAssets(assetIds: readonly string[], versionId?: string): Promise<AssetResolutionTable> {
+	async function previewAssets(assetIds: readonly string[]): Promise<AssetResolutionTable> {
 		if (assetIds.length === 0) return {}
-		const url = versionId ? `/api/history/versions/${encodeURIComponent(versionId)}/assets` : '/api/preview/assets'
-		return (await $fetch<{ assets: AssetResolutionTable }>(url, { query: { ids: assetIds.join(',') }, cache: 'no-store' })).assets
+		return (await $fetch<{ assets: AssetResolutionTable }>('/api/preview/assets', { query: { ids: assetIds.join(',') }, cache: 'no-store' })).assets
 	}
 
 	function assetUrl(assetId: string): string {
@@ -169,7 +150,6 @@ export function useUiuxClient() {
 
 	return {
 		readResource,
-		readVersionResource,
 		listResources,
 		listEvidence,
 		listEvidenceOfKinds,
@@ -185,9 +165,4 @@ export function useUiuxClient() {
 		viewThumbnailUrl,
 		routeUrl,
 	}
-}
-
-/** A version blob by content digest (host history store, then artifact store; `history.read`). */
-export function versionBlobUrl(digest: string): string {
-	return `/api/history/blobs/${encodeURIComponent(digest)}`
 }

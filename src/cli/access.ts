@@ -1,4 +1,4 @@
-import { lstat, stat } from 'node:fs/promises'
+import { stat } from 'node:fs/promises'
 import { hostname } from 'node:os'
 import { resolve } from 'node:path'
 
@@ -6,9 +6,7 @@ import { isCatalogKey, isHumanOnlyKey, keysOfPreset, PERMISSION_KEYS } from '../
 import { memberLabel, memberLabelName, type LabelPreset } from '../application/access/labels'
 import { presetNameKey } from '../domain/access-presets/schema'
 import { isMemberKind, type MemberKind } from '../application/access/principal'
-import { FileNativePersistence } from '../persistence/file-native'
-import { readArtifactBlobUnlocked } from '../persistence/history/version-blobs'
-import { resolveLayoutDirectory, resolveWorkspacePath, V5_LAYOUT, type WorkspaceLayout } from '../persistence/paths'
+import { resolveWorkspacePath, V5_LAYOUT, type WorkspaceLayout } from '../persistence/paths'
 import type { WorkspaceSchemaPolicy } from '../persistence/schema-policy'
 import { checkWorkspaceSelection, selectWorkspace } from '../persistence/workspace-selection'
 import { readActiveServerHold } from '../persistence/server-hold'
@@ -35,7 +33,7 @@ import {
 	type AccessFile,
 	type StoredMember,
 } from '../server/access/roster'
-import { AccessStore, assertHomeOutsideWorkspace, assertReplacementKeepsManager, copyHostHistory, planHostHistoryCopy, realFuturePath, resolveUiuxHome, rosterExists, workspaceRealRoot, writeNewRoster, type HostHistoryCopyResult } from '../server/access/store'
+import { AccessStore, assertHomeOutsideWorkspace, assertReplacementKeepsManager, realFuturePath, resolveUiuxHome, rosterExists, workspaceRealRoot, writeNewRoster } from '../server/access/store'
 import { writeStderrLine, writeStdoutLine } from './output'
 
 /**
@@ -76,10 +74,9 @@ current directory; the roster lives in $UIUX_HOME, default ~/.uiux):
                                              (--origin defaults to the loopback origin on the server's port)
   session list
   session revoke <session-id> | --member <nick>
-  access copy --from <old-dir> [--replace]   (roster and host history from another Workspace path, once,
-                                             such as after moving a Workspace; copy before the first
-                                             uiux dev there; --replace discards the target's roster and
-                                             own host history)`
+  access copy --from <old-dir> [--replace]   (the roster from another Workspace path, once, such as
+                                             after moving a Workspace; --replace discards the target's
+                                             roster)`
 
 class UsageError extends Error {}
 
@@ -516,79 +513,29 @@ function commandSpec(command: string, sub: string | undefined): CommandSpec | un
 				const fromPath = resolve(context.cwd, from)
 				// The old directory may already be gone; fall back to its nearest existing ancestor's real path.
 				const sourceRoot = realFuturePath(fromPath)
-				// The source gets the same entry check as the target before its lock is ever taken.
+				// The source gets the same entry check as the target.
 				const sourceSelection = checkWorkspaceSelection(sourceRoot, context.schemaPolicy)
 				if (!sourceSelection.ok) throw new AccessError('access.workspace_invalid', `The source ${sourceSelection.message}`)
 				if (sourceRoot === context.workspaceRoot) throw new AccessError('access.roster_exists', 'The source and target are the same Workspace.')
 				const source = await AccessStore.readRoster(context.home, sourceRoot)
 				if (!source) throw new AccessError('access.roster_missing', `No roster recorded for ${sourceRoot} under ${context.home}.`)
 				const replace = context.parsed.flags.has('replace')
-				// Clause 01a1144e-56bd-7988-8d2a-87b23954ca49: the host history comes along, once. Every
-				// refusal is checked first, and the history is copied before the roster is written, so a
-				// refused or failed copy leaves the target unchanged.
+				// Clause 01a1144e-56bd-7988-8d2a-87b23954ca49: every refusal is checked before the roster is written.
 				assertHomeOutsideWorkspace(context.home, context.workspaceRoot)
 				if (!replace && await rosterExists(context.home, context.workspaceRoot))
-					throw new AccessError('access.roster_exists', `Workspace ${context.workspaceRoot} already has a roster. Pass --replace to discard it (and its host history).`)
+					throw new AccessError('access.roster_exists', `Workspace ${context.workspaceRoot} already has a roster. Pass --replace to discard it.`)
 				// A replacement keeps the target's last human manager (owner ruling 2 of 2026-10-11).
 				if (replace) await assertReplacementKeepsManager(context.home, context.workspaceRoot, source)
-				const history = await planHostHistoryCopy(context.home, sourceRoot, context.workspaceRoot)
-				let copied: HostHistoryCopyResult | undefined
-				if (history.sourceExists) {
-					if (history.targetExists && !replace)
-						throw new AccessError('access.roster_exists', `Workspace ${context.workspaceRoot} already has host history (${history.target.dir}). Pass --replace to discard it.`)
-					// A running server keeps the target's history state in memory; replacing it underneath would corrupt it.
-					await refuseWhileServed(context.workspaceRoot)
-					// Under the target Workspace's persistence lock, which every writer of its history holds,
-					// and where possible the source's, so no source writer or prune runs mid-copy.
-					const persistence = new FileNativePersistence({ root: context.workspaceRoot, schemaPolicy: context.schemaPolicy })
-					try {
-						copied = await persistence.withLock(() => withSourceLock(sourceRoot, context.err, () => copyHostHistory(history, {
-							replace,
-							// A server may have started since the check above.
-							beforeSwap: () => refuseWhileServed(context.workspaceRoot),
-							// Issue #253: a blob only the target's artifact store keeps is copied into its host
-							// history, so the copied versions do not depend on a Checkpoint's blobs. One that
-							// cannot be read there is reported as missing like any other.
-							readBlobElsewhere: digest => readArtifactBlobUnlocked(persistence, digest).catch(() => undefined),
-						})))
-					}
-					catch (error) {
-						if (error instanceof AccessError) throw error
-						throw new AccessError('access.store_invalid', `Could not copy the host history from ${history.source.dir}: ${error instanceof Error ? error.message : String(error)}. Nothing was copied.`)
-					}
-				}
-				let written: Awaited<ReturnType<typeof writeNewRoster>>
-				try {
-					written = await writeNewRoster({
-						workspaceRoot: context.workspaceRoot,
-						home: context.home,
-						replace,
-						file: realRoot => copyRoster(source, { workspaceRoot: realRoot, hint: generateHint() }),
-						onManagerCheckSkipped: reason => context.err(`uiux: warning: the roster being replaced is damaged (${reason}); --replace repairs it without checking that a human member keeps members.manage.`),
-					})
-				}
-				catch (error) {
-					if (!copied) throw error
-					// Whatever failed, the host history is already in place: only a rerun with --replace finishes the copy.
-					const hint = 'The host history was copied, but the roster was not; run uiux access copy again with --replace.'
-					if (error instanceof AccessError) throw new AccessError(error.code, `${error.message} ${hint}`)
-					throw new AccessError('access.store_invalid', `Could not write the roster: ${error instanceof Error ? error.message : String(error)}. ${hint}`)
-				}
+				const written = await writeNewRoster({
+					workspaceRoot: context.workspaceRoot,
+					home: context.home,
+					replace,
+					file: realRoot => copyRoster(source, { workspaceRoot: realRoot, hint: generateHint() }),
+					onManagerCheckSkipped: reason => context.err(`uiux: warning: the roster being replaced is damaged (${reason}); --replace repairs it without checking that a human member keeps members.manage.`),
+				})
 				context.out(`Copied ${source.members.length} member(s) and ${source.tokens.length} token(s) from roster ${source.hint} (${sourceRoot}) to roster ${written.file.hint} (${written.file.workspaceRoot}).`)
-				if (copied) {
-					context.out(`Copied the host history (${copied.files} file(s)) from ${history.source.dir} to ${history.target.dir}.`)
-					if (history.targetExists)
-						context.out(`--replace discarded the target's own host history: ${copied.discardedVersions} version(s).`)
-					if (copied.filledBlobs.length > 0)
-						context.out(`Copied ${copied.filledBlobs.length} blob(s) that copied versions name from the artifact store of ${context.workspaceRoot} into its host history.`)
-					if (copied.missingBlobs.length > 0)
-						context.err(`uiux: warning: ${copied.missingBlobs.length} blob(s) that copied versions name are missing from the source host history and from this Workspace's artifact store; those versions cannot be compared or restored.`)
-				}
-				else {
-					context.out(`No host history recorded for ${sourceRoot}; none copied.`)
-				}
 				context.out('Existing tokens keep working here; browsers sign in again (invites and sessions are not copied).')
-				context.out('This is a one-time copy: revoking a token in one roster does not revoke it in the other, and later history is recorded separately.')
+				context.out('This is a one-time copy: revoking a token in one roster does not revoke it in the other.')
 				context.out(`Source roster: ${source.workspaceRoot} — delete it by hand when it is stale.`)
 				return 0
 			},
@@ -612,38 +559,6 @@ async function defaultInviteOrigin(context: Context): Promise<string> {
 		catch { /* fall back to the configured port */ }
 	}
 	return `http://${DEFAULT_LOOPBACK_BIND_HOST}:${resolveListenPort(context.env)}`
-}
-
-async function refuseWhileServed(workspaceRoot: string): Promise<void> {
-	const hold = await readActiveServerHold(workspaceRoot, await workspaceLayout())
-	if (hold)
-		throw new AccessError('access.lock_busy', `A UIUX server (pid ${hold.pid} on ${hold.hostname}) is serving ${workspaceRoot}. Stop that server, then run uiux access copy again to copy the host history.`)
-}
-
-/**
- * Runs `operation` under the source Workspace's persistence lock when the source is still a
- * Workspace, so its server cannot record or prune host history meanwhile. Best effort: the old
- * directory may be gone, and a lock that cannot be taken (a busy or unusable source) only warns,
- * since the copy checks its own consistency before it replaces anything.
- */
-async function withSourceLock<Result>(sourceRoot: string, warn: (line: string) => void, operation: () => Promise<Result>): Promise<Result> {
-	const layout = await workspaceLayout().catch(() => undefined)
-	if (!layout || !(await lstat(resolveLayoutDirectory(sourceRoot, layout.metadataDir)).then(stats => stats.isDirectory(), () => false))) return operation()
-	// Not read-only for the source: taking its persistence lock writes the lock file under the source's
-	// metadata directory (removed on release), and acquiring the lock runs the source's pending-transaction
-	// recovery, which can change its files to settle a multi-file write it left interrupted.
-	let entered = false
-	try {
-		return await new FileNativePersistence({ root: sourceRoot, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY, layout }).withLock(async () => {
-			entered = true
-			return operation()
-		})
-	}
-	catch (error) {
-		if (entered) throw error
-		warn(`uiux: warning: could not lock the source Workspace ${sourceRoot} (${error instanceof Error ? error.message : String(error)}); copying its host history without the lock.`)
-		return operation()
-	}
 }
 
 /** `session revoke` takes either one positional session id or `--member <nick>`. */

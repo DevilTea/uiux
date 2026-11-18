@@ -75,11 +75,11 @@ describe('the members on this host after an edit', () => {
 	})
 
 	it('gives each holder the new keys as grant and revoke deltas, an Agent without humanOnly keys (Rule 01a11c33-2761)', () => {
-		const next = [...REVIEWER.filter(key => key !== 'checkpoints.create'), 'locks.force-release']
+		const next = [...REVIEWER.filter(key => key !== 'reviews.promote'), 'locks.force-release']
 		const updates = memberUpdates(next, holdersOf(reviewer, members))
 		expect(updates.map(update => [update.member.id, update.grant, update.revoke])).toEqual([
-			['ann', ['locks.force-release'], ['checkpoints.create']],
-			['bot', [], ['checkpoints.create']],
+			['ann', ['locks.force-release'], ['reviews.promote']],
+			['bot', [], ['reviews.promote']],
 		])
 	})
 

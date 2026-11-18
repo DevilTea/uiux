@@ -38,9 +38,8 @@ function response(payload: Record<string, unknown>) {
 describe('the geometry.region-status feature', () => {
 	it('is named by the Contract and declared by a Workbench Preview only', () => {
 		expect(REGION_STATUS_GEOMETRY_FEATURE).toBe('geometry.region-status')
-		expect(declaredRuntimeFeatures({ harness: false, version: false })).toContain(REGION_STATUS_GEOMETRY_FEATURE)
-		expect(declaredRuntimeFeatures({ harness: true, version: false })).not.toContain(REGION_STATUS_GEOMETRY_FEATURE)
-		expect(declaredRuntimeFeatures({ harness: false, version: true })).not.toContain(REGION_STATUS_GEOMETRY_FEATURE)
+		expect(declaredRuntimeFeatures({ harness: false })).toContain(REGION_STATUS_GEOMETRY_FEATURE)
+		expect(declaredRuntimeFeatures({ harness: true })).not.toContain(REGION_STATUS_GEOMETRY_FEATURE)
 	})
 })
 

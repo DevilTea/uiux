@@ -11,7 +11,7 @@
  *
  * - a candidate is a tracked `formal_capture` blob that is `stale` while a `fresh` capture of the
  *   same render context (`contextKey`) stays in the tree; `unknown` freshness is never a candidate;
- * - a candidate that any other root reaches stays: a Review thread, a Checkpoint or any other file
+ * - a candidate that any other root reaches stays: a Review thread or any other file
  *   under `.uiux/` (other than the store and the Kit) that names its identity, or a blob that is kept
  *   and names it (an `interaction_replay`, say). The scan is textual and over-protects on purpose;
  * - what stays is then decided by gc itself: the candidates are deleted from a scratch tree and
@@ -70,7 +70,7 @@ function readStore(workspaceRoot) {
 	return store
 }
 
-/** Every `sha256:` identity named by a file under the Workspace other than the store and the Kit (Review threads, history, Views, Flows, ...). */
+/** Every `sha256:` identity named by a file under the Workspace other than the store and the Kit (Review threads, Views, Flows, ...). */
 function identitiesOutsideStore(workspaceRoot) {
 	const found = new Set()
 	const root = join(workspaceRoot, DOGFOOD_DIR)

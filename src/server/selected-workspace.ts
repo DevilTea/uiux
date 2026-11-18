@@ -8,7 +8,6 @@ import { createThumbnailCapturer } from '../application/services/thumbnail-captu
 import { createThumbnailInputs } from '../application/services/thumbnail-inputs'
 import { createChangeEventBus, publishCommits, publishLeaseChanges, type ChangeEventBus } from '../application/services/change-events'
 import type { AdapterProvenanceSource } from '../application/services/adapter-provenance'
-import { createHistoryRecorder, type HistoryRecorder } from '../application/services/history-recorder'
 import type { WorkspaceApplicationSession } from '../application/services/workspace-session'
 import { createWorkspaceApplicationSession } from '../application/services/workspace-session'
 import { createUiuxMcpHttpHandler } from '../mcp/server'
@@ -19,7 +18,6 @@ import { AccessService } from './access/service'
 import { AccessStore, resolveUiuxHome } from './access/store'
 import { createWorkspaceAccessPresetsReader } from './access/workspace-presets'
 import { createEventStreamHub, type EventStreamHub } from './event-stream'
-import { createHistoryStoreFactory, type HistoryStoreFactory } from './history-stores'
 import { createThumbnailStore } from './thumbnail-store'
 import { createKitBuildRunner, registerKitBuildRunner, type KitBuildRunner } from './kit-build'
 import { checkAdapterSetRuntime, getSelectedWorkspacePreviewBundle, isSelectionOnlyAdapterEntry, pinnedAdapterContentDigest, resolveSelectedWorkspaceAdapterList, selectedWorkspaceThemeSupport } from './workspace-adapters'
@@ -32,13 +30,6 @@ export type SelectedWorkspaceServerRuntime = Readonly<{
 	leases: LeaseManager
 	/** The Workspace's roster and authentication, opened (and created if needed) once per process. */
 	access(): Promise<AccessService>
-	/** The Workspace's history stores, opened lazily. */
-	history: HistoryStoreFactory
-	/**
-	 * The autosave recorder over those stores. The Nitro plugin starts it (start boundary, Baseline,
-	 * pruning) and `close()` stops it.
-	 */
-	historyRecorder: HistoryRecorder
 	mcp: McpHttpHandler
 	/**
 	 * The change events of every committed write, lease change and roster change (Feature "Live
@@ -103,15 +94,8 @@ export function createSelectedWorkspaceServerRuntime(
 	const serverOrigin = options?.serverOrigin ?? resolveInternalServerOrigin()
 	const leases = createLeaseManager()
 	let accessService: AccessService | undefined
-	// The recorder writes these stores and version comparison reads them.
-	const history = createHistoryStoreFactory({
-		workspaceRoot: selectedRoot,
-		persistence,
-		home: () => options?.uiuxHome ?? resolveUiuxHome(),
-	})
-	// The Adapter provenance of a version or Checkpoint record follows the server's resolution and kit build (Rule 01a167bf-1f93-78b7-9045-6562c20f5a42); set once the kit build runner exists.
+	// The Adapter provenance of Evidence and thumbnails follows the server's resolution and kit build (Rule 01a167bf-1f93-78b7-9045-6562c20f5a42); set once the kit build runner exists.
 	const adapterProvenanceHolder: { source?: AdapterProvenanceSource } = {}
-	const historyRecorder = createHistoryRecorder({ persistence, stores: () => history.open(), adapterProvenance: () => adapterProvenanceHolder.source })
 	const kitBuild = createKitBuildRunner({
 		root: selectedRoot,
 		codeDirectoryName: persistence.layout.codeDir,
@@ -145,9 +129,6 @@ export function createSelectedWorkspaceServerRuntime(
 		serverOrigin,
 		captureCookie,
 		thumbnails,
-		history,
-		// A Checkpoint first closes the open autosave and records outside changes (Rule 01a11a5e-00b9-7bf5-8005-9380a388afb8).
-		historyBoundary: () => historyRecorder,
 		kitBuild,
 		// Handoff refuses an Adapter set the Preview refuses (Clause 01a116f0-cae2-7c64-9c76-d472f252789a).
 		checkAdapterSet: set => checkAdapterSetRuntime(selectedRoot, persistence.layout, set),
@@ -188,7 +169,7 @@ export function createSelectedWorkspaceServerRuntime(
 		})()
 		return pending
 	}
-	const mcp = createUiuxMcpHttpHandler(app, { leases, history: historyRecorder })
+	const mcp = createUiuxMcpHttpHandler(app, { leases })
 	return Object.freeze({
 		root: selectedRoot,
 		serverOrigin,
@@ -196,8 +177,6 @@ export function createSelectedWorkspaceServerRuntime(
 		app,
 		leases,
 		access,
-		history,
-		historyRecorder,
 		mcp,
 		events,
 		eventStreams,
@@ -210,7 +189,6 @@ export function createSelectedWorkspaceServerRuntime(
 			stopLeaseEvents()
 			unregisterKitBuild()
 			await kitBuild.stop()
-			await historyRecorder.stop()
 			await accessService?.flushUsage()
 			await mcp.close()
 		},

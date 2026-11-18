@@ -1,8 +1,6 @@
 import { randomUUID } from 'node:crypto'
 
-import { HISTORY_WRITE_OPERATIONS, isRestorableResourceKind, type HistoryWriteOperation } from '../../domain/history/constants'
-import { isFullUuid, type Diagnostic } from '../../domain/validation'
-import { runWithDesignWriteContext, type DesignWriteContext } from '../../persistence/history/write-context'
+import type { Diagnostic } from '../../domain/validation'
 import type { ReviewResolution } from '../../domain/reviews/schema'
 import type { CurrentProductKitProvenance } from '../../domain/product-kit/provenance'
 import type { CurrentAdapterProvenance } from '../../domain/evidence/adapter-provenance'
@@ -10,14 +8,11 @@ import type { PointResourceKind } from '../dto/point-resources'
 import type { ResourceDiscoveryOutcome } from '../dto/resource-discovery'
 import type { AssetAuthoringResult, CreateAssetCommand, DeleteAssetCommand, ReplaceAssetCommand } from '../services/asset-authoring'
 import type { CreateFlowCommand, DeleteFlowCommand, FlowAuthoringResult, UpdateFlowCommand } from '../services/flow-authoring'
+import type { GitChangesService } from '../services/git-changes'
 import type { RequirementsCoverage } from '../services/requirements'
 import type { CaptureFormalEvidenceCommand, CaptureFormalEvidenceResult, FlowInput, FormalEvidenceItem, ViewRenderInput } from '../services/formal-capture'
 import type { ProductKitChecksResult } from '../services/product-kit-checks'
 import type { AssessHandoffReadinessCommand, AssessHandoffReadinessResult, ExportHandoffCommand, ExportHandoffResult } from '../services/handoff-export'
-import type { DiffVersionsCommand, VersionDiffOutcome } from '../services/history-diff'
-import type { ReadVersionBlobOutcome, ReadVersionResourceOutcome, ResolveVersionAssetsOutcome } from '../services/history-preview'
-import type { RestoreGuard, RestoreResourceVersionCommand, RestoreResourceVersionOutcome } from '../services/history-restore'
-import type { CreateCheckpointOutcome, DeleteCheckpointOutcome, ListVersionsOutcome, ListVersionsQuery, ReadVersionOutcome } from '../services/history-service'
 import type { CreateLocaleCommand, LocaleAuthoringResult, UpdateLocaleCommand } from '../services/locale-authoring'
 import type {
 	AppendReviewMessageCommand,
@@ -66,7 +61,6 @@ import {
 import {
 	authorizeLeaseAcquire,
 	authorizeOperation,
-	authorizeRestore,
 	effectiveKeys,
 	productKitChangeKeys,
 	type AccessOperation,
@@ -153,24 +147,11 @@ export interface ScopedWorkspaceSession {
 	/** Each Flow's current Flow input digest that Flow trace freshness is judged against; read with the Evidence, under its key. */
 	flowInputs(): Promise<readonly FlowInput[]>
 	readArtifact(identity: string): Promise<Uint8Array | undefined>
+	/** The read-only view of the changes since a Git base (`workspace.read`; Feature 01a1ece7-8d4e-763c-8897-2c35ef129a4d). */
+	listChanges: GitChangesService['listChanges']
+	readChangeDiff: GitChangesService['readChangeDiff']
+	readChangeBlob: GitChangesService['readChangeBlob']
 	assessHandoffReadiness(command: AssessHandoffReadinessCommand): Promise<AssessHandoffReadinessResult | AccessRefusal>
-	diffVersions(command: DiffVersionsCommand): Promise<VersionDiffOutcome | AccessRefusal>
-	listVersions(query: ListVersionsQuery): Promise<ListVersionsOutcome | AccessRefusal>
-	readVersion(id: string): Promise<ReadVersionOutcome | AccessRefusal>
-	/** The version reads for Preview (`history.read`; never a system credential, Clause 01a11485-f978-767a-b977-33028aee7ae7). */
-	readVersionResource(id: string, kind: string, key: string): Promise<ReadVersionResourceOutcome | AccessRefusal>
-	readVersionBlob(digest: string): Promise<ReadVersionBlobOutcome | AccessRefusal>
-	/** A version frame's Asset resolution, one of the version reads for Preview (`history.read`). */
-	resolveVersionAssets(id: string, assetIds: readonly string[]): Promise<ResolveVersionAssetsOutcome | AccessRefusal>
-	/** Stamps the member actor and the transport's source; needs no edit lease (Rule 01a11a5e-0a0c-7d65-8d09-9a71a730ec61). */
-	createCheckpoint(command: Readonly<{ name: string; note?: string }>): Promise<CreateCheckpointOutcome | AccessRefusal>
-	deleteCheckpoint(id: string): Promise<DeleteCheckpointOutcome | AccessRefusal>
-	/**
-	 * Needs `history.restore` and the restored kind's write key (Rule 01a11c09-c648-71be-a550-2ecabf12f5d0);
-	 * checks (and for an Agent takes) the target's edit lease like any write of it (Rule
-	 * 01a11a5e-1520-78ac-a711-6e51c54c2079), and records the write with `restoredFrom`.
-	 */
-	restoreResourceVersion(command: RestoreResourceVersionCommand): Promise<Scoped<RestoreResourceVersionOutcome>>
 	createView(command: CreateViewCommand): Promise<Scoped<ViewAuthoringResult>>
 	updateViewSpec(command: UpdateViewSpecCommand): Promise<Scoped<ViewAuthoringResult>>
 	updateViewStructure(command: UpdateViewStructureCommand): Promise<Scoped<ViewAuthoringResult>>
@@ -248,7 +229,7 @@ export interface ScopedWorkspaceSession {
 	runProductKitChecks(): Promise<ProductKitChecksResult | AccessRefusal>
 	exportHandoff(command: ExportHandoffCommand): Promise<ExportHandoffResult | AccessRefusal>
 	acquireLeases(input: unknown): AcquireLeasesOutcome
-	/** With no `resources`, an Agent's release also closes the autosave it wrote (Rule 01a11a5e-0068-7a4b-b4bc-3cb282b4ae5a). */
+	/** With no `resources`, an Agent releases every lease it holds. */
 	releaseLeases(input: unknown): Promise<ReleaseLeasesOutcome>
 	listLeases(): readonly PublicLease[]
 	forceReleaseLease(address: unknown): ForceReleaseOutcome
@@ -267,8 +248,6 @@ export type ScopedSessionOptions = Readonly<{
 	transport: AccessTransport
 	leases: LeaseManager
 	now?: () => Date
-	/** The history recorder's `release_lock` boundary; absent where history is not recorded. */
-	history?: Readonly<{ agentReleased(actor: StampedActor): Promise<void> }>
 }>
 
 const SUCCESS = new Set(['created', 'updated', 'deleted'])
@@ -379,25 +358,6 @@ export function createScopedWorkspaceSession(
 		}
 	}
 
-	/**
-	 * The design-write context of one write (recorder seam 6): the server-stamped member actor, the
-	 * transport's source (Clause 01a11a5e-221b-7a04-a6cb-66bc9608c11f: `/api/*` records `workbench`,
-	 * bearer Tokens included, and `/mcp` records `mcp`) and the operation. Only the design
-	 * operations of Clause 01a11a5e-216d-7587-8022-66a66f264eee get one, so Review activity is never
-	 * recorded (Rule 01a11a5e-0873-7976-8a48-a9a1a00e4b6d), and system principals never create events.
-	 */
-	function designWriteContext(operation: AccessOperation, restoredFrom?: string): DesignWriteContext | undefined {
-		if (principal.type !== 'member' || !(HISTORY_WRITE_OPERATIONS as readonly string[]).includes(operation)) return undefined
-		return {
-			actor: principalActor(principal),
-			source: transport === 'mcp' ? 'mcp' : 'workbench',
-			operation: operation as HistoryWriteOperation,
-			// Clause 01a11a5e-20c6-7573-8530-e6fed6d8d4af: the version a restore copied. The recorder
-			// closes the open autosave before and after such a write (Rule 01a11e0d-d911-7030-9565-7473aa0995e1).
-			...(restoredFrom === undefined ? {} : { restoredFrom }),
-		}
-	}
-
 	function withWarnings<R extends object>(result: R, warnings: readonly Diagnostic[]): R & AccessWarnings {
 		return warnings.length > 0 ? { ...result, warnings } : result
 	}
@@ -422,7 +382,6 @@ export function createScopedWorkspaceSession(
 		target: LeaseAddress | undefined,
 		run: () => Promise<R>,
 		warnings: readonly Diagnostic[] = [],
-		options: Readonly<{ restoredFrom?: string }> = {},
 	): Promise<Scoped<R>> {
 		const denied = authorizeOperation(principal, operation)
 		if (denied) return refusalFromScope(key, denied)
@@ -440,9 +399,8 @@ export function createScopedWorkspaceSession(
 			ticket = begun.ticket
 		}
 		let result: R
-		const context = designWriteContext(operation, options.restoredFrom)
 		try {
-			result = context ? await runWithDesignWriteContext(context, run) : await run()
+			result = await run()
 		}
 		catch (error) {
 			ticket?.abort()
@@ -516,75 +474,13 @@ export function createScopedWorkspaceSession(
 		async viewRenderInputs() { assert('listEvidence'); return app.viewRenderInputs() },
 		async flowInputs() { assert('listEvidence'); return app.flowInputs() },
 		async readArtifact(identity) { assert('readArtifact'); return app.readArtifact(identity) },
+		async listChanges(query) { assert('listChanges'); return app.listChanges(query) },
+		async readChangeDiff(query) { assert('readChangeDiff'); return app.readChangeDiff(query) },
+		async readChangeBlob(query) { assert('readChangeBlob'); return app.readChangeBlob(query) },
 		async assessHandoffReadiness(command) {
 			const denied = authorizeOperation(principal, 'assessHandoffReadiness')
 			return denied ? refusalFromScope('handoff', denied) : app.assessHandoffReadiness(command)
 		},
-		async diffVersions(command) {
-			const denied = authorizeOperation(principal, 'diffVersions')
-			return denied ? refusalFromScope('history', denied) : app.diffVersions(command)
-		},
-		async listVersions(query) {
-			const denied = authorizeOperation(principal, 'listVersions')
-			return denied ? refusalFromScope('history', denied) : app.listVersions(query)
-		},
-		async readVersion(id) {
-			const denied = authorizeOperation(principal, 'readVersion')
-			return denied ? refusalFromScope(id, denied) : app.readVersion(id)
-		},
-		async readVersionResource(id, kind, key) {
-			const denied = authorizeOperation(principal, 'readVersionForPreview')
-			return denied ? refusalFromScope(id, denied) : app.readVersionResource(id, kind, key)
-		},
-		async readVersionBlob(digest) {
-			const denied = authorizeOperation(principal, 'readVersionForPreview')
-			return denied ? refusalFromScope(digest, denied) : app.readVersionBlob(digest)
-		},
-		async resolveVersionAssets(id, assetIds) {
-			const denied = authorizeOperation(principal, 'readVersionForPreview')
-			return denied ? refusalFromScope(id, denied) : app.resolveVersionAssets(id, assetIds)
-		},
-		async createCheckpoint(command) {
-			const denied = authorizeOperation(principal, 'createCheckpoint')
-			if (denied) return refusalFromScope('checkpoint', denied)
-			// The policy refuses every system principal, so only a member gets here. Rule
-			// 01a11a5e-025f-71d7-8d08-63948220de57 and Clause 01a11a5e-221b-7a04-a6cb-66bc9608c11f: the
-			// server-stamped actor and the transport's source; the caller supplies neither.
-			return app.createCheckpoint({
-				name: command.name,
-				...(command.note === undefined ? {} : { note: command.note }),
-				actor: principalActor(principal as MemberPrincipal),
-				source: transport === 'mcp' ? 'mcp' : 'workbench',
-			})
-		},
-		async deleteCheckpoint(id) {
-			const denied = authorizeOperation(principal, 'deleteCheckpoint')
-			return denied ? refusalFromScope(id, denied) : app.deleteCheckpoint(id)
-		},
-
-		async restoreResourceVersion(command) {
-			const resource = (command as Readonly<{ resource?: unknown }>).resource
-			const kind = typeof resource === 'object' && resource !== null && typeof (resource as { kind?: unknown }).kind === 'string' ? (resource as { kind: string }).kind : ''
-			const key = typeof resource === 'object' && resource !== null && typeof (resource as { key?: unknown }).key === 'string' ? (resource as { key: string }).key : ''
-			// `history.restore` and the kind's write key. A kind this build cannot restore has no write
-			// key; the service refuses it while parsing the command, before it reads or writes anything,
-			// so only `history.restore` is checked for it here.
-			const denied = isRestorableResourceKind(kind) ? authorizeRestore(principal, kind) : authorizeOperation(principal, 'restoreResourceVersion')
-			if (denied) return refusalFromScope(key || 'history', denied)
-			const target = isValidLeaseAddress({ kind, key }) ? { kind: kind as LockableKind, key } : undefined
-			const versionId: unknown = command.versionId
-			// Clause 01a11bb1-b35a-7e69-bba5-978e3f47c4fa: a `product-kit` restore needs the keys of what it
-			// changes, so one that changes `designSystems` or the Adapter specifiers needs `product-kit.compose`.
-			const guard: RestoreGuard<AccessRefusal> = (change) => {
-				if (change.kind === 'product-kit') {
-					const denied = authorizeRestore(principal, change.kind, productKitChangeKeys(change.current, change.next))
-					return denied ? refusalFromScope(key || 'history', denied) : undefined
-				}
-				return undefined
-			}
-			return write('restoreResourceVersion', key || 'history', target, () => app.restoreResourceVersion(command, guard), [], isFullUuid(versionId) ? { restoredFrom: versionId } : {})
-		},
-
 		createView: command => write('createView', command.id, { kind: 'view', key: command.id }, () => app.createView(command)),
 		updateViewSpec: command => write('updateViewSpec', command.key, { kind: 'view', key: command.key }, () => app.updateViewSpec(command)),
 		updateViewStructure: command => write('updateViewStructure', command.key, { kind: 'view', key: command.key }, () => app.updateViewStructure(command)),
@@ -736,9 +632,6 @@ export function createScopedWorkspaceSession(
 			const parsed = parseAddresses(input, false)
 			if (!parsed.ok) return invalidLeases(parsed.diagnostics)
 			const released = leases.release(holder, parsed.addresses)
-			// The end of an Agent's task closes only its open autosave; no Checkpoint is created (Rule 01a11a5e-0ac6-79b2-b542-1e527e8b4fdf).
-			if (parsed.addresses === undefined && principal.type === 'member' && principal.kind === 'agent')
-				await options.history?.agentReleased(principalActor(principal)).catch(() => undefined)
 			return { status: 'released', released: released.map(lease => ({ kind: lease.kind, key: lease.key })) }
 		},
 		listLeases() {

@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { HISTORY_RESOURCE_KINDS, HISTORY_WRITE_OPERATIONS } from '../src/domain/history/constants'
+import { DIFFABLE_RESOURCE_KINDS } from '../src/domain/diff'
 import {
 	matchWorkbenchLocale,
 	resolveInitialWorkbenchLocale,
@@ -51,21 +51,12 @@ describe('Workbench chrome catalogs', () => {
 		}
 	})
 
-	it('labels every known history resource kind in every catalog', () => {
-		// The History UI shows `history.kind.<kind>` and falls back to the raw kind key when it is missing.
+	it('labels every resource kind the changes view can diff in every catalog', () => {
+		// The changes view shows `history.kind.<kind>` and falls back to the raw kind key when it is missing.
 		for (const locale of WORKBENCH_LOCALES) {
 			const messages = new Map(flattenEntries(readCatalog(locale)))
-			for (const kind of HISTORY_RESOURCE_KINDS)
+			for (const kind of DIFFABLE_RESOURCE_KINDS)
 				expect(messages.get(`history.kind.${kind}`), `${locale}:history.kind.${kind}`).toBeTruthy()
-		}
-	})
-
-	it('labels every history write operation in every catalog', () => {
-		// Clause 01a11a5e-216d-7587-8022-66a66f264eee: the History UI shows `history.operation.<operation>` and falls back to the raw identifier when it is missing.
-		for (const locale of WORKBENCH_LOCALES) {
-			const messages = new Map(flattenEntries(readCatalog(locale)))
-			for (const operation of HISTORY_WRITE_OPERATIONS)
-				expect(messages.get(`history.operation.${operation}`), `${locale}:history.operation.${operation}`).toBeTruthy()
 		}
 	})
 

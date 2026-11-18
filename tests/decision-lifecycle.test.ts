@@ -5,15 +5,12 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { createLeaseManager } from '../src/application/access/leases'
-import { createHistoryRecorder, type HistoryRecorder, type HistoryRecorderClock } from '../src/application/services/history-recorder'
-import type { VersionListing } from '../src/application/services/history-service'
 import { createWorkspaceApplicationSession, type WorkspaceApplicationSession } from '../src/application/services/workspace-session'
 import type { Decision } from '../src/domain/spec/schema'
 import type { ViewResource } from '../src/domain/views/schema'
 import type { WorkspaceManifest } from '../src/domain/workspace/schema'
 import { FileNativePersistence } from '../src/persistence'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
-import { createHistoryStoreFactory } from '../src/server/history-stores'
 import { createDecisionFromReviewForHttp, decideDecisionForHttp, transitionDecisionForHttp } from '../src/server/authoring-http'
 import { connectMcp, presetKeys, scoped, testMember } from './support/access'
 import { HEAVY_SERVER_SUITE_TIMEOUT_MS } from './support/timeouts'
@@ -33,7 +30,6 @@ const DECISION_ID = '55555555-5555-4555-8555-555555555555'
 const MISSING_DECISION_ID = '66666666-6666-4666-8666-666666666666'
 const REVIEW_ID = '77777777-7777-4777-8777-777777777777'
 const SECOND_DECISION_ID = '99999999-9999-4999-8999-999999999999'
-const START = Date.parse('2026-10-25T00:00:00.000Z')
 
 const OWNER = testMember({ memberId: 'owner-1', nickname: 'mei', kind: 'human', preset: 'owner', credential: 'session' })
 const OWNER_TOKEN = testMember({ memberId: 'owner-1', nickname: 'mei', kind: 'human', preset: 'owner', credential: 'token' })
@@ -67,9 +63,7 @@ const VIEW: ViewResource = {
 }
 
 const cleanup: string[] = []
-const running: HistoryRecorder[] = []
 afterEach(async () => {
-	await Promise.all(running.splice(0).map(recorder => recorder.stop()))
 	await Promise.all(cleanup.splice(0).map(path => rm(path, { recursive: true, force: true })))
 })
 
@@ -79,24 +73,15 @@ async function tempDir(prefix: string): Promise<string> {
 	return path
 }
 
-function manualClock(): HistoryRecorderClock {
-	return { now: () => START, setTimeout: () => Symbol('timer'), clearTimeout: () => undefined }
-}
-
-type Fixture = Readonly<{ persistence: FileNativePersistence; app: WorkspaceApplicationSession; recorder: HistoryRecorder }>
+type Fixture = Readonly<{ persistence: FileNativePersistence; app: WorkspaceApplicationSession }>
 
 async function fixture(): Promise<Fixture> {
 	const root = await tempDir('uiux-decision-lifecycle-ws-')
-	const home = join(await tempDir('uiux-decision-lifecycle-home-'), 'home')
 	const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
 	await createCurrentWorkspace(persistence, MANIFEST)
 	await persistence.views.create(VIEW_ID, VIEW)
-	const history = createHistoryStoreFactory({ workspaceRoot: root, persistence, home: () => home })
-	const recorder = createHistoryRecorder({ persistence, stores: () => history.open(), clock: manualClock(), log: () => undefined })
-	const app = createWorkspaceApplicationSession(persistence, { history, historyBoundary: () => recorder })
-	running.push(recorder)
-	expect(await recorder.start()).toMatchObject({ enabled: true })
-	return { persistence, app, recorder }
+	const app = createWorkspaceApplicationSession(persistence)
+	return { persistence, app }
 }
 
 async function readView(ctx: Fixture) {
@@ -234,10 +219,10 @@ describe('who may act (decisions.decide is humanOnly)', { timeout: HEAVY_SERVER_
 })
 
 describe('the lifecycle over MCP and HTTP', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS }, () => {
-	it('lists the three tools, runs defer and reopen as an Agent, refuses decide, and records write events', async () => {
+	it('lists the three tools, runs defer and reopen as an Agent, and refuses decide', async () => {
 		const ctx = await fixture()
 		const leases = createLeaseManager()
-		const mcp = await connectMcp(ctx.app, AGENT, { leases, history: ctx.recorder })
+		const mcp = await connectMcp(ctx.app, AGENT, { leases })
 		try {
 			const tools = (await mcp.client.listTools()).tools
 			for (const name of ['defer_decision', 'decide_decision', 'reopen_decision', 'create_decision_from_review'])
@@ -266,11 +251,6 @@ describe('the lifecycle over MCP and HTTP', { timeout: HEAVY_SERVER_SUITE_TIMEOU
 		finally {
 			await mcp.close()
 		}
-		const listing = (await ctx.app.listVersions({})) as VersionListing
-		const autosave = listing.versions.find(version => version.type === 'autosave')!
-		const read = await ctx.app.readVersion(autosave.id)
-		if (read.status !== 'found' || read.version.type === 'checkpoint') throw new Error(JSON.stringify(read))
-		expect(read.version.events.map(event => [event.operation, event.source])).toEqual([['deferDecision', 'mcp'], ['reopenDecision', 'mcp']])
 	})
 
 	it('maps every HTTP result to its status, and decide needs a human session holding the key', async () => {

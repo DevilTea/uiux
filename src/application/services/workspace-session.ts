@@ -109,29 +109,12 @@ import {
 	type ExportHandoffCommand,
 	type ExportHandoffResult,
 } from './handoff-export'
-import {
-	createHistoryDiffService,
-	type DiffVersionsCommand,
-	type HistoryStoreSource,
-	type VersionDiffOutcome,
-} from './history-diff'
-import { createHistoryRestoreService, type RestoreGuard, type RestoreResourceVersionCommand, type RestoreResourceVersionOutcome } from './history-restore'
+import { createGitChangesService, type GitChangesService } from './git-changes'
 import { readViewReferenceTarget } from './flow-references'
 import { createChecksRunEvidenceService, type RecordChecksRunResult } from './checks-run-evidence'
 import { createFlowEvidenceService, type CaptureFlowEvidenceCommand, type CaptureFlowEvidenceResult } from './flow-evidence'
 import { createInteractionEvidenceService, type CaptureInteractionEvidenceCommand, type CaptureInteractionEvidenceResult } from './interaction-evidence'
 import { createViewAssetBindingCheck, type AssetCatalog } from './asset-bindings'
-import { createHistoryPreviewService, type ReadVersionBlobOutcome, type ReadVersionResourceOutcome, type ResolveVersionAssetsOutcome } from './history-preview'
-import {
-	createHistoryService,
-	type CheckpointBoundary,
-	type CreateCheckpointCommand,
-	type CreateCheckpointOutcome,
-	type DeleteCheckpointOutcome,
-	type ListVersionsOutcome,
-	type ListVersionsQuery,
-	type ReadVersionOutcome,
-} from './history-service'
 import {
 	createProductKitAuthoringService,
 	type ComposeProductKitCommand,
@@ -255,15 +238,9 @@ export interface WorkspaceApplicationSession {
 	assessHandoffReadiness(command: AssessHandoffReadinessCommand): Promise<AssessHandoffReadinessResult>
 	exportHandoff(command: ExportHandoffCommand): Promise<ExportHandoffResult>
 	readArtifact(identity: string): Promise<Uint8Array | undefined>
-	diffVersions(command: DiffVersionsCommand): Promise<VersionDiffOutcome>
-	createCheckpoint(command: CreateCheckpointCommand): Promise<CreateCheckpointOutcome>
-	deleteCheckpoint(id: string): Promise<DeleteCheckpointOutcome>
-	listVersions(query: ListVersionsQuery): Promise<ListVersionsOutcome>
-	readVersion(id: string): Promise<ReadVersionOutcome>
-	readVersionResource(id: string, kind: string, key: string): Promise<ReadVersionResourceOutcome>
-	readVersionBlob(digest: string): Promise<ReadVersionBlobOutcome>
-	resolveVersionAssets(id: string, assetIds: readonly string[]): Promise<ResolveVersionAssetsOutcome>
-	restoreResourceVersion<R = never>(command: RestoreResourceVersionCommand, guard?: RestoreGuard<R>): Promise<RestoreResourceVersionOutcome | R>
+	listChanges: GitChangesService['listChanges']
+	readChangeDiff: GitChangesService['readChangeDiff']
+	readChangeBlob: GitChangesService['readChangeBlob']
 }
 
 /**
@@ -275,13 +252,6 @@ export function createWorkspaceApplicationSession(
 	options?: {
 		serverOrigin?: string
 		captureCookie?: () => Readonly<{ name: string; value: string }> | undefined
-		/** The Workspace's history stores; without them no version exists to compare. */
-		history?: HistoryStoreSource
-		/**
-		 * The history recorder's boundary, taken before every Checkpoint (Rule
-		 * 01a11a5e-00b9-7bf5-8005-9380a388afb8); absent where no recorder runs.
-		 */
-		historyBoundary?: () => CheckpointBoundary | undefined
 		/** The kit build runner under `uiux dev`; without it no kit build runs and its state is `none`. */
 		kitBuild?: KitBuildControl
 		/** The server-side Adapter check Handoff applies to the Adapters it materializes (Clause 01a116f0-cae2-7c64-9c76-d472f252789a). */
@@ -342,10 +312,7 @@ export function createWorkspaceApplicationSession(
 		...(options?.checkAdapterSet ? { checkAdapterSet: options.checkAdapterSet } : {}),
 		adapterProvenance: adapterProvenanceSource,
 	})
-	const historyDiff = createHistoryDiffService(persistence, options?.history)
-	const historyService = createHistoryService(persistence, options?.history, { ...(options?.historyBoundary ? { boundary: options.historyBoundary } : {}), adapterProvenance: adapterProvenanceSource })
-	const historyRestore = createHistoryRestoreService(persistence, options?.history, { adapterProvenance: adapterProvenanceSource })
-	const historyPreview = createHistoryPreviewService(persistence, options?.history)
+	const gitChanges = createGitChangesService(persistence)
 	const productKitAuthoring = createProductKitAuthoringService(persistence, options?.kitBuild ? { buildStatus: () => options.kitBuild!.status() } : {})
 	const accessPresetsAuthoring = createAccessPresetsAuthoringService(persistence)
 	const requirements = createRequirementsService(persistence)
@@ -607,15 +574,9 @@ export function createWorkspaceApplicationSession(
 		assessHandoffReadiness: handoffExport.assessReadiness,
 		exportHandoff: handoffExport.exportHandoff,
 		readArtifact: identity => persistence.artifacts.read(identity),
-		diffVersions: historyDiff.diffVersions,
-		createCheckpoint: historyService.createCheckpoint,
-		deleteCheckpoint: historyService.deleteCheckpoint,
-		listVersions: historyService.listVersions,
-		readVersion: historyService.readVersion,
-		readVersionResource: historyPreview.readVersionResource,
-		readVersionBlob: historyPreview.readVersionBlob,
-		resolveVersionAssets: historyPreview.resolveVersionAssets,
-		restoreResourceVersion: historyRestore.restoreResourceVersion,
+		listChanges: gitChanges.listChanges,
+		readChangeDiff: gitChanges.readChangeDiff,
+		readChangeBlob: gitChanges.readChangeBlob,
 	}
 }
 

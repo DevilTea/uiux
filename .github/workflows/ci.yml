@@ -4,15 +4,13 @@ on:
   push:
     branches: [main]
   pull_request:
-    # labeled and unlabeled rerun the dogfood guard, whose history check depends on the dogfood-history label.
-    types: [opened, synchronize, reopened, labeled, unlabeled]
+    types: [opened, synchronize, reopened]
   workflow_dispatch:
 
 jobs:
-  # Dogfood guards (docs/dogfood-worktree.md): a PR adds no .uiux/history/** file and no Evidence
-  # blob that `uiux artifacts gc --dry-run` (empty UIUX_HOME) would collect. A PR labeled
-  # dogfood-history (applied only by the owner, whose host commits Baseline Checkpoints) skips the
-  # history check, read from the event payload; the blob check has no escape hatch.
+  # Dogfood guards (docs/dogfood-worktree.md): a PR adds no Evidence blob that `uiux artifacts gc
+  # --dry-run` (empty UIUX_HOME) would collect and nothing at .uiux/kit/node_modules; neither check has
+  # an escape hatch.
   dogfood-guard:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
@@ -29,11 +27,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Dogfood guard
-        if: ${{ !contains(github.event.pull_request.labels.*.name, 'dogfood-history') }}
         run: pnpm dogfood:guard --base origin/${{ github.base_ref }}
-      - name: "Dogfood guard (dogfood-history label: history check skipped)"
-        if: ${{ contains(github.event.pull_request.labels.*.name, 'dogfood-history') }}
-        run: pnpm dogfood:guard --base origin/${{ github.base_ref }} --allow-history
 
   # Dogfood drift check (issue #383, Discussion #379 P4, docs/dogfood-worktree.md): on a copy of .uiux/
   # with a temporary UIUX_HOME it builds the kit, serves the copy on loopback and fails on any required
@@ -48,8 +42,6 @@ jobs:
   # the owner made it failing on 2026-11-03. main has no branch protection, so it is not a required check.
   # It runs beside `check`, not after it: it needs nothing from `pnpm check` (it builds for itself).
   dogfood-check:
-    # A label change reruns only the dogfood guard.
-    if: github.event_name != 'pull_request' || (github.event.action != 'labeled' && github.event.action != 'unlabeled')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -71,8 +63,6 @@ jobs:
         run: pnpm dogfood:check
 
   check:
-    # A label change reruns only the dogfood guard.
-    if: github.event_name != 'pull_request' || (github.event.action != 'labeled' && github.event.action != 'unlabeled')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

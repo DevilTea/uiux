@@ -1,16 +1,15 @@
 import type { FormalEvidenceRecord } from '../../domain/evidence/schema'
-import { resourceIdentityKey } from '../../domain/history/summary'
 import type { ImpactEvidence, ImpactWorkspace } from '../../domain/impact'
+import { resourceIdentityKey } from '../../domain/resource-identity'
 import type { FileNativePersistence } from '../../persistence/file-native'
-import { versionResourcesFromSnapshot } from '../../persistence/history/snapshot'
 import { REVIEW_FILE_SUFFIX, WORKSPACE_DATA_DIRECTORY, type WorkspaceLayout } from '../../persistence/paths'
 import { canonicalJsonBytes, revisionForResourceFiles } from '../../persistence/file-native'
+import { resourcesFromSnapshot } from '../../persistence/resource-files'
 import { formalCaptureRecordOf } from './formal-capture'
 
 /**
  * The picture of the current Workspace that reference-impact analysis compares (`src/domain/impact`),
- * shared by the single-resource restore and by the authoring operations that delete or change the
- * identity of a resource (issue #75). It is read under one shared persistence lock, decoded
+ * used by the authoring operations that delete or change the identity of a resource (issue #75). It is read under one shared persistence lock, decoded
  * leniently: whatever cannot be read is left out, never thrown over.
  */
 
@@ -23,7 +22,7 @@ export function parseJsonBytes(bytes: Uint8Array): unknown {
 /** The analysis picture of a snapshot of the versioned files, the Reviews and, when asked, the formal Evidence. */
 export function impactWorkspaceFromSnapshot(snapshot: ReadonlyMap<string, Uint8Array>, layout: WorkspaceLayout, reviews: readonly unknown[], evidence: readonly ImpactEvidence[] | undefined): ImpactWorkspace {
 	const revisions = new Map<string, string>()
-	for (const resource of versionResourcesFromSnapshot(snapshot, layout).resources) revisions.set(resourceIdentityKey(resource), resource.revision)
+	for (const resource of resourcesFromSnapshot(snapshot, layout)) revisions.set(resourceIdentityKey(resource), resource.revision)
 	const views = new Map<string, unknown>()
 	const flows = new Map<string, unknown>()
 	const locales = new Map<string, unknown>()

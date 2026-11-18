@@ -2,7 +2,7 @@
 import { nextTick, useTemplateRef } from 'vue'
 import { useI18n } from '#imports'
 import KitButton from '~/components/kit/ui/Button.vue'
-import type { ReceivedImpact } from '../../utils/version-restore'
+import type { ReceivedImpact } from '../../utils/impact-list'
 import ImpactList from './ImpactList.vue'
 
 /**
@@ -46,7 +46,7 @@ function focusCancel(event: Event): void {
           {{ body }}
         </p>
         <p class="text-xs font-medium text-muted">
-          {{ t('history.restore.impact.count', impacts.length) }}
+          {{ t('impact.count', impacts.length) }}
         </p>
         <ImpactList :impacts="impacts" />
       </div>

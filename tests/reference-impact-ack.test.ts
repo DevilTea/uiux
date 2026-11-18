@@ -6,15 +6,12 @@ import { afterEach, describe, expect, it } from 'vitest'
 
 import { createLeaseManager, type LeaseManager } from '../src/application/access/leases'
 import type { MemberPrincipal } from '../src/application/access/principal'
-import { createHistoryRecorder, type HistoryRecorder, type HistoryRecorderClock } from '../src/application/services/history-recorder'
 import type { ViewSpecContent } from '../src/application/services/view-authoring'
 import { createWorkspaceApplicationSession, type WorkspaceApplicationSession } from '../src/application/services/workspace-session'
-import type { HostVersionRecord } from '../src/domain/history/schema'
 import { FileNativePersistence, type CommittedResourceChange } from '../src/persistence'
 import { assetMetadataRelativePath, flowRelativePath, reviewRelativePath, viewRelativePath } from '../src/persistence/paths'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { deleteAssetForHttp, deleteFlowForHttp, deleteViewForHttp, updateViewStructureForHttp, updateWorkspaceSettingsForHttp } from '../src/server/authoring-http'
-import { createHistoryStoreFactory } from '../src/server/history-stores'
 import { connectMcp, scoped, testMember } from './support/access'
 import { HEAVY_SERVER_SUITE_TIMEOUT_MS } from './support/timeouts'
 import { putEvidenceRecord } from './support/evidence-record'
@@ -34,7 +31,6 @@ const FLOW_ID = '22222222-2222-4222-8222-222222222222'
 const ASSET_ID = '33333333-3333-4333-8333-333333333333'
 const REVIEW_ID = '44444444-4444-4444-8444-444444444444'
 const STEP_ID = '66666666-6666-4666-8666-666666666666'
-const START = Date.parse('2026-10-25T00:00:00.000Z')
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).toString('base64')
 
 const OWNER = testMember({ memberId: 'owner-1', nickname: 'mei', kind: 'human', preset: 'owner', credential: 'session' })
@@ -52,9 +48,7 @@ const MANIFEST = {
 }
 
 const cleanup: string[] = []
-const running: HistoryRecorder[] = []
 afterEach(async () => {
-	await Promise.all(running.splice(0).map(recorder => recorder.stop()))
 	await Promise.all(cleanup.splice(0).map(path => rm(path, { recursive: true, force: true })))
 })
 
@@ -62,15 +56,9 @@ function spec(intent: string, references: ViewSpecContent['references'] = []): V
 	return { intent, entryConditions: [], interactionRules: [], constraints: [], accessibility: [], references }
 }
 
-function manualClock(): HistoryRecorderClock & Readonly<{ advance(milliseconds: number): void }> {
-	let now = START
-	return { now: () => now, setTimeout: () => Symbol('timer'), clearTimeout: () => undefined, advance(milliseconds) { now += milliseconds } }
-}
-
 type Fixture = Readonly<{
 	root: string
 	persistence: FileNativePersistence
-	recorder: HistoryRecorder
 	app: WorkspaceApplicationSession
 	leases: LeaseManager
 	commits: CommittedResourceChange[][]
@@ -86,15 +74,12 @@ async function fixture(): Promise<Fixture> {
 	cleanup.push(parent)
 	const root = join(parent, 'ws')
 	await mkdir(root)
-	const home = join(parent, 'home')
 	const persistence = new FileNativePersistence({ root, schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
 	await createCurrentWorkspace(persistence, MANIFEST)
 	await persistence.locales.create('en-US', {})
-	const history = createHistoryStoreFactory({ workspaceRoot: root, persistence, home: () => home })
-	const recorder = createHistoryRecorder({ persistence, stores: () => history.open(), clock: manualClock(), log: () => undefined })
-	const app = createWorkspaceApplicationSession(persistence, { history, historyBoundary: () => recorder })
+	const app = createWorkspaceApplicationSession(persistence)
 	const leases = createLeaseManager()
-	const owner = scoped(app, OWNER, { leases, history: recorder })
+	const owner = scoped(app, OWNER, { leases })
 
 	expect(await owner.createAsset({ id: ASSET_ID, name: 'Logo', contentFilename: 'logo.png', mediaType: 'image/png', contentBase64: PNG })).toMatchObject({ status: 'created' })
 	const created = await owner.createView({ id: VIEW_ID, name: 'Checkout', spec: spec('Pay') })
@@ -110,15 +95,13 @@ async function fixture(): Promise<Fixture> {
 	expect(await owner.createFlow({ id: FLOW_ID, name: 'Checkout flow', entryStepId: STEP_ID, steps: { [STEP_ID]: step } })).toMatchObject({ status: 'created' })
 	expect(await scoped(app, REVIEWER, { leases }).createReviewThread({ id: REVIEW_ID, anchor: { viewId: VIEW_ID, widgetId: 'pay' }, variantNames: ['dark'], renderContext: { viewportId: 'mobile' } })).toMatchObject({ status: 'created' })
 
-	running.push(recorder)
-	await recorder.start()
 	const commits: CommittedResourceChange[][] = []
 	persistence.onCanonicalCommit(changes => commits.push([...changes]))
-	return { root, persistence, recorder, app, leases, commits }
+	return { root, persistence, app, leases, commits }
 }
 
 function session(ctx: Fixture, principal: MemberPrincipal = OWNER, leases: LeaseManager = ctx.leases) {
-	return scoped(ctx.app, principal, { leases, history: ctx.recorder, transport: principal.kind === 'agent' ? 'mcp' : 'http' })
+	return scoped(ctx.app, principal, { leases, transport: principal.kind === 'agent' ? 'mcp' : 'http' })
 }
 
 async function fileOf(ctx: Fixture, relative: string): Promise<string> {
@@ -319,7 +302,7 @@ describe('deleting a View (Rule 01a172ce-280b-7cec-9ca5-ec189b313ebe)', { timeou
 		expect(ctx.leases.find({ kind: 'view', key: VIEW_ID })).toBeUndefined()
 	})
 
-	it('deletes a View nothing names without acknowledgement, over HTTP, as a write event and a resource.removed commit', async () => {
+	it('deletes a View nothing names without acknowledgement, over HTTP, as a resource.removed commit', async () => {
 		const ctx = await fixture()
 		const lonely = '99999999-9999-4999-8999-999999999999'
 		const created = await session(ctx, OWNER).createView({ id: lonely, name: 'Lonely', spec: spec('Nothing names me') })
@@ -330,14 +313,6 @@ describe('deleting a View (Rule 01a172ce-280b-7cec-9ca5-ec189b313ebe)', { timeou
 		expect(http.status).toBe(200)
 		expect(http.body).toEqual({ status: 'deleted', key: lonely, changeSummary: { changes: [{ path: '', op: 'remove' }] } })
 		expect(ctx.commits).toEqual([[{ kind: 'view', key: lonely, revision: null }]])
-
-		await ctx.recorder.closeOpenAutosave('shutdown')
-		const versions = await ctx.app.listVersions({ types: ['autosave'] })
-		expect(versions.status).toBe('listed')
-		const newest = (versions as { versions: readonly { id: string }[] }).versions[0]!
-		const read = await ctx.app.readVersion(newest.id)
-		const events = (read as { version: HostVersionRecord }).version.events
-		expect(events.map(event => [event.operation, event.source, event.beforeRevision, event.afterRevision])).toContainEqual(['deleteView', 'workbench', revision, null])
 	})
 
 	it('refuses a stale revision, an unknown View and a key that is not a UUID, deleting nothing', async () => {
@@ -590,71 +565,6 @@ describe('the impact is checked again inside the lock', { timeout: HEAVY_SERVER_
 		const refusedFlow = await session(ctx, OWNER).deleteFlow({ flowId: second, expectedRevision: flowRevision })
 		expect(refusedFlow).toMatchObject({ status: 'impact_acknowledgement_required', impacts: [{ category: 'submission_revision_not_current' }] })
 		expect(await exists(join(ctx.root, flowRelativePath(second)))).toBe(true)
-	})
-})
-
-describe('a delete is a history boundary (owner ruling 1 of discussioncomment-19180530)', { timeout: HEAVY_SERVER_SUITE_TIMEOUT_MS }, () => {
-	async function autosaves(ctx: Fixture) {
-		await ctx.recorder.closeOpenAutosave('shutdown')
-		const listed = await ctx.app.listVersions({ types: ['autosave'] })
-		const rows = (listed as { versions: readonly { id: string }[] }).versions
-		return Promise.all(rows.map(async (row) => {
-			const read = await ctx.app.readVersion(row.id)
-			return { id: row.id, operations: (read as { version: HostVersionRecord }).version.events.map(event => event.operation) }
-		}))
-	}
-
-	it('restores a View created and deleted within one autosave window', async () => {
-		const ctx = await fixture()
-		await ctx.recorder.closeOpenAutosave('shutdown')
-		const key = '99999999-9999-4999-8999-999999999999'
-		const created = await session(ctx, OWNER).createView({ id: key, name: 'Short lived', spec: spec('Created, then deleted at once') })
-		const before = (await ctx.persistence.views.read(key))!
-		expect(await session(ctx, OWNER).deleteView({ key, expectedRevision: (created as { revision: string }).revision })).toMatchObject({ status: 'deleted' })
-
-		const rows = await autosaves(ctx)
-		// Newest first: the delete alone, then the autosave that holds the create.
-		expect(rows.map(row => row.operations)).toEqual([['deleteView'], ['createView']])
-		const restored = await session(ctx, OWNER).restoreResourceVersion({ versionId: rows[1]!.id, resource: { kind: 'view', key }, expectedRevision: null })
-		expect(restored).toMatchObject({ status: 'created', kind: 'view', key })
-		expect((await ctx.persistence.views.read(key))!.resource).toEqual(before.resource)
-	})
-
-	it('restores a View edited and then deleted by the same actor to the state just before the delete', async () => {
-		const ctx = await fixture()
-		await ctx.recorder.closeOpenAutosave('shutdown')
-		const key = '99999999-9999-4999-8999-999999999999'
-		const created = await session(ctx, OWNER).createView({ id: key, name: 'Edited', spec: spec('First') })
-		const edited = await session(ctx, OWNER).updateViewSpec({ key, expectedRevision: (created as { revision: string }).revision, spec: spec('Second') })
-		const before = (await ctx.persistence.views.read(key))!
-		expect(await session(ctx, OWNER).deleteView({ key, expectedRevision: (edited as { revision: string }).revision })).toMatchObject({ status: 'deleted' })
-
-		const rows = await autosaves(ctx)
-		expect(rows.map(row => row.operations)).toEqual([['deleteView'], ['createView', 'updateViewSpec']])
-		await session(ctx, OWNER).restoreResourceVersion({ versionId: rows[1]!.id, resource: { kind: 'view', key }, expectedRevision: null })
-		expect((await ctx.persistence.views.read(key))!.resource).toEqual(before.resource)
-	})
-
-	it('restores a deleted Asset and a deleted UX Flow the same way', async () => {
-		const ctx = await fixture()
-		await ctx.recorder.closeOpenAutosave('shutdown')
-		const assetKey = '88888888-8888-4888-8888-888888888888'
-		const flowKey = '55555555-5555-4555-8555-555555555555'
-		const asset = await session(ctx, OWNER).createAsset({ id: assetKey, name: 'Loose', contentFilename: 'loose.png', mediaType: 'image/png', contentBase64: PNG })
-		const flow = await session(ctx, OWNER).createFlow({ id: flowKey, name: 'Second', entryStepId: STEP_ID, steps: { [STEP_ID]: { target: { viewId: VIEW_ID }, transitions: [] } } })
-		const assetBefore = (await ctx.persistence.assets.read(assetKey))!
-		const flowBefore = (await ctx.persistence.flows.read(flowKey))!
-		expect(await session(ctx, OWNER).deleteAsset({ assetId: assetKey, expectedRevision: (asset as { revision: string }).revision })).toMatchObject({ status: 'deleted' })
-		expect(await session(ctx, OWNER).deleteFlow({ flowId: flowKey, expectedRevision: (flow as { revision: string }).revision })).toMatchObject({ status: 'deleted' })
-
-		const rows = await autosaves(ctx)
-		// Every delete closes the autosave before it, so each stands alone after the one that holds the creates.
-		expect(rows.map(row => [...row.operations].sort())).toEqual([['deleteFlow'], ['deleteAsset'], ['createAsset', 'createFlow']])
-		const versionId = rows[2]!.id
-		expect(await session(ctx, OWNER).restoreResourceVersion({ versionId, resource: { kind: 'asset', key: assetKey }, expectedRevision: null })).toMatchObject({ status: 'created' })
-		expect(await session(ctx, OWNER).restoreResourceVersion({ versionId, resource: { kind: 'flow', key: flowKey }, expectedRevision: null })).toMatchObject({ status: 'created' })
-		expect((await ctx.persistence.assets.read(assetKey))!.revision).toBe(assetBefore.revision)
-		expect((await ctx.persistence.flows.read(flowKey))!.resource).toEqual(flowBefore.resource)
 	})
 })
 

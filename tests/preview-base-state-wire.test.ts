@@ -669,10 +669,8 @@ describe('inspection.base-state.mounted in the bridges', () => {
 
 describe('inspection.base-state declaration', () => {
 	it('is declared only by a Workbench Preview', () => {
-		expect(declaredRuntimeFeatures({ harness: false, version: false })).toContain(BASE_STATE_FEATURE)
-		expect(declaredRuntimeFeatures({ harness: true, version: false })).not.toContain(BASE_STATE_FEATURE)
-		expect(declaredRuntimeFeatures({ harness: false, version: true })).not.toContain(BASE_STATE_FEATURE)
-		expect(declaredRuntimeFeatures({ harness: true, version: true })).not.toContain(BASE_STATE_FEATURE)
+		expect(declaredRuntimeFeatures({ harness: false })).toContain(BASE_STATE_FEATURE)
+		expect(declaredRuntimeFeatures({ harness: true })).not.toContain(BASE_STATE_FEATURE)
 		expect(BASE_STATE_FEATURE).toBe('inspection.base-state')
 	})
 })

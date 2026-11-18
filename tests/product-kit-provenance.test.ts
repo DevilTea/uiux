@@ -5,30 +5,26 @@ import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 
 import { adapterGraphDigest } from '../src/adapters/adapter-graph-digest'
-import { IN_LOCK_PROVENANCE_BUDGET_MS, KitFileDigestCache, kitFileDigestCache, provenanceBudgetMessage, type KitFileHasher } from '../src/adapters/kit-provenance'
+import { KitFileDigestCache, kitFileDigestCache } from '../src/adapters/kit-provenance'
 import { locateKitProject } from '../src/adapters/kit-registry'
 import { digestKitFile, listKitFiles, readKitFile } from '../src/adapters/kit-source-files'
-import { createHistoryRecorder, type HistoryRecorder } from '../src/application/services/history-recorder'
 import { readCurrentProductKitProvenance, readWorkspaceProductKitProvenance } from '../src/application/services/product-kit-provenance'
 import type { FormalEvidenceRecord } from '../src/domain/evidence/schema'
 import { evaluateEvidenceStaleness, PRODUCT_KIT_CHANGED_REASON, PRODUCT_KIT_PROVENANCE_UNAVAILABLE_REASON, type EvidenceStalenessContext } from '../src/domain/evidence/staleness'
 import { fileDigest } from '../src/domain/product-kit/digest'
 import { fileSetDigest, inOutputDigest, inSourceDigest, productKitFreshnessContext, type ProductKitProvenance } from '../src/domain/product-kit/provenance'
 import type { ProductKit } from '../src/domain/product-kit/schema'
-import { FileNativePersistence, localeRelativePath, OBSERVER_HOOK_TIMEOUT_MS } from '../src/persistence'
+import { FileNativePersistence } from '../src/persistence'
 import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
-import { createHistoryStoreFactory } from '../src/server/history-stores'
 import { evidenceFreshness } from '../app/utils/readiness'
 import { createCurrentWorkspace } from './support/workspace-layout'
 
 const VIEW_ID = '01a11bb1-0000-7000-8000-00000000c2b2'
 const temporaryRoots: string[] = []
-const recorders: HistoryRecorder[] = []
 
 afterEach(async () => {
 	kitFileDigestCache.hashFile = digestKitFile
 	kitFileDigestCache.clear()
-	for (const recorder of recorders.splice(0)) await recorder.stop()
 	await Promise.all(temporaryRoots.splice(0).map(root => rm(root, { recursive: true, force: true })))
 })
 
@@ -355,112 +351,6 @@ describe('Evidence freshness against Product Kit provenance (Rules 01a11bb1-be4a
 		// Without a current Product Kit provenance in the context, the Product Kit is not judged.
 		expect(evaluateEvidenceStaleness(legacy, context())).toEqual({ isStale: false })
 	})
-})
-
-describe('version records carry Product Kit provenance (Clause 01a11bb1-b6ae-7cf7-9838-9628757d1190)', () => {
-	it('records it in the Baseline Checkpoint and in an external version', async () => {
-		const { root, persistence } = await kitWorkspace()
-		await persistence.locales.create('en-US', { greeting: 'Hello' })
-		const home = join(await tempDir('uiux-kit-provenance-home-'), 'home')
-		const history = createHistoryStoreFactory({ workspaceRoot: root, persistence, home: () => home })
-		const recorder = createHistoryRecorder({ persistence, stores: () => history.open(), log: () => undefined })
-		recorders.push(recorder)
-		const started = await recorder.start()
-		const stores = await history.open()
-		const current = await provenance(persistence)
-		const baseline = (await stores.checkpoints.list()).records.find(record => record.id === started.baseline)
-		expect(baseline?.productKit).toEqual(current)
-
-		await writeFile(join(root, localeRelativePath('en-US')), `${JSON.stringify({ greeting: 'Hi' }, null, '\t')}\n`)
-		const boundary = await recorder.closeOpenAutosave('checkpoint')
-		expect(boundary?.external).toEqual(expect.any(String))
-		const external = await stores.host.readVersion(boundary!.external!)
-		expect(external?.productKit).toEqual(current)
-		expect(JSON.stringify(external)).not.toContain(root)
-	})
-
-	it('keeps the work under the lock to stats for an unchanged large kit, and never holds the lock past its budget for a slow one', async () => {
-		const { root, persistence } = await kitWorkspace()
-		for (let index = 0; index < 2_000; index++) await put(root, `kit/src/many/${index % 20}/f${index}.ts`, `export const v${index} = ${index}\n`)
-		await persistence.locales.create('en-US', { greeting: 'Hello' })
-		const home = join(await tempDir('uiux-kit-provenance-home-'), 'home')
-		const history = createHistoryStoreFactory({ workspaceRoot: root, persistence, home: () => home })
-		const logged: string[] = []
-		const recorder = createHistoryRecorder({ persistence, stores: () => history.open(), log: message => logged.push(message) })
-		recorders.push(recorder)
-		const hashed = countHashes()
-		// Starting digests the kit once, before the lock is taken.
-		await recorder.start()
-		expect(hashed.length).toBe(2_003)
-		const stores = await history.open()
-		let greeting = 0
-		const externalVersion = async () => {
-			await writeFile(join(root, localeRelativePath('en-US')), `${JSON.stringify({ greeting: `Hi ${++greeting}` }, null, '\t')}\n`)
-			const started = performance.now()
-			const boundary = await recorder.closeOpenAutosave('checkpoint')
-			const elapsed = performance.now() - started
-			return { record: (await stores.host.readVersion(boundary!.external!))!, elapsed }
-		}
-
-		// A record whose in-lock budget (2 s) ran out under host load goes without productKit; the slow
-		// phase below is what asserts the budget. Here the question is which kit files are read, so such a
-		// record is retried once the digests finished outside the lock (issue #263: one record took about
-		// 0.8 s of the 2 s when 16 copies of this file ran at once).
-		const externalVersionInBudget = async () => {
-			for (let attempt = 0; attempt < 5; attempt++) {
-				const version = await externalVersion()
-				if (version.record.productKit !== undefined) return version
-				await kitFileDigestCache.digests(await locateKitProject(root, 'kit'))
-			}
-			throw new Error('the Product Kit provenance never fit the in-lock budget')
-		}
-
-		// Unchanged kit: no kit file is read under the lock.
-		hashed.length = 0
-		const unchanged = await externalVersionInBudget()
-		expect(hashed).toEqual([])
-		expect(unchanged.record.productKit).toEqual(await provenance(persistence))
-
-		// One changed kit file: only it is read.
-		await put(root, 'kit/src/many/3/f3.ts', 'export const v3 = 33\n')
-		const changed = await externalVersionInBudget()
-		expect(hashed).toEqual(['src/many/3/f3.ts'])
-		expect(changed.record.productKit).toEqual(await provenance(persistence))
-
-		// A digest that does not finish (a counted stand-in held open) ends the wait at the budget, far
-		// below the observer hook bound: the record goes without productKit and no gap is recorded.
-		let release!: () => void
-		const held = new Promise<void>((resolve) => {
-			release = resolve
-		})
-		const counted: KitFileHasher = async (kit, path) => {
-			hashed.push(path)
-			await held
-			return digestKitFile(kit, path)
-		}
-		kitFileDigestCache.hashFile = counted
-		hashed.length = 0
-		logged.length = 0
-		await put(root, 'kit/src/many/4/f4.ts', 'export const v4 = 44\n')
-		const slow = await externalVersion()
-		expect(hashed).toEqual(['src/many/4/f4.ts'])
-		expect(slow.elapsed).toBeLessThan(OBSERVER_HOOK_TIMEOUT_MS)
-		expect(slow.record.productKit).toBeUndefined()
-		expect(slow.record.recordingGap).toBeUndefined()
-		// Issue #211: the record left without productKit is logged, naming no host path.
-		expect(logged).toEqual([provenanceBudgetMessage(IN_LOCK_PROVENANCE_BUDGET_MS)])
-		expect(logged[0]).not.toContain(root)
-
-		// The digest finishes outside the lock, and the next record finds it cached.
-		release()
-		await kitFileDigestCache.digests(await locateKitProject(root, 'kit'))
-		hashed.length = 0
-		const next = await externalVersion()
-		expect(hashed).toEqual([])
-		expect(next.record.productKit).toEqual(await provenance(persistence))
-		expect(next.record.recordingGap).toBeUndefined()
-		expect(logged).toHaveLength(1)
-	}, 60_000)
 })
 
 describe('graph-wide Adapter content digest (Clause 01a115cd-d7f6-74a1-ba9f-c20a24a31ae5)', () => {

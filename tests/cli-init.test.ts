@@ -12,6 +12,7 @@ import { FileNativePersistence } from '../src/persistence/file-native'
 import { checkWorkspaceSelection } from '../src/persistence/workspace-selection'
 import { V5_LAYOUT } from '../src/persistence/paths'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION, PRODUCT_WORKSPACE_SCHEMA_POLICY, WORKSPACE_GITIGNORE_RULES } from '../src/product/workspace-schema'
+import { insideGitWorkTree } from './support/git'
 import { HEAVY_SERVER_SUITE_TIMEOUT_MS } from './support/timeouts'
 
 /**
@@ -69,10 +70,10 @@ describe('uiux init', () => {
 		expect(await readdir(nested)).toEqual([])
 	}, HEAVY_SERVER_SUITE_TIMEOUT_MS)
 
-	it('creates the Workspace in <cwd>/.uiux/ outside a Git repository', async () => {
+	it('creates the Workspace in <git toplevel>/.uiux/ and prints how to start it', async () => {
 		const cwd = await makeDirectory()
 		const run = capture()
-		expect(await runInitCommand({ cwd, gitToplevel: () => undefined, ...run.options })).toBe(0)
+		expect(await runInitCommand({ cwd, git: insideGitWorkTree(cwd), ...run.options })).toBe(0)
 		await expectInitialized(join(cwd, '.uiux'))
 		expect(run.stdout.join('\n')).toContain('uiux dev')
 	})
@@ -80,7 +81,7 @@ describe('uiux init', () => {
 	it('creates the Workspace in a custom --workspace directory, which holds the manifest directly', async () => {
 		const cwd = await makeDirectory()
 		const run = capture()
-		expect(await runInitCommand({ cwd, workspace: 'nested/ws', gitToplevel: () => { throw new Error('not consulted') }, ...run.options })).toBe(0)
+		expect(await runInitCommand({ cwd, workspace: 'nested/ws', git: insideGitWorkTree(cwd), ...run.options })).toBe(0)
 		await expectInitialized(join(cwd, 'nested', 'ws'))
 		expect(run.stdout.join('\n')).toContain(`uiux dev --workspace ${join(cwd, 'nested', 'ws')}`)
 	})
@@ -107,7 +108,7 @@ describe('uiux init', () => {
 		const repository = join(cwd, 'repo')
 		await mkdir(join(repository, '.uiux'), { recursive: true })
 		await writeFile(join(repository, '.uiux', 'workspace.json'), '{"schemaVersion":4}\n')
-		expect(await runInitCommand({ cwd: repository, gitToplevel: () => repository, ...capture().options })).toBe(2)
+		expect(await runInitCommand({ cwd: repository, git: insideGitWorkTree(repository), ...capture().options })).toBe(2)
 		expect(await readdir(join(repository, '.uiux'))).toEqual(['workspace.json'])
 	})
 
@@ -168,7 +169,7 @@ describe('uiux init', () => {
 		const user = join(cwd, 'user')
 		await mkdir(user)
 		const run = capture()
-		expect(await runInitCommand({ cwd: user, gitToplevel: () => undefined, env: { UIUX_HOME: join(user, '.uiux') }, ...run.options })).toBe(2)
+		expect(await runInitCommand({ cwd: user, git: insideGitWorkTree(user), env: { UIUX_HOME: join(user, '.uiux') }, ...run.options })).toBe(2)
 		expect(await readdir(user)).toEqual([])
 
 		// A sibling of UIUX_HOME is fine.

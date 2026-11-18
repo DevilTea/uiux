@@ -9,9 +9,8 @@ import { resolveWorkspacePath, type WorkspaceLayout } from './paths'
 
 /**
  * A live UIUX server's claim on its selected Workspace. It is local runtime state (never a
- * canonical file, never exported) that lets operator commands such as `uiux access copy` refuse
- * to change the host history of a Workspace that a running server is serving. Its path is the
- * layout's `serverHoldPath`.
+ * canonical file, never exported) that lets operator commands such as `uiux artifacts gc` refuse
+ * to run underneath a running server. Its path is the layout's `serverHoldPath`.
  */
 export type ServerHold = Readonly<{
 	pid: number

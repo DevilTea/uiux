@@ -25,6 +25,7 @@ import { FileNativePersistence } from '../src/persistence'
 import { inspectWorkspaceManifest } from '../src/persistence/schema-policy'
 import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { AGENT_EDITOR, connectMcp, HUMAN_OWNER, scoped } from './support/access'
+import { makeDirectoryOutsideGit } from './support/git'
 import { currentManifest, createCurrentWorkspace, writeManifest } from './support/workspace-layout'
 
 const VIEW = '11111111-1111-4111-8111-111111111111'
@@ -238,7 +239,7 @@ describe('digests leave out requirement references', () => {
 type Repo = Readonly<{ repo: string; root: string; persistence: FileNativePersistence; app: ReturnType<typeof createWorkspaceApplicationSession> }>
 
 async function workspaceInRepo(options: Readonly<{ git?: boolean }> = {}): Promise<Repo> {
-	const repo = await mkdtemp(join(tmpdir(), 'uiux-requirements-'))
+	const repo = options.git === false ? await makeDirectoryOutsideGit('uiux-requirements-') : await mkdtemp(join(tmpdir(), 'uiux-requirements-'))
 	temporary.push(repo)
 	if (options.git !== false) execFileSync('git', ['init', '-q'], { cwd: repo })
 	const root = join(repo, '.uiux')

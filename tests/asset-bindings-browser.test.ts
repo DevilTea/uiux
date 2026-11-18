@@ -307,25 +307,6 @@ describe('a View that binds an Asset (issue #97)', () => {
 		expect((await fetch(`${server.origin}/api/preview/assets?ids=${ASSET_ID}`, { headers: bearer(keyless) })).status).toBe(403)
 	}, 30_000)
 
-	it('renders an SVG Asset in a version frame from the version blob', async () => {
-		const checkpoint = await api('/api/history/checkpoints', { method: 'POST', body: JSON.stringify({ name: 'Logo before replacement' }) })
-		expect(checkpoint.status, await checkpoint.clone().text()).toBe(201)
-		const { versionId } = await checkpoint.json() as { versionId: string }
-		const { context, page } = await open(`/preview?viewId=${boundViewId}&locale=en-US&version=${versionId}`)
-		try {
-			expect(await settledStatus(page)).toBe('ready')
-			const image = page.locator('img.asset-picture')
-			await image.waitFor({ timeout: 15_000 })
-			expect(await image.getAttribute('src')).toMatch(/^\/api\/history\/blobs\/sha256:[0-9a-f]{64}$/u)
-			expect(await image.getAttribute('data-media-type')).toBe('image/svg+xml')
-			expect(await page.evaluate(decodeBoundAssetImages, { timeoutMs: 10_000 })).toBe(0)
-			expect(await image.evaluate((element: HTMLImageElement) => element.naturalWidth)).toBeGreaterThan(0)
-		}
-		finally {
-			await context.close()
-		}
-	}, 60_000)
-
 	it('resolves the open Preview again when the bound Asset is replaced, and refuses the old URL', async () => {
 		const before = await currentDigest()
 		const { context, page } = await open(`/views/${boundViewId}`)

@@ -23,7 +23,7 @@ Never run `uiux dev`, `uiux artifacts gc` or any authoring against the owner's c
    UIUX_HOME=<printed home> node bin/uiux.mjs dev --workspace "$PWD/.uiux"
    ```
 
-   The first start writes a Baseline Checkpoint into the worktree's `.uiux/history/`. That is expected and is never committed.
+   UIUX writes no version history: Git is the history, and the server refuses a Workspace outside a Git work tree (`workspace.git_required`), which a worktree of this repository never is.
 
 4. Author through MCP (`/mcp`, `Authorization: Bearer <Token>`) with the domain-specific operations of AGENTS.md. Do not edit canonical files by hand. The `.uiux/kit/` sources are code and may be edited directly.
 
@@ -32,9 +32,9 @@ Never run `uiux dev`, `uiux artifacts gc` or any authoring against the owner's c
 5. Stop the server (`uiux artifacts gc` refuses a Workspace a server serves), then select what to commit (`pnpm dogfood:worktree select`). It prints the exact `git add -- ...` list; add `--stage` to run it. It selects:
 
    - every changed canonical resource under `.uiux/` (a deleted one is staged as a deletion), and
-   - the new Evidence blobs under `.uiux/artifacts/sha256/` that survive `uiux artifacts gc --dry-run` with an empty `UIUX_HOME`, run against the `.uiux/` as it would be committed (HEAD's plus the selected changes, `history/` from HEAD only).
+   - the new Evidence blobs under `.uiux/artifacts/sha256/` that survive `uiux artifacts gc --dry-run` with an empty `UIUX_HOME`, run against the `.uiux/` as it would be committed (HEAD's plus the selected changes).
 
-   It never selects `.uiux/history/**`, an unreferenced blob or `.uiux/kit/node_modules` (a directory, a symlink or a file, and anything under it; those are listed as skipped), and it warns about a tracked blob that changed or vanished (`git restore -- <path>`; blobs are content-addressed). Unreferenced new blobs and the Baseline Checkpoint stay as untracked files in the disposable worktree. Never `git add -A` or `git add .`.
+   It never selects an unreferenced blob or `.uiux/kit/node_modules` (a directory, a symlink or a file, and anything under it; those are listed as skipped), and it warns about a tracked blob that changed or vanished (`git restore -- <path>`; blobs are content-addressed). Unreferenced new blobs stay as untracked files in the disposable worktree. Never `git add -A` or `git add .`.
 
    After a recapture, the same gc dry-run on the as-committed tree also finds the *tracked* blobs it would now collect. `select` prints them as a `git rm -q -- ...` list, and `--stage` runs it. gc collects an old capture only when the View's revision changed: it keeps, per View and render context, every capture of the View's current revision (Rule 01a14e30-31c0-7289-a944-74af9556eabf; a capture carries no capture time, so gc cannot order two captures of one View revision). A recapture that leaves the View alone (a Kit, Adapter, Locale or Workspace change) therefore leaves the whole old generation reachable, and this list is empty for it. A tracked blob you already deleted in the working tree is not flagged as damage when gc would collect it, and a deletion already staged is not listed again.
 
@@ -53,13 +53,12 @@ If another PR changed the same `.uiux/` file first, the merge conflicts at file 
 
 ## CI guards
 
-`pnpm dogfood:guard [--base <ref>] [--head <ref>] [--allow-history]` (`scripts/dogfood-guard.mjs`) compares `merge-base(base, head)..head`; `--head` defaults to `HEAD`, `--base` to `origin/$GITHUB_BASE_REF`, else `origin/main`, else `main`. It reads the committed head, so commit first. CI runs it as the `dogfood-guard` job of `.github/workflows/ci.yml` on every pull request (full history checkout).
+`pnpm dogfood:guard [--base <ref>] [--head <ref>]` (`scripts/dogfood-guard.mjs`) compares `merge-base(base, head)..head`; `--head` defaults to `HEAD`, `--base` to `origin/$GITHUB_BASE_REF`, else `origin/main`, else `main`. It reads the committed head, so commit first. CI runs it as the `dogfood-guard` job of `.github/workflows/ci.yml` on every pull request (full history checkout).
 
-1. History guard: the PR adds or changes no `.uiux/history/**` file. A deletion is allowed.
-2. Blob guard: `uiux artifacts gc --dry-run`, run with an empty `UIUX_HOME` against an export of the head's committed `.uiux/`, lists none of the Evidence blobs the PR adds. A blob the base already holds is not the PR's. When the PR adds no blob, gc is not run.
-3. Kit guard: the PR adds or changes nothing at `.uiux/kit/node_modules` (a directory, a symlink or a file, or anything under it; a deletion is allowed).
+1. Blob guard: `uiux artifacts gc --dry-run`, run with an empty `UIUX_HOME` against an export of the head's committed `.uiux/`, lists none of the Evidence blobs the PR adds. A blob the base already holds is not the PR's. When the PR adds no blob, gc is not run.
+2. Kit guard: the PR adds or changes nothing at `.uiux/kit/node_modules` (a directory, a symlink or a file, or anything under it; a deletion is allowed).
 
-History escape hatch (history guard only): the owner's host legitimately writes Baseline Checkpoints and history under `.uiux/history/`, and the owner commits them. A PR carrying the `dogfood-history` label skips the history guard in CI (the `dogfood-guard` job also runs on `labeled` and `unlabeled`, and reads the labels from the event payload, so adding or removing the label reruns it); locally the same is `pnpm dogfood:guard --allow-history`. The output then prints `SKIP  history: skipped because --allow-history was given ...` with the number of history files the PR changes. Only the owner applies the `dogfood-history` label; an Agent never does, and an Agent's worktree-authored PR never carries history. The blob guard and the kit guard have no escape hatch. Modified history files are flagged as well as added ones.
+Neither guard has an escape hatch. UIUX writes no `.uiux/history/` since Discussion #491 P1, so there is no history guard and no label that skips one.
 
 Exit codes: 0 every guard passes, 1 a guard failed (the paths are listed), 2 usage or environment (no base ref, gc refused). The tests are `tests/dogfood-guard.test.ts`; `main` passes every guard (an empty PR, and the last dogfood Evidence commit `9084c39`, whose 48 added blobs are all reached).
 
@@ -86,5 +85,5 @@ Cross-OS: freshness reads digests, not the platform. The View condition is a dig
 ## Limits
 
 - The guards judge the committed files, not the author's intent: a blob that a Review submission or the newest Evidence reaches passes even if it is no longer wanted.
-- The blob guard's roots are the ones gc has with an empty host history: Review submissions, committed Checkpoints, and the latest Evidence of each View and render context. An Evidence blob that only a local host history keeps is flagged, which is the point.
+- The blob guard's roots are the ones gc has: Review submissions and the latest Evidence of each View and render context (the records naming the View's current revision, or every record of a group whose order cannot be decided).
 - Merge-base is taken against the base ref you give; fetch it first (`git fetch origin`) when running locally.

@@ -51,12 +51,11 @@ export const ACCESS_OPERATIONS = {
 	requestViewThumbnails: { requiredKeys: ['workspace.read'] },
 	// Clause 01a11485-fa00-72da-bc46-98302a3c106e: reading the Access presets on HTTP.
 	readAccessPresets: { requiredKeys: ['workspace.read'] },
-	// `history.read`: version history reads, which a system credential never gets (Clause 01a11485-f978-767a-b977-33028aee7ae7).
-	diffVersions: { requiredKeys: ['history.read'] },
-	listVersions: { requiredKeys: ['history.read'] },
-	readVersion: { requiredKeys: ['history.read'] },
-	// The version reads for Preview: a version's manifest, View and Locales, and its blobs by digest.
-	readVersionForPreview: { requiredKeys: ['history.read'] },
+	// The Workbench's read-only view of the changes since a Git base: the list, one resource's semantic
+	// diff and an Asset's base image need `workspace.read` and no other key (Feature 01a1ece7-8d4e-763c-8897-2c35ef129a4d).
+	listChanges: { requiredKeys: ['workspace.read'] },
+	readChangeDiff: { requiredKeys: ['workspace.read'] },
+	readChangeBlob: { requiredKeys: ['workspace.read'] },
 	// The session routes need no key, for cookie sessions only (Clause 01a11485-faa9-74fe-8e0a-068cd770ff1c).
 	readSession: { requiredKeys: [], sessionOnly: true },
 	endSession: { requiredKeys: [], sessionOnly: true },
@@ -79,8 +78,6 @@ export const ACCESS_OPERATIONS = {
 	decideDecision: { requiredKeys: ['decisions.decide'] },
 	// Clause 01a11485-fa87-7cf8-8ec1-275793457228; the HTTP refusal order is `resolutionRefusal`.
 	resolveReviewThread: { requiredKeys: ['reviews.resolve'] },
-	// `checkpoints.create`: humans and Agents, no lease.
-	createCheckpoint: { requiredKeys: ['checkpoints.create'] },
 	// Authoring, capture and Handoff export.
 	createView: { requiredKeys: ['views.write'] },
 	updateViewSpec: { requiredKeys: ['views.write'] },
@@ -125,15 +122,11 @@ export const ACCESS_OPERATIONS = {
 	// check also needs `product-kit.source.read` (`readKitSource`): see `runProductKitChecks` in `scoped-session.ts`.
 	runProductKitChecks: { requiredKeys: ['evidence.capture'], sessionOnly: true },
 	exportHandoff: { requiredKeys: ['handoff.export'] },
-	// A restore also needs the restored kind's write key (Rule 01a11c09-c648-71be-a550-2ecabf12f5d0): see `authorizeRestore`.
-	restoreResourceVersion: { requiredKeys: ['history.restore'] },
 	// Acquiring needs each requested kind's write key (Rule 01a11c09-c125-752e-aa98-b4c063b2b7fb): see
 	// `authorizeLeaseAcquire`. Releasing one's own leases needs no key.
 	acquireLeases: { requiredKeys: [], perResourceKeys: true },
 	releaseLeases: { requiredKeys: [] },
 	forceReleaseLease: { requiredKeys: ['locks.force-release'] },
-	// Offered in the Workbench only.
-	deleteCheckpoint: { requiredKeys: ['checkpoints.delete'] },
 	// Served only on a loopback origin or an `https` configured origin (Rule 01a12500-b105-7773-822f-359d4dcbd1da);
 	// the HTTP layer refuses every other origin before this rule runs (Clause 01a12500-a619-7fa5-b7f6-797adaf52f34).
 	administerAccess: { requiredKeys: ['members.manage'] },
@@ -187,7 +180,7 @@ function missingKeysMessage(principal: MemberPrincipal, operation: string, missi
 /**
  * Returns `undefined` when the principal may perform the operation, otherwise the
  * `auth.scope_denied` refusal. `additionalKeys` are keys this request needs beyond the
- * operation's own, such as a restored kind's write key.
+ * operation's own, such as the keys a Product Kit change touches.
  */
 export function authorizeOperation(principal: Principal, operation: AccessOperation, additionalKeys: readonly PermissionKey[] = []): ScopeDenied | undefined {
 	// Fail closed: an operation outside the policy data, or a per-resource operation named without
@@ -212,18 +205,6 @@ export function authorizeOperation(principal: Principal, operation: AccessOperat
 
 function refuse(message: string): ScopeDenied {
 	return { code: 'auth.scope_denied', requiredKeys: [], message }
-}
-
-/**
- * Rule 01a11c09-c648-71be-a550-2ecabf12f5d0: a restore needs `history.restore` and the restored
- * kind's write key, so `history.restore` never stands in for a missing write key. A kind with no
- * write key is refused. `additionalKeys` are keys the restore's result needs, such as
- * `product-kit.compose` for a Product Kit change to its Adapter list (`productKitChangeKeys`).
- */
-export function authorizeRestore(principal: Principal, kind: string, additionalKeys: readonly PermissionKey[] = []): ScopeDenied | undefined {
-	const writeKey = writeKeyForKind(kind)
-	if (!writeKey) return refuse(`restoreResourceVersion needs the write key of the restored kind, and ${kind} has none.`)
-	return authorizeOperation(principal, 'restoreResourceVersion', [writeKey, ...additionalKeys])
 }
 
 /**

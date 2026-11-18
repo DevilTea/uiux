@@ -17,10 +17,6 @@ import { evidenceAdapterProvenance, type CurrentAdapterProvenance } from '../../
 import type { WorkspaceAdapterSelection } from '../../domain/workspace/schema'
 import type { FileNativePersistence } from '../../persistence'
 import type { KitBuildStatus } from '../ports/kit-build'
-import { EXPIRED, IN_LOCK_PROVENANCE_BUDGET_MS, remainingInLockBudget, withinBudget, type InLockProvenanceOptions } from '../../adapters/kit-provenance'
-import { validateProductKit } from '../../domain/product-kit/schema'
-import type { JsonObject } from '../../domain/validation'
-import { diagnostics } from '../../logging/diagnostics'
 
 /**
  * Content digests already computed during one operation, by resolved entry module, so that an
@@ -176,66 +172,5 @@ export async function readCurrentAdapterProvenance(persistence: FileNativePersis
 	}
 	catch {
 		return { state: 'unavailable' }
-	}
-}
-
-/** Whether no entry of a valid resolution is of a selection other than the Product Kit file's list (see `isSelectionOnly`); without a server, the Adapters resolve from the files on disk as before. */
-function resolutionIsPinned(resolution: AdapterSetResolutionResult, source: AdapterProvenanceSource | undefined): boolean {
-	if (resolution.state !== 'valid' || !source?.isSelectionOnly) return true
-	return !resolution.set.entries.some(entry => source.isSelectionOnly!(entry))
-}
-
-/** The longest a version or Checkpoint record, which holds the persistence lock, waits for the Adapter provenance (as for the Product Kit provenance, `IN_LOCK_PROVENANCE_BUDGET_MS`). */
-export const IN_LOCK_ADAPTER_PROVENANCE_BUDGET_MS = IN_LOCK_PROVENANCE_BUDGET_MS
-
-/**
- * The `adapters` member of a version or Checkpoint record (Clause 01a11a5e-201a-7532-8192-517b439c6c0c;
- * Rule 01a11a5e-06fb-79c5-8396-d50d08780a6d), for a caller that holds the persistence lock: `{ adapters }`
- * with the active set in the Adapter provenance shape of a formal capture record, or `{}` when it is
- * not known (the same cases as {@link readCurrentAdapterProvenance}: a kit build running or failed,
- * the Product Kit file unreadable, the set invalid, a content digest not computable) or not known
- * within the budget, so recording a version never fails or overstays the lock for it. The Product
- * Kit file is read under the caller's lock; the Adapters resolve and bundle without it.
- */
-export async function adapterRecordFieldUnlocked(
-	persistence: FileNativePersistence,
-	source: AdapterProvenanceSource | undefined,
-	options: InLockProvenanceOptions = {},
-): Promise<Readonly<{ adapters?: JsonObject[] }>> {
-	try {
-		if (!kitBuildAllowsAdapterProvenance(source)) return {}
-		const productKitPath = persistence.layout.productKitPath
-		const bytes = productKitPath ? await persistence.readOptionalBytesUnlocked(productKitPath) : undefined
-		if (!bytes) return {}
-		let parsed: unknown
-		try {
-			parsed = JSON.parse(new TextDecoder().decode(bytes))
-		}
-		catch {
-			return {}
-		}
-		const validated = validateProductKit(parsed)
-		if (!validated.ok) return {}
-		const selections = validated.value.adapters
-		if (selections.length === 0) return { adapters: [] }
-		const budget = remainingInLockBudget(options, IN_LOCK_ADAPTER_PROVENANCE_BUDGET_MS)
-		// A resolution not pinned to the kit build output (the selection differs from the Product Kit
-		// file read again meanwhile) would bundle each Adapter's module graph here, work an expired
-		// budget abandons without cancelling: the record goes without `adapters` instead (issue #336).
-		const compute = async (): Promise<CurrentAdapterProvenance> => {
-			const resolution = await resolveProductKitAdapterSet(persistence, selections, source)
-			if (!resolutionIsPinned(resolution, source)) return { state: 'unavailable' }
-			return adapterSetEvidenceProvenance(persistence, resolution, undefined, source)
-		}
-		const current = await withinBudget(withSettledKitBuild(source, compute), budget)
-		if (current === EXPIRED) {
-			const log = options.log ?? (message => diagnostics.error(message))
-			log(`uiux: the Adapter provenance was not computed within ${budget} ms under the persistence lock; this history record goes without adapters.`)
-			return {}
-		}
-		return current?.state === 'available' ? { adapters: current.adapters as unknown as JsonObject[] } : {}
-	}
-	catch {
-		return {}
 	}
 }

@@ -854,17 +854,15 @@ describe('the View revision the Preview reports it mounted', () => {
 		bridge.dispose()
 	})
 
-	it('reports nothing for a View read without a revision, and nothing for a generation that did not declare the feature (a capture or a version frame)', async () => {
+	it('reports nothing for a View read without a revision, and nothing for a generation that did not declare the feature (a capture)', async () => {
 		const bundle = await loadBundle(await statefulWorkspace())
 		const without = wireBeforeAck(['geometry', BASE_STATE_FEATURE])
 		without.acknowledge()
 		mountReporting(bundle, without.runtime, new BaseStateRequestHold(), { view: statefulView(), context: renderContext() }).dispose()
 		expect(without.mountedTypes()).toEqual([])
-		for (const mode of [{ harness: true, version: false }, { harness: false, version: true }]) {
-			const undeclared = wireBeforeAck(declaredRuntimeFeatures(mode))
-			undeclared.acknowledge()
-			mountReporting(bundle, undeclared.runtime, new BaseStateRequestHold(), { view: statefulView(), viewRevision: 'revision-1', context: renderContext() }).dispose()
-			expect(undeclared.mountedTypes()).toEqual([])
-		}
+		const undeclared = wireBeforeAck(declaredRuntimeFeatures({ harness: true }))
+		undeclared.acknowledge()
+		mountReporting(bundle, undeclared.runtime, new BaseStateRequestHold(), { view: statefulView(), viewRevision: 'revision-1', context: renderContext() }).dispose()
+		expect(undeclared.mountedTypes()).toEqual([])
 	})
 })

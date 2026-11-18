@@ -9,14 +9,12 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { createChecksRunEvidenceService } from '../src/application/services/checks-run-evidence'
 import { canonicalJsonBytes, FileNativePersistence, revisionForResourceFiles } from '../src/persistence/file-native'
 import { reviewRelativePath, viewRelativePath } from '../src/persistence/paths'
-import { CheckpointStore } from '../src/persistence/history/checkpoint-store'
-import type { CheckpointRecord } from '../src/domain/history/schema'
 import { CURRENT_WORKSPACE_SCHEMA_VERSION } from '../src/product/workspace-schema'
 import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
 import { HEAVY_SERVER_SUITE_TIMEOUT_MS } from './support/timeouts'
 import { interactionReplayRecord } from './support/evidence-record'
 import { createCurrentWorkspace } from './support/workspace-layout'
-import { GuardError, addedBlobs, blobPath, checkBlobs, checkHistory, checkKitNodeModules, collectableTrackedBlobs, isKitNodeModules, resolveBase, runGuard } from '../scripts/dogfood-guard.mjs'
+import { GuardError, addedBlobs, blobPath, checkBlobs, checkKitNodeModules, collectableTrackedBlobs, isKitNodeModules, resolveBase, runGuard } from '../scripts/dogfood-guard.mjs'
 import { dogfoodStatus, formatSelection, isLinkedWorktree, prepare, runSelect, select } from '../scripts/dogfood-worktree.mjs'
 
 /**
@@ -52,20 +50,6 @@ function commitAll(cwd: string, message: string): void {
 }
 
 const encoder = new TextEncoder()
-
-function checkpoint(): CheckpointRecord {
-	return {
-		historySchemaVersion: 1,
-		id: randomUUID(),
-		type: 'checkpoint',
-		actor: { type: 'human', id: 'member:owner', displayName: 'Owner' },
-		at: '2026-10-18T12:00:00Z',
-		workspaceSchemaVersion: CURRENT_WORKSPACE_SCHEMA_VERSION,
-		resources: [],
-		name: 'Owner baseline',
-		source: 'workbench',
-	}
-}
 
 /** A repository on `main` whose `.uiux/` is a current Workspace, plus the persistence over it. */
 async function makeRepository(): Promise<{ repo: string; persistence: FileNativePersistence }> {
@@ -115,61 +99,18 @@ function guardCli(repo: string, ...args: string[]) {
 }
 
 describe('dogfood guard: history', () => {
-	it('fails a PR that adds a history file, and says which', async () => {
+	it('passes a PR that changes only canonical resources', async () => {
 		const { repo } = await repositoryWithBase()
-		mkdirSync(join(repo, '.uiux', 'history', 'checkpoints'), { recursive: true })
-		writeFileSync(join(repo, '.uiux', 'history', 'checkpoints', 'baseline.json'), '{}\n')
-		commitAll(repo, 'adds history')
-		expect(checkHistory(repo, { from: 'main', to: 'HEAD' })).toEqual(['.uiux/history/checkpoints/baseline.json'])
-		const run = runGuard(repo, { base: 'main' })
-		expect(run.ok).toBe(false)
-		expect(run.lines.join('\n')).toContain('FAIL  history')
-		expect(run.lines.join('\n')).toContain('.uiux/history/checkpoints/baseline.json')
-	})
-
-	it('fails a PR that changes a history file the base already has', async () => {
-		const { repo } = await repositoryWithBase(async ({ repo: root }) => {
-			mkdirSync(join(root, '.uiux', 'history', 'checkpoints'), { recursive: true })
-			writeFileSync(join(root, '.uiux', 'history', 'checkpoints', 'owner.json'), '{"a":1}\n')
-		})
-		writeFileSync(join(repo, '.uiux', 'history', 'checkpoints', 'owner.json'), '{"a":2}\n')
-		commitAll(repo, 'edits history')
-		expect(checkHistory(repo, { from: 'main', to: 'HEAD' })).toEqual(['.uiux/history/checkpoints/owner.json'])
-	})
-
-	it('skips only the history guard with allowHistory / --allow-history, and says so; the blob guard still fails', async () => {
-		const { repo, persistence } = await repositoryWithBase()
-		await new CheckpointStore(persistence).create(checkpoint(), new Map())
-		commitAll(repo, 'owner commits history')
-		const skipped = runGuard(repo, { base: 'main', allowHistory: true })
-		expect(skipped.ok).toBe(true)
-		expect(skipped.lines.join('\n')).toContain('SKIP  history: skipped because --allow-history was given')
-		expect(skipped.lines.join('\n')).toContain('1 .uiux/history/ file(s)')
-		const cli = guardCli(repo, '--base', 'main', '--allow-history')
-		expect(cli.status, cli.stdout + cli.stderr).toBe(0)
-		expect(cli.stdout).toContain('SKIP  history')
-		expect(guardCli(repo, '--base', 'main').status).toBe(1)
-		// No escape hatch for the blob guard: a collectable blob still fails with the flag.
-		await garbageBlob(persistence, 'unreferenced with history allowed')
-		commitAll(repo, 'adds garbage')
-		const run = runGuard(repo, { base: 'main', allowHistory: true })
-		expect(run.ok).toBe(false)
-		expect(run.lines.join('\n')).toContain('SKIP  history')
-		expect(run.lines.join('\n')).toContain('FAIL  blobs')
-	}, HEAVY_SERVER_SUITE_TIMEOUT_MS)
-
-	it('passes a PR that changes only canonical resources, and one that deletes history', async () => {
-		const { repo } = await repositoryWithBase(async ({ repo: root }) => {
-			mkdirSync(join(root, '.uiux', 'history', 'checkpoints'), { recursive: true })
-			writeFileSync(join(root, '.uiux', 'history', 'checkpoints', 'owner.json'), '{"a":1}\n')
-		})
-		const manifest = join(repo, '.uiux', 'workspace.json')
-		addTheme(manifest)
-		git(repo, 'rm', '-q', '.uiux/history/checkpoints/owner.json')
+		addTheme(join(repo, '.uiux', 'workspace.json'))
 		commitAll(repo, 'resource change')
-		expect(checkHistory(repo, { from: 'main', to: 'HEAD' })).toEqual([])
 		expect(runGuard(repo, { base: 'main' }).ok).toBe(true)
 	}, HEAVY_SERVER_SUITE_TIMEOUT_MS)
+
+	it('rejects the retired --allow-history option as invalid usage (the history check no longer exists)', () => {
+		const cli = guardCli(scratch(), '--allow-history')
+		expect(cli.status).toBe(2)
+		expect(cli.stderr).toContain('Usage: node scripts/dogfood-guard.mjs [--base <ref>] [--head <ref>]')
+	})
 })
 
 describe('dogfood guard: blobs', () => {
@@ -237,20 +178,18 @@ describe('dogfood guard: kit node_modules (issue #471)', () => {
 		expect(isKitNodeModules('app/node_modules')).toBe(false)
 	})
 
-	it('fails a PR that commits the kit/node_modules symlink, even with allowHistory, and says how to remove it', async () => {
+	it('fails a PR that commits the kit/node_modules symlink, and says how to remove it', async () => {
 		const { repo } = await repositoryWithBase()
 		linkKitNodeModules(repo)
 		// The ignore rule `kit/node_modules/` has a trailing slash: a plain `git add -A` takes the symlink.
 		commitAll(repo, 'commits the symlink')
 		expect(git(repo, 'ls-tree', '-r', '--name-only', 'HEAD', '--', '.uiux/kit').trim()).toBe('.uiux/kit/node_modules')
 		expect(checkKitNodeModules(repo, { from: 'main', to: 'HEAD' })).toEqual(['.uiux/kit/node_modules'])
-		for (const allowHistory of [false, true]) {
-			const run = runGuard(repo, { base: 'main', allowHistory })
-			expect(run.ok).toBe(false)
-			expect(run.lines.join('\n')).toContain('FAIL  kit')
-			expect(run.lines.join('\n')).toContain('git rm --cached -- .uiux/kit/node_modules')
-		}
-		const cli = guardCli(repo, '--base', 'main', '--allow-history')
+		const run = runGuard(repo, { base: 'main' })
+		expect(run.ok).toBe(false)
+		expect(run.lines.join('\n')).toContain('FAIL  kit')
+		expect(run.lines.join('\n')).toContain('git rm --cached -- .uiux/kit/node_modules')
+		const cli = guardCli(repo, '--base', 'main')
 		expect(cli.status, cli.stdout + cli.stderr).toBe(1)
 		expect(cli.stdout).toContain('.uiux/kit/node_modules')
 	})
@@ -297,20 +236,15 @@ describe('dogfood guard: base resolution', () => {
 
 describe('dogfood worktree', () => {
 	async function worktreeRepository() {
-		let ownerCheckpoint = ''
 		let trackedBlob = ''
 		const context = await repositoryWithBase(async ({ persistence }) => {
-			// The owner's committed Checkpoint: a valid record, which gc reads.
-			const record = checkpoint()
-			await new CheckpointStore(persistence).create(record, new Map())
-			ownerCheckpoint = `.uiux/history/checkpoints/${record.id}.json`
 			trackedBlob = blobPath(await keptBlob(persistence, 1))
 		})
 		git(context.repo, 'switch', '-q', 'main')
 		const worktree = join(scratch(), 'author')
 		git(context.repo, 'worktree', 'add', '-q', '-b', 'author', worktree, 'main')
 		const persistence = new FileNativePersistence({ root: join(worktree, '.uiux'), schemaPolicy: PRODUCT_WORKSPACE_SCHEMA_POLICY })
-		return { ...context, worktree, persistence, ownerCheckpoint, trackedBlob }
+		return { ...context, worktree, persistence, trackedBlob }
 	}
 
 	it('refuses the primary checkout and accepts a linked worktree', async () => {
@@ -347,27 +281,22 @@ describe('dogfood worktree', () => {
 		expect(prepare(worktree, { home: join(scratch(), 'home3'), build: false }).join('\n')).not.toContain('no node_modules')
 	}, HEAVY_SERVER_SUITE_TIMEOUT_MS)
 
-	it('selects the resources and the reached blobs, and never history or unreferenced blobs', async () => {
-		const { worktree, persistence, ownerCheckpoint } = await worktreeRepository()
+	it('selects the resources and the reached blobs, and never unreferenced blobs', async () => {
+		const { worktree, persistence } = await worktreeRepository()
 		const manifest = join(worktree, '.uiux', 'workspace.json')
 		addTheme(manifest)
 		mkdirSync(join(worktree, '.uiux', 'flows'), { recursive: true })
 		const kept = await keptBlob(persistence)
 		const garbage = await garbageBlob(persistence, 'unreferenced in the worktree')
-		// The worktree's Baseline Checkpoint and host history: untracked, and a tracked one changed.
-		writeFileSync(join(worktree, '.uiux', 'history', 'checkpoints', 'baseline.json'), '{}\n')
-		writeFileSync(join(worktree, ownerCheckpoint), `${readFileSync(join(worktree, ownerCheckpoint), 'utf8')}\n`)
 
 		const result = await select(worktree)
 		expect(result.add).toEqual(['.uiux/workspace.json', blobPath(kept)].sort())
 		expect(result.collectable).toEqual([blobPath(garbage)])
-		expect(result.history.sort()).toEqual(['.uiux/history/checkpoints/baseline.json', ownerCheckpoint].sort())
 		expect(result.damaged).toEqual([])
 		const text = formatSelection(result).join('\n')
 		expect(text).toContain('git add -- \\')
 		expect(text).toContain(`'${blobPath(kept)}'`)
 		expect(text).not.toContain(garbage)
-		expect(text).not.toContain('history/checkpoints/baseline.json\'')
 	}, HEAVY_SERVER_SUITE_TIMEOUT_MS)
 
 	it('never lists or stages .uiux/kit/node_modules: a symlink, a file, or anything under it (issue #471)', async () => {

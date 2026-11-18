@@ -8,7 +8,6 @@ import { describeFetchError } from '../utils/fetch-error'
 import { diagnosticText } from '../utils/diagnostic-copy'
 import { resolveDefaultLocale, resolveDefaultThemeId } from '../../src/preview/render-context-options'
 import { missingDefaultLocaleDiagnostic } from '../../src/i18n/runtime'
-import { resolveFrameContext } from '../../src/preview/version-frame-context'
 import type { WorkspaceManifest } from '../../src/domain/workspace/schema'
 import { RuntimePreviewProtocolBridge } from '../../src/preview/protocol/bridge'
 import { createRuntimeGenerationId } from '../../src/preview/protocol/generation-id'
@@ -79,20 +78,6 @@ const workspaceDefaultLocale = ref<string>()
 const hostColorScope = computed(() => themeId.value === 'dark' ? 'dark' : 'light')
 const variantName = ref<string | undefined>((route.query.variant as string) || undefined)
 const harnessMode = computed(() => route.query.harness === 'formal')
-/**
- * Read-only version mode (Rule 01a11a5e-1232-777c-a76d-26a6d5cbcfc0): `?version=<id>` renders that
- * version's View with that version's manifest and Locales, through the version reads for Preview,
- * while the Widget runtime and Adapters are the current ones. The document then enters no targeting
- * interaction and takes no Widget Event arm: it is a canvas comparison frame, never authored or
- * commented on (the Workbench draws no pins over it, Rule 01a11a5e-13d6-7a24-92e9-9a5de720ca27). A
- * selected Variant or key the version lacks renders its base state or default (Rule
- * 01a11a5e-1331-7e9e-a98d-5ff9b265b0e8); the Workbench shows the notice outside the frame.
- */
-const versionId = (route.query.version as string) || undefined
-/** Version mode: the version's manifest, and the Locales it holds files for (from its record). */
-let versionManifest: WorkspaceManifest | undefined
-let versionLocales: readonly string[] | undefined
-
 /**
  * The targeting interaction Workbench entered (Part 3): `inspection` for the Select tool,
  * `comment-range` for Comment mode, none for Interact. The runtime hit-tests and reports the
@@ -271,7 +256,7 @@ function receiveWidgetEventArm(message: WidgetEventArmMessage) {
  */
 const baseStateHold = new BaseStateRequestHold(() => runtimeBridge?.ended === true)
 function receiveBaseStateRequest(message: BaseStateRequestMessage) {
-	if (harnessMode.value || versionId) return
+	if (harnessMode.value) return
 	sendBaseState(baseStateHold.receive(message, activeBridge))
 }
 
@@ -281,7 +266,7 @@ function receiveBaseStateRequest(message: BaseStateRequestMessage) {
  * 2026-11-03; Clause 01a19ab9-d028-7bb9-a370-4736992852f5), and then the request held until now is
  * answered, so the revision reaches the Workbench, which takes it on arrival, ahead of an answer sent in the same batch. The bridge sends
  * nothing before the capability ACK, nothing for a generation that did not declare the feature (a
- * capture or a version frame) and nothing once it ended.
+ * capture) and nothing once it ended.
  */
 function onBaseStateRuntimeMounted(mounted: Readonly<{ viewRevision?: string }>) {
 	const message = baseStateMountedMessage({ previewSessionId: previewSessionId.value, runtimeGenerationId }, mounted)
@@ -328,7 +313,7 @@ function reportWidgetEvent(report: WidgetEventReport) {
 }
 
 function declaredFeatures(): string[] {
-	return declaredRuntimeFeatures({ harness: harnessMode.value, version: !!versionId })
+	return declaredRuntimeFeatures({ harness: harnessMode.value })
 }
 
 // ---- Checks reports (issue #347) --------------------------------------------------------------
@@ -339,7 +324,7 @@ function declaredFeatures(): string[] {
 // 01a17619-ab3f-797d-ae93-4038a48ee31f), sent shortly after the last change and only once the
 // document has settled, so a Preview that has not finished loading never reads as clean.
 
-const checksReportsEnabled = !harnessMode.value && !versionId
+const checksReportsEnabled = !harnessMode.value
 /** What the mounted Runtime evaluated; none while no Runtime is mounted or until it has been observed. */
 let checksObservation: ChecksObservation | undefined
 /** The runtime context the reports are about; raised on every View, Variant, Locale or Runtime instance change. */
@@ -411,7 +396,7 @@ function initBridge() {
 			previewSessionId.value,
 			runtimeGenerationId,
 			// `widget.events` ships with the mount factory (decision 10). A formal capture has no
-			// Workbench parent and is never armed, and a version frame is read-only: neither declares it.
+			// Workbench parent and is never armed, so it does not declare it.
 			{ protocolVersion: 1, features: declaredFeatures() },
 			// Transport-level batching (see `PreviewWireBatchEnvelope`): every envelope of one task (a
 			// frame's geometry reports, a Widget Event occurrence) leaves in one post, in order.
@@ -463,9 +448,8 @@ function initBridge() {
 	}
 }
 
-/** A Locale's messages: the version's in version mode, else the current ones. */
+/** A Locale's current messages. */
 async function readLocale(code: string): Promise<I18nResource | undefined> {
-	if (versionId) return (await uiux.readVersionResource<I18nResource>(versionId, 'locale', code))?.resource
 	return (await uiux.readResource<{ resource?: I18nResource }>('locale', code))?.resource
 }
 
@@ -516,9 +500,7 @@ function startEarlyReads(): EarlyReads {
 		return importPreviewBundle(status.bundleUrl)
 	})
 	bundle.catch(noop)
-	// A version frame resolves its Locale against the version after its View is read, so it reads each Locale when asked.
 	const readLocaleOnce = (code: string): Promise<I18nResource | undefined> => {
-		if (versionId) return readLocale(code)
 		let read = locales.get(code)
 		if (!read) {
 			read = readLocale(code)
@@ -531,10 +513,10 @@ function startEarlyReads(): EarlyReads {
 		adapters,
 		bundle,
 		locale: readLocaleOnce,
-		startLocale: (code) => { if (!versionId) void readLocaleOnce(code) },
+		startLocale: (code) => { void readLocaleOnce(code) },
 		startAssets(view) {
 			// An async wrapper: a View whose bindings cannot be collected fails where the Assets are awaited, as before.
-			const read = (async () => await uiux.previewAssets(collectBoundAssetIds(view.ir), versionId))()
+			const read = (async () => await uiux.previewAssets(collectBoundAssetIds(view.ir)))()
 			read.catch(noop)
 			early.assets = { view, read }
 		},
@@ -542,44 +524,13 @@ function startEarlyReads(): EarlyReads {
 	return early
 }
 
-/** Version mode: the version's manifest and Locale list decide the defaults and the fallbacks. */
-async function resolveVersionDefaults() {
-	versionManifest = (await uiux.readVersionResource<WorkspaceManifest>(versionId!, 'workspace', 'workspace'))?.resource
-	versionLocales ??= (await $fetch<{ version: { resources: readonly { kind: string; key: string }[] } }>(`/api/history/versions/${encodeURIComponent(versionId!)}`, { cache: 'no-store' }))
-		.version.resources.filter(resource => resource.kind === 'locale').map(resource => resource.key)
-	workspaceDefaultLocale.value = resolveDefaultLocale(versionManifest)
-	if (!locale.value) locale.value = workspaceDefaultLocale.value
-	if (!themeId.value) themeId.value = resolveDefaultThemeId(versionManifest)
-}
-
-/** The View to render: the version's, with the selection resolved against that version, or the current one. */
+/** The View to render: the current one. */
 async function readViewForPreview(): Promise<ViewRead | undefined> {
-	if (!versionId) return await uiux.readResource<ViewRead>('view', viewId.value)
-	const read = await uiux.readVersionResource<ViewResource>(versionId, 'view', viewId.value)
-	if (!read) throw new Error(t('preview.errors.viewNotInVersion'))
-	const resolved = resolveFrameContext({
-		...(variantName.value ? { variant: variantName.value } : {}),
-		locale: locale.value,
-		viewportId: viewportId.value,
-		width: viewportWidth.value,
-		height: viewportHeight.value,
-		themeId: themeId.value,
-	}, { manifest: versionManifest, view: read.resource, locales: versionLocales ?? [] }).context
-	variantName.value = resolved.variant
-	locale.value = resolved.locale
-	viewportId.value = resolved.viewportId
-	viewportWidth.value = resolved.width
-	viewportHeight.value = resolved.height
-	themeId.value = resolved.themeId
-	return { kind: 'view', key: read.key, revision: read.revision, diagnostics: [], resource: read.resource }
+	return await uiux.readResource<ViewRead>('view', viewId.value)
 }
 
 /** Resolves the Workspace default locale and, when not supplied, the effective locale and theme. */
 async function resolveWorkspaceDefaults() {
-	if (versionId) {
-		await resolveVersionDefaults()
-		return
-	}
 	if (workspaceDefaultLocale.value && locale.value && themeId.value) return
 	let manifest: WorkspaceManifest | undefined
 	try {
@@ -608,13 +559,13 @@ async function loadView() {
 		if (locale.value) early.startLocale(locale.value)
 		const defaults = resolveWorkspaceDefaults()
 		const requestedViewId = viewId.value
-		const viewRead = versionId ? undefined : readViewForPreview()
-		viewRead?.catch(noop)
+		const viewRead = readViewForPreview()
+		viewRead.catch(noop)
 		await defaults
 		if (workspaceDefaultLocale.value) early.startLocale(workspaceDefaultLocale.value)
-		let result = await (viewRead ?? readViewForPreview())
+		let result = await viewRead
 		// Another View was selected while this one loaded: read the one selected now, as the sequence did.
-		if (viewRead && viewId.value !== requestedViewId) result = await readViewForPreview()
+		if (viewId.value !== requestedViewId) result = await readViewForPreview()
 		if (!result) throw new Error(t('preview.errors.viewUnavailable'))
 		viewData.value = result
 		// The reactive View, the object `evaluateRuntimeOnce` reads the Assets for.
@@ -741,14 +692,13 @@ async function evaluateRuntimeOnce(early?: EarlyReads) {
 			}
 		}
 
-		// The server resolves the Assets the View binds: the current ones, or the version's in a version
-		// frame (Rule 01a167f4-472f-7ae9-8ebb-3075216ad94c). A bound Asset it blocks keeps the View from rendering.
+		// The server resolves the Assets the View binds. A bound Asset it blocks keeps the View from rendering.
 		const view = viewData.value.resource
 		// Read with `view`, so the revision is that of the View the Runtime is built from.
 		const viewRevision = viewData.value.revision
 		let assets: AssetResolutionTable
 		try {
-			assets = await (early?.assets?.view === view ? early.assets.read : uiux.previewAssets(collectBoundAssetIds(view.ir), versionId))
+			assets = await (early?.assets?.view === view ? early.assets.read : uiux.previewAssets(collectBoundAssetIds(view.ir)))
 		}
 		catch (cause) {
 			if (superseded()) return
@@ -806,8 +756,7 @@ async function evaluateRuntimeOnce(early?: EarlyReads) {
  * Preview document opens no change-event stream of its own (the Workbench holds the one stream and
  * starts a fresh Preview generation when the default Locale changes), so while blocked the current
  * Preview also re-reads that file itself and renders once it exists: a Preview opened on its own,
- * or one whose Workbench has no stream, still recovers. A version frame's Locales never change, so
- * it does not.
+ * or one whose Workbench has no stream, still recovers.
  */
 const BLOCKED_RECHECK_MS = 2000
 let blockedRecheckTimer: ReturnType<typeof setInterval> | undefined
@@ -834,7 +783,7 @@ function stopBlockedRecheck() {
 
 watch(() => materializationResult.value?.status === 'blocked', (blocked) => {
 	stopBlockedRecheck()
-	if (blocked && !versionId) blockedRecheckTimer = setInterval(() => { void recheckBlockedPreview() }, BLOCKED_RECHECK_MS)
+	if (blocked) blockedRecheckTimer = setInterval(() => { void recheckBlockedPreview() }, BLOCKED_RECHECK_MS)
 })
 
 /** One inbound envelope, alone or from a batch, through the runtime bridge's gates. */
@@ -857,8 +806,6 @@ function receiveWire(input: unknown) {
 	}
 	else if (message.type === 'geometry.reveal' && geometryProducer) geometryProducer.receiveReveal(message)
 	else if ((message.type === 'contour.full.request' || message.type === 'contour.partial.request' || message.type === 'contour.cancel') && geometryProducer) geometryProducer.receiveContour(message)
-	// A version frame is read-only: it enters no targeting interaction and takes no Widget Event arm.
-	else if (versionId && (message.type === 'targeting.enter' || message.type === 'widget.event.arm')) return
 	else if (message.type === 'targeting.enter') {
 		// A new interaction supersedes the previous one at once; its hover candidate starts empty.
 		targetingPurpose.value = message.payload.purpose
@@ -895,8 +842,7 @@ function onWindowMessage(event: MessageEvent) {
 		if (payload.viewport?.height) viewportHeight.value = payload.viewport.height
 		if (payload.themeId) themeId.value = payload.themeId
 		variantName.value = payload.variantName
-		// A version frame resolves every new selection against the version again (its fallbacks).
-		if (viewChanged || versionId) {
+		if (viewChanged) {
 			localesMap.clear()
 			void loadView()
 		}
@@ -1032,7 +978,6 @@ onUnmounted(() => {
   -->
   <div
     class="min-h-screen text-default transition-colors"
-    :data-preview-version="versionId"
     :class="[
       hostColorScope,
       hostColorScope === 'dark' ? 'bg-default' : 'bg-muted',

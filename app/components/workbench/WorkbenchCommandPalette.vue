@@ -5,7 +5,6 @@ import type { CommandPaletteGroup, CommandPaletteItem } from '@nuxt/ui'
 import { isWidgetAnchor, isWorkspaceAnchor } from '../../../src/domain/reviews/schema'
 import { useWorkbench } from '../../composables/useWorkbench'
 import { useWorkbenchShell } from '../../composables/useWorkbenchShell'
-import { useCheckpointAccess } from '../../composables/useCheckpointAccess'
 import { ADAPTERS_LOCATION, CATALOG_LOCATION, flowPath, PRODUCT_KIT_PATH, viewLocation, VIEWS_LOCATION } from '../../utils/workbench-routes'
 
 /** ⌘K: go to an area, a View, a Flow or a thread, or run a Workbench action (brief a). */
@@ -14,7 +13,6 @@ const workbench = useWorkbench()
 const shell = useWorkbenchShell()
 const { views, flows, reviews } = workbench
 const route = useRoute()
-const checkpoints = useCheckpointAccess()
 
 function statusLabel(status: string | undefined): string {
 	if (status === 'resolved') return t('reviews.status.resolved')
@@ -115,18 +113,6 @@ const groups = computed<CommandPaletteGroup<CommandPaletteItem>[]>(() => {
 		...(workbench.reviewReadOnly.value ? { suffix: t('inbox.readOnly') } : {}),
 		onSelect: () => { void navigateTo({ path: '/reviews', query: { compose: 'workspace', ...(fromView ? { from: fromView } : {}) } }) },
 	})
-	// Create Checkpoint (Rule 01a11a5e-0c71-78d1-9adb-14db6c67ab9c): desktop and tablet only, never on a
-	// phone (Rule 01a11a5e-1ba5-765e-966f-a681def5f472); without `checkpoints.create` it is listed disabled with the reason.
-	if (checkpoints.createOffered.value) {
-		const blocked = checkpoints.createBlockedReason.value
-		actions.push({
-			label: t('history.checkpoint.create'),
-			icon: 'i-lucide-flag',
-			disabled: !!blocked,
-			...(blocked ? { suffix: blocked } : {}),
-			onSelect: () => { shell.checkpointOpen.value = true },
-		})
-	}
 	actions.push(
 		{ label: t('palette.toggleTheme'), icon: 'i-lucide-sun-moon', kbds: ['meta', '.'], onSelect: () => shell.toggleWorkbenchTheme() },
 		{ label: t('palette.switchLanguage'), icon: 'i-lucide-languages', onSelect: () => shell.switchWorkbenchLanguage() },
