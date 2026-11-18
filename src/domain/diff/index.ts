@@ -34,7 +34,7 @@ export type UnsupportedKindDiff = Readonly<{ type: 'unsupported_kind' }>
 export type ResourceDiff = ViewDiff | FlowDiff | LocaleDiff | WorkspaceSettingsDiff | AssetDiff | StructuralDiff | OpaqueDiff | UnsupportedKindDiff
 
 /** The canonical resource kinds this build can diff; the kind set is open, and any other kind gets no diff. */
-export const DIFFABLE_RESOURCE_KINDS = Object.freeze(['workspace', 'product-kit', 'access-presets', 'view', 'flow', 'locale', 'asset'] as const)
+export const DIFFABLE_RESOURCE_KINDS = Object.freeze(['workspace', 'product-kit', 'access-presets', 'view', 'flow', 'locale', 'asset', 'review'] as const)
 
 /** True for a kind this build can diff at all. */
 export function isDiffableResourceKind(kind: string): boolean {

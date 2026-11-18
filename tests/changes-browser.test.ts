@@ -23,30 +23,35 @@ beforeAll(async () => {
 		},
 	})
 	browser = await chromium.launch({ headless: true })
-	const read = await fetch(`${server.origin}/api/resources/view/${VIEW_ID}`, { headers: server.headers })
+	await renameView(server)
+}, 120_000)
+
+/** Renames the fixture View through the Workbench's own API: an uncommitted change of the Workspace. */
+async function renameView(target: WorkbenchServer): Promise<void> {
+	const read = await fetch(`${target.origin}/api/resources/view/${VIEW_ID}`, { headers: target.headers })
 	const { revision } = await read.json() as { revision: string }
-	const renamed = await fetch(`${server.origin}/api/views/${VIEW_ID}/metadata`, {
+	const renamed = await fetch(`${target.origin}/api/views/${VIEW_ID}/metadata`, {
 		method: 'PUT',
-		headers: { ...server.headers, 'content-type': 'application/json' },
+		headers: { ...target.headers, 'content-type': 'application/json' },
 		body: JSON.stringify({ expectedRevision: revision, name: 'Renamed since the Git base' }),
 	})
 	if (!renamed.ok) throw new Error(`Renaming the View failed: ${renamed.status} ${await renamed.text()}`)
-}, 120_000)
+}
 
 afterAll(async () => {
 	await browser?.close()
 	await server?.close()
 })
 
-async function open(path: string): Promise<{ context: BrowserContext; page: Page }> {
+async function open(path: string, target: WorkbenchServer = server): Promise<{ context: BrowserContext; page: Page }> {
 	const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light' })
 	await context.addInitScript(() => {
 		localStorage.setItem('nuxt-color-mode', 'light')
 		localStorage.setItem('uiux.workbench.locale', 'en-US')
 	})
-	await context.addCookies([{ ...server.cookie, url: server.origin, httpOnly: true, sameSite: 'Strict' }])
+	await context.addCookies([{ ...target.cookie, url: target.origin, httpOnly: true, sameSite: 'Strict' }])
 	const page = await context.newPage()
-	await page.goto(`${server.origin}${path}`, { waitUntil: 'networkidle' })
+	await page.goto(`${target.origin}${path}`, { waitUntil: 'networkidle' })
 	return { context, page }
 }
 
@@ -99,4 +104,52 @@ describe('the changes since the Git base', () => {
 		}
 		finally { await context.close() }
 	}, 90_000)
+})
+
+/** Rule 01a1ece7-9239-7a3f-931f-cbe92f83561f: without a default branch the toggle is unavailable and HEAD stays the base. */
+describe('a repository with no default branch', () => {
+	it('disables the toggle to the merge base, says why, and still lists the changes against HEAD', async () => {
+		const noDefault = await startWorkbenchServer({
+			prepare: async (root) => {
+				initGit(root, 'topic-no-default-branch')
+				commitAll(root, 'base')
+			},
+		})
+		try {
+			await renameView(noDefault)
+			const { context, page } = await open('/?tab=activity', noDefault)
+			try {
+				const panel = page.locator('[data-changes-since]')
+				await panel.locator('[data-changes-no-default-branch]').waitFor({ timeout: 20_000 })
+				expect(await panel.locator('[data-changes-base-option="merge-base"]').isDisabled()).toBe(true)
+				expect(await panel.locator('[data-changes-base-option="head"]').getAttribute('aria-pressed')).toBe('true')
+				await panel.locator(`[data-summary-row="view:${VIEW_ID}"]`).waitFor({ timeout: 20_000 })
+			}
+			finally { await context.close() }
+		}
+		finally { await noDefault.close() }
+	}, 120_000)
+})
+
+/** Rule 01a1ece7-92cf-79d6-b7d0-1d907da0045b: when git cannot supply the base the view says so and the rest keeps working. */
+describe('a repository whose Git cannot supply the base', () => {
+	it('says so in the changes view, lists nothing, and leaves the rest of the Activity tab working', async () => {
+		// A work tree with no commit yet: Git is there, but `HEAD` names nothing.
+		const noCommit = await startWorkbenchServer({ prepare: async (root) => { initGit(root) } })
+		try {
+			const { context, page } = await open('/?tab=activity', noCommit)
+			try {
+				const panel = page.locator('[data-changes-since]')
+				const alert = panel.locator('[data-changes-unavailable]')
+				await alert.waitFor({ timeout: 20_000 })
+				expect(await alert.innerText()).toMatch(/no commit/iu)
+				expect(await panel.locator('[data-summary-row]').count()).toBe(0)
+				// The Review events below it, and the Workbench around it, are unaffected.
+				await page.locator('[data-review-activity]').waitFor({ timeout: 20_000 })
+				expect(await page.locator('[data-changes-failed]').count()).toBe(0)
+			}
+			finally { await context.close() }
+		}
+		finally { await noCommit.close() }
+	}, 120_000)
 })

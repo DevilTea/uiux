@@ -4,7 +4,10 @@ import { join } from 'node:path'
 
 import { afterEach, describe, expect, it } from 'vitest'
 
+import { authorizeOperation } from '../src/application/access/policy'
+import type { SystemPrincipal } from '../src/application/access/principal'
 import { AccessDeniedError } from '../src/application/access/scoped-session'
+import { parseCatFileBatch } from '../src/application/services/git-changes'
 import { createWorkspaceApplicationSession, type WorkspaceApplicationSession } from '../src/application/services/workspace-session'
 import { FileNativePersistence } from '../src/persistence/file-native'
 import { PRODUCT_WORKSPACE_SCHEMA_POLICY } from '../src/product/workspace-schema'
@@ -23,6 +26,9 @@ import { createCurrentWorkspace } from './support/workspace-layout'
 const VIEW_ID = '11111111-1111-4111-8111-111111111111'
 const OTHER_VIEW_ID = '22222222-2222-4222-8222-222222222222'
 const ASSET_ID = '33333333-3333-4333-8333-333333333333'
+const REVIEW_ID = '44444444-4444-4444-8444-444444444444'
+const FLOW_ID = '55555555-5555-4555-8555-555555555555'
+const STEP_ID = '66666666-6666-4666-8666-666666666666'
 const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1]).toString('base64')
 const PNG_V2 = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 2]).toString('base64')
 
@@ -103,6 +109,44 @@ describe('the changes view lists what changed since the Git base (Rules 01a1ece7
 		expect(await ctx.app.readChangeDiff({ kind: 'locale', key: 'de-DE' })).toMatchObject({ status: 'not_found' })
 	})
 
+	it('lists every kind of canonical resource: Workspace settings, Product Kit, Access presets, Locale, View, Flow, Asset and Review thread (Rule 01a1ece7-8e23)', async () => {
+		const ctx = await fixture({ commit: false })
+		expect(await ctx.app.createFlow({ id: FLOW_ID, name: 'Pay flow', entryStepId: STEP_ID, steps: { [STEP_ID]: { target: { viewId: VIEW_ID }, transitions: [] } } })).toMatchObject({ status: 'created' })
+		commitAll(ctx.repo, 'initial with a Flow')
+		// Touch each file in the working tree: the view lists what differs from Git, whoever wrote it.
+		for (const path of ['access-presets.json', 'product-kit.json', 'workspace.json', 'i18n/en-US.json', `views/${VIEW_ID}.view.json`, `flows/${FLOW_ID}.flow.json`, `assets/${ASSET_ID}/asset.json`])
+			await writeFile(join(ctx.root, path), `${(await readFile(join(ctx.root, path), 'utf8')).trimEnd()}\n\n`)
+		expect(await ctx.app.createReviewThread({ id: REVIEW_ID, anchor: { viewId: VIEW_ID, widgetId: 'root' } })).toMatchObject({ status: 'created' })
+		const listed = await ctx.app.listChanges({}) as unknown as { changes: { kind: string; key: string; status: string }[] }
+		expect(listed.changes.map(change => `${change.kind}:${change.status}`)).toEqual([
+			'access-presets:modified',
+			'asset:modified',
+			'flow:modified',
+			'locale:modified',
+			'product-kit:modified',
+			'review:added',
+			'view:modified',
+			'workspace:modified',
+		])
+	})
+
+	it('shows a Review thread added, changed or removed since the base, with its structural difference', async () => {
+		const ctx = await fixture()
+		expect(await ctx.app.createReviewThread({ id: REVIEW_ID, anchor: { viewId: VIEW_ID, widgetId: 'root' } })).toMatchObject({ status: 'created' })
+		expect(await ctx.app.listChanges({})).toMatchObject({ changes: [{ kind: 'review', key: REVIEW_ID, status: 'added' }] })
+		expect(await ctx.app.readChangeDiff({ kind: 'review', key: REVIEW_ID })).toMatchObject({ status: 'compared', changeStatus: 'added', diff: { type: 'structural' } })
+		commitAll(ctx.repo, 'with a thread')
+		const file = join(ctx.root, 'reviews', `${REVIEW_ID}.review.json`)
+		const thread = JSON.parse(await readFile(file, 'utf8')) as { messages: unknown[] }
+		await writeFile(file, `${JSON.stringify({ ...thread, displayHint: { pin: { x: 0.5, y: 0.5 } } }, null, 2)}\n`)
+		expect(await ctx.app.listChanges({})).toMatchObject({ changes: [{ kind: 'review', key: REVIEW_ID, status: 'modified' }] })
+		const diff = await ctx.app.readChangeDiff({ kind: 'review', key: REVIEW_ID })
+		expect(diff).toMatchObject({ status: 'compared', changeStatus: 'modified', diff: { type: 'structural' } })
+		expect((diff as unknown as { diff: { changes: unknown[] } }).diff.changes.length).toBeGreaterThan(0)
+		await rm(file)
+		expect(await ctx.app.listChanges({})).toMatchObject({ changes: [{ kind: 'review', key: REVIEW_ID, status: 'removed' }] })
+	})
+
 	it('shows an Asset whose content changed with its image before (read from Git by digest) and after', async () => {
 		const ctx = await fixture()
 		const before = await ctx.persistence.assets.read(ASSET_ID)
@@ -119,8 +163,9 @@ describe('the changes view lists what changed since the Git base (Rules 01a1ece7
 
 	it('rejects a resource that is not a canonical resource of the Workspace, and never passes it to git', async () => {
 		const ctx = await fixture()
-		for (const [kind, key] of [['view', '../../etc/passwd'], ['view', 'not-a-uuid'], ['locale', '../x'], ['asset', '-x'], ['review', VIEW_ID], ['bogus', 'x']] as const)
+		for (const [kind, key] of [['view', '../../etc/passwd'], ['view', 'not-a-uuid'], ['locale', '../x'], ['asset', '-x'], ['review', 'not-a-uuid'], ['review', '../x'], ['bogus', 'x']] as const)
 			expect(await ctx.app.readChangeDiff({ kind, key }), `${kind}:${key}`).toMatchObject({ status: 'invalid' })
+		expect(await ctx.app.readChangeDiff({ kind: 'review', key: REVIEW_ID })).toMatchObject({ status: 'not_found' })
 		expect(await ctx.app.readChangeBlob({ key: '../x', digest: `sha256:${'0'.repeat(64)}` })).toMatchObject({ status: 'invalid' })
 		expect(await ctx.app.readChangeBlob({ key: ASSET_ID, digest: 'sha256:short' })).toMatchObject({ status: 'invalid' })
 	})
@@ -226,8 +271,12 @@ describe('the changes view stores nothing and writes nothing (Rules 01a1ece7-910
 })
 
 describe('the changes view needs only the key to read the Workspace', () => {
-	it('refuses a member without workspace.read and a system credential, and serves a Viewer', async () => {
+	it('refuses a member without workspace.read and the system credential, and serves a Viewer', async () => {
 		const ctx = await fixture()
+		// The system credential is allowlisted for a few operations (Clause 01a11c09-a3bb), none of them these reads.
+		const system: SystemPrincipal = { type: 'system', id: 'system:capture', credential: 'system' }
+		for (const operation of ['listChanges', 'readChangeDiff', 'readChangeBlob'] as const)
+			expect(authorizeOperation(system, operation), operation).toMatchObject({ code: 'auth.scope_denied', requiredKeys: ['workspace.read'] })
 		const none = scoped(ctx.app, testMember({ keys: ['views.write'], kind: 'human', credential: 'session' }))
 		await expect(none.listChanges({})).rejects.toBeInstanceOf(AccessDeniedError)
 		await expect(none.readChangeDiff({ kind: 'view', key: VIEW_ID })).rejects.toBeInstanceOf(AccessDeniedError)
@@ -245,6 +294,30 @@ describe('the changes view needs only the key to read the Workspace', () => {
 		expect(await listChangesForHttp(viewer, { other: '1' })).toMatchObject({ status: 400 })
 		expect(await readChangeDiffForHttp(viewer, { kind: 'view' })).toMatchObject({ status: 400 })
 		expect(await readChangeDiffForHttp(viewer, { kind: 'view', key: 'nope' })).toMatchObject({ status: 400 })
+	})
+})
+
+describe('the answers of git cat-file --batch', () => {
+	const oid = 'a'.repeat(40)
+	const answer = (type: string, body: string) => `${oid} ${type} ${Buffer.byteLength(body)}\n${body}\n`
+
+	it('skips the body of an answer by its size whatever the type, so an object that is not a blob cannot misalign the next answer', () => {
+		const tree = `first line\n100644 blob ${oid}\tx\n`
+		const stream = Buffer.from(answer('tree', tree) + answer('blob', 'JSON') + 'views/gone missing\n' + answer('commit', `tree ${oid}\n`) + answer('blob', 'last'))
+		const read = parseCatFileBatch(stream, ['a/tree', 'b/blob', 'c/missing', 'd/commit', 'e/blob'])
+		expect([...read.keys()]).toEqual(['a/tree', 'b/blob', 'c/missing', 'd/commit', 'e/blob'])
+		expect(read.get('a/tree')).toBeUndefined()
+		expect(Buffer.from(read.get('b/blob')!).toString()).toBe('JSON')
+		expect(read.get('c/missing')).toBeUndefined()
+		expect(read.get('d/commit')).toBeUndefined()
+		expect(Buffer.from(read.get('e/blob')!).toString()).toBe('last')
+	})
+
+	it('reads a blob whose own bytes hold line breaks and header-like lines', () => {
+		const body = `${oid} blob 3\nabc`
+		const read = parseCatFileBatch(Buffer.from(answer('blob', body) + answer('blob', 'next')), ['x', 'y'])
+		expect(Buffer.from(read.get('x')!).toString()).toBe(body)
+		expect(Buffer.from(read.get('y')!).toString()).toBe('next')
 	})
 })
 

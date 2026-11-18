@@ -194,4 +194,17 @@ describe('other commands never need Git', () => {
 		const gc = spawnSync(process.execPath, [CLI, 'artifacts', 'gc', '--dry-run', '--workspace', root], { cwd: directory, encoding: 'utf8', timeout: 60_000 })
 		expect(gc.status, gc.stderr).toBe(0)
 	}, 120_000)
+
+	it('discovers the .uiux/ of the current directory without --workspace, outside a work tree, for a command that starts nothing', async () => {
+		const directory = await outsideGit()
+		await writeCurrentWorkspace(join(directory, '.uiux'))
+		const home = join(await outsideGit(), 'home')
+		const listed = spawnSync(process.execPath, [CLI, 'member', 'list'], { cwd: directory, encoding: 'utf8', env: { ...process.env, UIUX_HOME: home }, timeout: 60_000 })
+		expect(listed.stderr).not.toContain('workspace.git_required')
+		expect(listed.status, listed.stderr).toBe(0)
+		expect(listed.stdout).toContain('No roster yet')
+		const gc = spawnSync(process.execPath, [CLI, 'artifacts', 'gc', '--dry-run'], { cwd: directory, encoding: 'utf8', env: { ...process.env, UIUX_HOME: home }, timeout: 60_000 })
+		expect(gc.stderr).not.toContain('workspace.git_required')
+		expect(gc.status, gc.stderr).toBe(0)
+	}, 120_000)
 })

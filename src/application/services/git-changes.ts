@@ -5,7 +5,7 @@ import { resourceIdentityKey } from '../../domain/resource-identity'
 import { isFullUuid } from '../../domain/validation'
 import type { FileNativePersistence } from '../../persistence/file-native'
 import { runGit, type GitFailure } from '../../persistence/git'
-import { assetDirectoryRelativePath, assetMetadataRelativePath, flowRelativePath, localeRelativePath, viewRelativePath, type VersionedResourceIdentity } from '../../persistence/paths'
+import { assetDirectoryRelativePath, assetMetadataRelativePath, classifyCanonicalResourcePath, flowRelativePath, localeRelativePath, reviewRelativePath, viewRelativePath, WORKSPACE_DATA_DIRECTORY, type VersionedResourceIdentity } from '../../persistence/paths'
 
 /**
  * The Workbench's read-only view of the changes since a Git base (Feature
@@ -54,6 +54,34 @@ export type GitChangesService = Readonly<{
 	readChangeBlob(query: Readonly<{ base?: ChangeBase; key: string; digest: string }>): Promise<ChangeBlobOutcome>
 }>
 
+/**
+ * The answers of `git cat-file --batch` to one request per path, in order. An answer is
+ * `<oid> <type> <size>\n<size bytes>\n`, or `<request> missing\n` without a body. Whatever the
+ * type, the body is skipped by its size, so an object that is not a blob cannot misalign the answers
+ * that follow; only a blob gives bytes, and a missing or non-blob object gives `undefined`.
+ */
+export function parseCatFileBatch(data: Uint8Array, paths: readonly string[]): Map<string, Uint8Array | undefined> {
+	const buffer = Buffer.from(data.buffer, data.byteOffset, data.byteLength)
+	const out = new Map<string, Uint8Array | undefined>()
+	let offset = 0
+	for (const path of paths) {
+		const end = buffer.indexOf(0x0A, offset)
+		if (end < 0) break
+		const header = buffer.subarray(offset, end).toString('utf8')
+		offset = end + 1
+		const match = /^[0-9a-f]+ ([a-z]+) (\d+)$/u.exec(header)
+		if (!match) {
+			// `missing` (or an ambiguous request) has no body.
+			out.set(path, undefined)
+			continue
+		}
+		const size = Number(match[2])
+		out.set(path, match[1] === 'blob' ? Uint8Array.from(buffer.subarray(offset, offset + size)) : undefined)
+		offset += size + 1
+	}
+	return out
+}
+
 /** More changed resources than this are reported as unavailable rather than read one by one. */
 const MAX_CHANGED_RESOURCES = 5_000
 
@@ -67,8 +95,13 @@ export function createGitChangesService(persistence: FileNativePersistence): Git
 	const root = persistence.root
 	const layout = persistence.layout
 
-	/** The pathspecs of the versioned files and directories, each taken literally. */
-	const plainRoots = layout.versionedRoots.map(entry => entry.replace(/\/$/u, ''))
+	/**
+	 * The pathspecs of the canonical files and directories, each taken literally: the layout's versioned
+	 * roots and the Review threads' directory. A Review thread is a canonical resource (Feature
+	 * 01a1ece7-8d4e Notes, Rule 01a1144e-4f4b) although the layout does not version it, so the
+	 * layout's versioned roots alone would leave it out of this view.
+	 */
+	const plainRoots = [...layout.versionedRoots.map(entry => entry.replace(/\/$/u, '')), WORKSPACE_DATA_DIRECTORY.reviews]
 	const pathspecs = plainRoots.map(entry => `:(literal)${entry}`)
 
 	async function git(args: readonly string[], input?: string) {
@@ -124,9 +157,9 @@ export function createGitChangesService(persistence: FileNativePersistence): Git
 		return { ok: true, info: { base: effective, commit: commit.slice(0, 12) }, commit, prefix: root, mergeBase }
 	}
 
-	/** The resource a path of the Workspace belongs to, or `undefined` for a path the layout does not version. */
+	/** The canonical resource a path of the Workspace belongs to, or `undefined` for a path that is none. */
 	function classify(path: string): VersionedResourceIdentity | undefined {
-		return layout.classifyVersionedPath(path)
+		return classifyCanonicalResourcePath(layout, path)
 	}
 
 	/** Every versioned file Git has at `commit`, grouped by resource. */
@@ -151,23 +184,7 @@ export function createGitChangesService(persistence: FileNativePersistence): Git
 		if (paths.length === 0) return out
 		const result = await git(['cat-file', '--batch'], `${paths.map(path => `${commit}:${prefix}${path}`).join('\n')}\n`)
 		if (!result.ok) return result
-		const data = result.stdout
-		let offset = 0
-		for (const path of paths) {
-			const end = data.indexOf(0x0A, offset)
-			if (end < 0) break
-			const header = data.subarray(offset, end).toString('utf8')
-			offset = end + 1
-			const match = /^[0-9a-f]+ blob (\d+)$/u.exec(header)
-			if (!match) {
-				out.set(path, undefined)
-				continue
-			}
-			const size = Number(match[1])
-			out.set(path, Uint8Array.from(data.subarray(offset, offset + size)))
-			offset += size + 1
-		}
-		return out
+		return parseCatFileBatch(result.stdout, paths)
 	}
 
 	/** The paths that differ between `commit` and the working tree, and the files Git does not track yet. */
@@ -208,8 +225,14 @@ export function createGitChangesService(persistence: FileNativePersistence): Git
 		return kind === 'asset' ? list.some(path => path.endsWith('/asset.json')) : list.length > 0
 	}
 
-	async function currentPaths(resource: VersionedResourceIdentity): Promise<string[]> {
-		return [...(await currentFiles(resource)).keys()]
+	/** The paths of one resource in the working tree, listed without reading an Asset's content bytes. */
+	function currentPaths(resource: VersionedResourceIdentity): Promise<string[]> {
+		if (resource.kind !== 'asset') return currentFiles(resource).then(files => [...files.keys()])
+		return persistence.withReadLock(async () => {
+			const directory = assetDirectoryRelativePath(resource.key)
+			const entries = await persistence.listDirectoryUnlocked(directory) ?? []
+			return entries.filter(entry => entry.isFile() && classify(`${directory}/${entry.name}`)).map(entry => `${directory}/${entry.name}`)
+		})
 	}
 
 	async function listChanges(query: Readonly<{ base?: ChangeBase }>): Promise<ListChangesOutcome> {
@@ -248,6 +271,7 @@ export function createGitChangesService(persistence: FileNativePersistence): Git
 				case 'flow': return flowRelativePath(resource.key)
 				case 'locale': return localeRelativePath(resource.key)
 				case 'asset': return assetMetadataRelativePath(resource.key)
+				case 'review': return reviewRelativePath(resource.key)
 				default: return undefined
 			}
 		}

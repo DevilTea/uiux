@@ -8,10 +8,10 @@ import { useWorkbench } from './useWorkbench'
 /**
  * The changes since a Git base (Feature 01a1ece7-8d4e-763c-8897-2c35ef129a4d), read from
  * `GET /api/changes`. The base is view state: `head` (the default) or `merge-base`, never part of the
- * address and never stored. The list reads again when the Workbench re-reads its resources, on a
- * change event, when the window regains focus and, only while the change-event stream is not open,
- * every `CHANGES_POLL_MS` while it is visible, since a commit made outside the Workbench moves the
- * base without a change event.
+ * address and never stored. The list reads again on a change event; when the window regains focus;
+ * when the Workbench re-reads its resources while the change-event stream is not open; and, only
+ * while that stream is not open, every `CHANGES_POLL_MS` while the page is visible, since a commit
+ * made outside the Workbench moves the base without a change event.
  */
 export const CHANGES_POLL_MS = 30_000
 /** A focus and a visibility change arrive together; one read serves both. */
@@ -96,7 +96,10 @@ export function useGitChanges(options: Readonly<{
 		document.removeEventListener('visibilitychange', refresh)
 		if (timer) clearInterval(timer)
 	})
-	watch(signature, () => { if (enabled()) void load() })
+	// The Workbench re-reads a resource after the change event that also reloads this list, so while the
+	// stream is open the signature moves with an event that has already caused one load; only without
+	// the stream (a write through this tab that no event announced) does a moved signature load it.
+	watch(signature, () => { if (enabled() && live.state.value !== 'open') void load() })
 
 	return { requested, effectiveBase, mergeBase, listing, changes, loading, error, load }
 }
