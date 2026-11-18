@@ -1,15 +1,15 @@
-import { canonicalJsonStringify } from '../../canonical-json'
-import { isRecord, jsonPointer, type JsonValue } from '../../validation'
+import { canonicalJsonStringify } from '../canonical-json'
+import { isRecord, jsonPointer, type JsonValue } from '../validation'
 
 /**
- * The JSON-pointer structural diff (Rule 01a11a5e-1134-755c-a740-a619a7943fe0): where no semantic
- * diff applies, a comparison reports the members that were added, removed or replaced, each named
+ * The JSON-pointer structural diff : where no semantic
+ * diff applies, a diff reports the members that were added, removed or replaced, each named
  * by its JSON pointer (RFC 6901), never a line diff. The semantic diffs reuse it for the parts of a
  * resource whose meaning is open (Widget config, State overrides, viewport presets).
  *
  * A `$i18n` or `$asset` binding (an object whose only member is that key) is one value: a changed
  * binding is reported as the binding before and after, never as its inner string, so a diff shows
- * the reference and not a resolved text or file (Rule 01a11a5e-0e8d-7d8a-84f1-3195ac7719e7).
+ * the reference and not a resolved text or file.
  */
 export type JsonPointerChange =
 	| Readonly<{ op: 'add'; path: string; after: JsonValue }>

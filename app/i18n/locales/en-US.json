@@ -648,8 +648,7 @@
       "bundleInvalid": "The preview runtime is incomplete. Rebuild UIUX, then reload.",
       "bundleLoadFailed": "Could not load the preview runtime.",
       "localeLoadFailed": "Could not load the primary Locale.",
-      "assetsLoadFailed": "Could not load the Assets this View uses.",
-      "viewNotInVersion": "This View doesn't exist in this version."
+      "assetsLoadFailed": "Could not load the Assets this View uses."
     }
   },
   "reviews": {
@@ -2055,7 +2054,6 @@
       "gapBadge": "Missing requirements",
       "domain": {
         "workspace": "Workspace",
-        "history": "History",
         "product_kit": "Product Kit",
         "reviews": "Reviews",
         "decisions": "Decisions",
@@ -2066,14 +2064,12 @@
         "settings": "Settings",
         "evidence": "Evidence",
         "handoff": "Handoff",
-        "checkpoints": "Checkpoints",
         "locks": "Edit locks",
         "presets": "Access presets",
         "members": "Members"
       },
       "description": {
         "workspace_read": "Open the Workspace: Views, UX Flows, Locales, Assets, Evidence and the Preview.",
-        "history_read": "Browse the version history and compare versions.",
         "product_kit_source_read": "Browse kit sources, build output and the build log.",
         "reviews_write": "Start Review threads, reply, re-anchor and pin them, and edit or withdraw one’s own.",
         "reviews_submit": "Submit Review threads for review and reopen them.",
@@ -2089,9 +2085,6 @@
         "product_kit_compose": "Change the design systems and which Adapters the Workspace uses, in which order.",
         "evidence_capture": "Capture formal Evidence.",
         "handoff_export": "Export a Handoff.",
-        "checkpoints_create": "Create Checkpoints.",
-        "history_restore": "Restore a resource from an earlier version.",
-        "checkpoints_delete": "Delete Checkpoints.",
         "locks_force_release": "Release another member’s edit lock.",
         "presets_manage": "Edit the Access presets.",
         "members_manage": "Manage members, Tokens, sign-in links and sessions."
@@ -2677,50 +2670,6 @@
       "unresolved_review_thread": "A Review is still unresolved.",
       "unsubstantiated_readiness_claim": "The readiness claim is not backed by Evidence."
     },
-    "history": {
-      "unsupported_history_schema_version": "This version history record uses a format this UIUX build does not support.",
-      "invalid_version_type": "The version type is not valid.",
-      "invalid_checkpoint_name": "A Checkpoint name must be 1 to 120 characters, with no leading or trailing spaces.",
-      "invalid_checkpoint_note": "A Checkpoint note can be at most 2,000 characters.",
-      "invalid_system_checkpoint_name": "A system Checkpoint does not have its fixed name.",
-      "invalid_net_change": "The version's net-change flag is not valid.",
-      "invalid_recording_gap": "The recording gap flag is not valid.",
-      "invalid_operation": "The recorded change names an operation that history does not record.",
-      "missing_revision": "A recorded change does not state the resource revision before or after it.",
-      "duplicate_resource": "The version lists the same resource more than once.",
-      "empty_resource_files": "A resource in the version lists no files.",
-      "invalid_file_path": "A file path in the version is not valid.",
-      "duplicate_file": "The version lists the same file under more than one resource.",
-      "invalid_resource_kind": "The resource kind in the version is not valid.",
-      "invalid_resource_key": "The resource key in the version is not valid.",
-      "resource_invalid": "A file this version records for the resource could not be read.",
-      "invalid_actor_type": "The author type of the version is not valid.",
-      "unstamped_actor": "The version does not record who made the change.",
-      "invalid_system_actor": "The system author of the version is not valid.",
-      "external_actor_id": "The author of a change made outside UIUX cannot carry a member ID.",
-      "invalid_source": "The change's source is not valid.",
-      "invalid_open_entry": "An entry of the open autosave is not valid.",
-      "unexpected_file": "A file in the history store is not a history record.",
-      "record_invalid": "A version history record is not valid.",
-      "record_exists": "A version with this ID already exists.",
-      "record_missing": "The version does not exist.",
-      "journal_invalid": "The open autosave could not be read.",
-      "blob_corrupt": "A stored history file does not match its content.",
-      "store_unsafe": "The history store on this computer is not safe to use. Check its folder permissions and links.",
-      "write_failed": "History could not be saved. Nothing was changed.",
-      "rollback_failed": "History could not be saved, and the interrupted write could not be fully undone. Check the history store.",
-      "invalid_cursor": "This place in the timeline is invalid. Reload the timeline.",
-      "invalid_comparison": "These versions cannot be compared. Choose a version and what to compare it with.",
-      "blob_missing": "A file of this version is no longer stored, so this version can't be compared or restored. Nothing was changed.",
-      "invalid_listing": "This version list request is not valid. Check the filters and the page size.",
-      "unavailable": "Version history isn't available on this server, so no Checkpoint can be created.",
-      "boundary_failed": "The open autosave couldn't be closed, so no Checkpoint was created. Nothing was changed. Try again.",
-      "not_checkpoint": "Only a Checkpoint can be deleted. This version was saved automatically.",
-      "invalid_restore": "This restore request is not valid. Choose one resource and give its current revision.",
-      "restore_unsupported_kind": "This kind of resource can't be restored. Review threads are never restored.",
-      "resource_not_in_version": "This version doesn't contain that resource, so there is nothing to restore.",
-      "restore_invalid_content": "The content in this version isn't valid now, so it wasn't restored. Nothing was changed."
-    },
     "review": {
       "anchor_history_mismatch": "The Review’s place does not match its history.",
       "current_submission_mismatch": "The current submission does not match the history.",
@@ -2883,6 +2832,18 @@
       "no_ui_invalid": "Each noUi entry needs a valid requirement ID and a reason of 1 to 500 characters.",
       "unresolved": "The requirement source has no Rule with this ID.",
       "provider_unavailable": "The requirement source can’t be read."
+    },
+    "git": {
+      "unavailable": "Git cannot be run for this Workspace, so it cannot supply the base.",
+      "no_commit": "This repository has no commit yet, so Git has no base to compare with.",
+      "no_merge_base": "Git found no merge base of HEAD and the default branch.",
+      "too_many_changes": "Too many resources changed to list them."
+    },
+    "changes": {
+      "invalid_resource": "This is not a canonical resource of the Workspace.",
+      "resource_not_found": "The resource exists neither at the base nor in the working tree.",
+      "invalid_blob": "An Asset and a content digest are needed to read the image.",
+      "blob_not_found": "The Asset has no file with that digest at the base."
     }
   },
   "diagnosticFallback": {
@@ -2899,7 +2860,6 @@
     "evidence": "There is a problem with this Evidence.",
     "flow": "There is a problem with this Flow.",
     "handoff": "Something blocks the Handoff.",
-    "history": "A version history record is not valid.",
     "i18n": "There is a problem with a translation.",
     "identity": "An identity is not valid.",
     "interaction": "The interaction replay could not be recorded.",
@@ -2926,7 +2886,9 @@
     "revision": "The revision record is not valid.",
     "copy_record": "There is a problem with the copy record, uiux-components.json.",
     "checks": "A check could not finish.",
-    "requirements": "There is a problem with a requirement reference."
+    "requirements": "There is a problem with a requirement reference.",
+    "git": "Git cannot supply the base.",
+    "changes": "The changes could not be read."
   },
   "threadContext": {
     "srPrefix": "Recorded Preview context:",
@@ -2946,30 +2908,6 @@
     "openInRecordedHint": "Switch the Preview to the Locale, viewport and theme this thread records"
   },
   "history": {
-    "title": "Version history",
-    "timelineLabel": "Version timeline",
-    "loadFailed": "Couldn't load the version history.",
-    "emptyTitle": "No versions yet",
-    "emptyDescription": "Changes to Views, Flows, Locales, Assets and Workspace settings are saved here automatically.",
-    "emptyFiltered": "No versions match these filters",
-    "emptyFilteredDescription": "Change or clear the filters to see more versions.",
-    "loadMore": "Load older versions",
-    "today": "Today",
-    "yesterday": "Yesterday",
-    "quiet": "{n} autosave with no net change | {n} autosaves with no net change",
-    "quietHint": "Their changes cancelled each other out, so the Workspace ended where it started.",
-    "type": {
-      "autosave": "Autosave",
-      "checkpoint": "Checkpoint",
-      "external": "Changed outside UIUX",
-      "system": "System change"
-    },
-    "actor": {
-      "external": "Outside UIUX",
-      "system": "System",
-      "baseline": "History start",
-      "unknown": "Someone"
-    },
     "kind": {
       "workspace": "Workspace settings",
       "product-kit": "Product Kit",
@@ -2979,90 +2917,14 @@
       "locale": "Locale",
       "asset": "Asset"
     },
-    "operation": {
-      "createView": "Created the View",
-      "updateViewSpec": "Edited the Spec",
-      "updateViewStructure": "Edited the structure",
-      "updateViewMetadata": "Edited the name or feature tag",
-      "deleteView": "Deleted the View",
-      "updateWorkspaceSettings": "Edited the Workspace settings",
-      "composeProductKit": "Composed the Product Kit",
-      "updateProductKit": "Edited the Product Kit",
-      "updateComponentRegistry": "Edited the component registry",
-      "updateAccessPresets": "Edited the access presets",
-      "createLocale": "Created the Locale",
-      "updateLocale": "Edited the Locale",
-      "createFlow": "Created the Flow",
-      "updateFlow": "Edited the Flow",
-      "deleteFlow": "Deleted the Flow",
-      "createAsset": "Added the Asset",
-      "replaceAsset": "Replaced the Asset",
-      "deleteAsset": "Deleted the Asset",
-      "promoteReviewToDecision": "Promoted a Review to a Decision",
-      "createDecisionFromReview": "Created another Decision from a Review",
-      "deferDecision": "Deferred a Decision",
-      "decideDecision": "Decided a Decision",
-      "reopenDecision": "Reopened a Decision",
-      "restoreResourceVersion": "Restored an earlier version"
-    },
-    "row": {
-      "compare": "Compare",
-      "compareNamed": "Compare {name} with the version before it",
-      "compareWithSelected": "Compare the selected version with {name}",
-      "expand": "Show what {name} changed",
-      "collapse": "Hide what {name} changed",
-      "selected": "Selected",
-      "changed": "{n} resource changed | {n} resources changed",
-      "noChanges": "No resource changed",
-      "changedResources": "Changed resources",
-      "events": "Changes in order",
-      "eventsLoadFailed": "Couldn't load the changes of this version.",
-      "noEvents": "No changes were recorded.",
-      "restored": "Restored from an earlier version that is no longer in history.",
-      "recordingGap": "Some changes may be missing from this version.",
-      "restoredFrom": "Restored from {version}"
-    },
-    "filter": {
-      "actor": "Changed by",
-      "allActors": "Anyone",
-      "kind": "Resource kind",
-      "allKinds": "All kinds",
-      "checkpointsOnly": "Checkpoints only"
-    },
-    "since": {
-      "compare": "Compare with now",
-      "unavailable": "No saved version has what you last saw",
-      "openView": "Open View",
-      "failed": "Couldn't find the version you last saw."
-    },
-    "invalid": {
-      "title": "Some history records can't be read",
-      "explanation": "These files aren't valid history records for this UIUX build, so they are left out of the timeline and can't be deleted here. Update UIUX, or check the history files.",
-      "notDeletable": "This record can't be read, so it isn't deleted."
-    },
     "compare": {
-      "title": "Comparison",
-      "failed": "Couldn't compare these versions.",
       "against": "Compare with",
-      "parent": "Previous version",
-      "current": "Current state",
-      "other": "Another version",
-      "otherNamed": "Another version: {name}",
-      "to": "to",
-      "nothing": "Nothing yet",
-      "close": "Close the comparison",
       "summary": "Summary",
       "changedCount": "{n} resource changed | {n} resources changed",
-      "unchangedCount": "{n} unchanged | {n} unchanged",
-      "noParent": "This is the first version, so everything in it counts as added.",
-      "noDifferences": "Nothing differs between these two versions.",
-      "allResources": "Show every changed resource",
-      "openInActivity": "Open the whole comparison in Activity",
       "status": {
         "added": "Added",
         "removed": "Removed",
-        "modified": "Modified",
-        "unchanged": "Unchanged"
+        "modified": "Modified"
       }
     },
     "diff": {
@@ -3118,65 +2980,7 @@
       "imageAlt": "{name}, {side}",
       "imageUnavailable": "This image can't be previewed here yet."
     },
-    "checkpoint": {
-      "create": "Create Checkpoint",
-      "title": "Create Checkpoint",
-      "description": "Saves a named version of the whole Workspace as it is now. Nothing in the Workspace changes.",
-      "name": "Name",
-      "nameHelp": "Up to {max} characters.",
-      "nameRequired": "Enter a name.",
-      "nameTooLong": "Use at most {max} characters.",
-      "note": "Note",
-      "noteHelp": "Optional, up to {max} characters.",
-      "noteTooLong": "Use at most {max} characters.",
-      "leaseTitle": "Someone is still editing",
-      "leaseBody": "The Checkpoint saves these files as they are now, including edits that aren't finished yet.",
-      "submit": "Create Checkpoint",
-      "created": "Checkpoint “{name}” created",
-      "failed": "Couldn't create the Checkpoint.",
-      "retryable": "Nothing was saved. Try again in a moment.",
-      "blockedUnsupported": "Not available: this version of UIUX doesn't support this Workspace's schema"
-    },
-    "delete": {
-      "action": "Delete Checkpoint",
-      "actionNamed": "Delete Checkpoint {name}",
-      "title": "Delete this Checkpoint?",
-      "body": "“{name}” is removed from the timeline for everyone. The Workspace files don't change, and this can't be undone.",
-      "confirm": "Delete Checkpoint",
-      "deleted": "Checkpoint “{name}” deleted",
-      "failed": "Couldn't delete the Checkpoint."
-    },
-    "view": {
-      "title": "Versions of this View",
-      "emptyTitle": "No changes to this View yet",
-      "emptyDescription": "Each saved change to this View is listed here."
-    },
-    "emptyFilteredMore": "None of the loaded versions match. Load older versions to look further back.",
-    "systemName": {
-      "baseline": "History start"
-    },
     "restore": {
-      "action": "Restore this version",
-      "actionNamed": "Restore this version: {resource}",
-      "title": "Restore this version?",
-      "thisVersion": "this version",
-      "body": "“{resource}” gets its content from {version} ({time}) as a new revision. Every version stays in history, and no other resource changes.",
-      "bodyNoTime": "“{resource}” gets its content from {version} as a new revision. Every version stays in history, and no other resource changes.",
-      "bodyAfterChange": "“{resource}” returns to its content right after this change, as {version} ({time}) left it, not to its content before the change. This writes a new revision; every version stays in history, and no other resource changes.",
-      "bodyAfterChangeNoTime": "“{resource}” returns to its content right after this change, as {version} left it, not to its content before the change. This writes a new revision; every version stays in history, and no other resource changes.",
-      "unchanged": "The current content of “{resource}” already matches this version, so there is nothing to restore.",
-      "keepsDecisions": "The View keeps its current Decisions.",
-      "keepsSchema": "The Workspace keeps its current schema version.",
-      "recreates": "It no longer exists, so the restore re-creates it with its original identity.",
-      "recreatesView": "It no longer exists, so the restore re-creates it with its original identity and the Decisions recorded in that version.",
-      "impactNote": "If the restore changes what other resources refer to, you'll see the effects before anything is written.",
-      "reading": "Checking the current revision",
-      "readFailed": "Couldn't read the current {resource}.",
-      "confirm": "Restore",
-      "restored": "“{resource}” restored from {version}",
-      "recreated": "“{resource}” re-created from {version}",
-      "sourceUnread": "Restored from an earlier version.",
-      "sourceLoading": "Reading the version this was restored from",
       "impact": {
         "title": "Restore anyway?",
         "body": "Restoring “{resource}” from {version} affects what other resources refer to. Nothing has been written yet.",
@@ -3218,57 +3022,24 @@
             "decided": "Decided Decision “{question}” of View {view} would be removed."
           }
         }
-      },
-      "conflict": {
-        "title": "{resource} changed after this dialog opened",
-        "body": "Nothing was restored. Reload to restore over its newest revision.",
-        "reload": "Reload"
-      },
-      "locked": {
-        "title": "{nickname} is editing {resource} until {time}",
-        "body": "Nothing was restored. Try again once the edit lock is released."
-      },
-      "refused": {
-        "invalid": "This version can't be restored",
-        "not_found": "There is nothing to restore",
-        "blocked": "The restore is blocked",
-        "denied": "Your permission keys don’t allow restoring this resource",
-        "failed": "Couldn't restore this version"
       }
     },
-    "canvas": {
-      "label": "Canvas",
-      "title": "Canvas comparison",
-      "stageLabel": "Before and after frames",
-      "mode": {
-        "list": "Change list",
-        "side": "Side by side",
-        "highlight": "Highlight changes"
-      },
-      "close": "Back to the live canvas",
-      "before": "Before",
-      "after": "After",
-      "version": "Version",
-      "frameTitle": "{side}: {name}, {version}",
-      "nothingBefore": "Nothing before this version: it is the first one.",
-      "viewMissing": "This View doesn't exist in this version.",
-      "loadFailed": "Couldn't load this version of the View.",
-      "caveatTitle": "Shown with today's Widget Runtime and Adapters",
-      "caveat": "The Adapters have changed since this version was saved, or it didn't record which Adapters were active, so it may look different here from how it looked when it was saved.",
-      "notice": {
-        "variant": "{side}: Variant {requested} doesn't exist here, so the base state is shown.",
-        "locale": "{side}: Locale {requested} isn't in this version, so {used} is shown.",
-        "viewport": "{side}: viewport {requested} isn't in this version, so {used} is shown.",
-        "theme": "{side}: theme {requested} isn't in this version, so {used} is shown."
-      },
-      "legend": {
-        "added": "Added",
-        "modified": "Changed",
-        "moved": "Moved",
-        "removed": "Removed"
-      },
-      "unmatched": "Widgets can't be matched by ID in this comparison, so no change is outlined.",
-      "overCap": "{n} more change isn't outlined | {n} more changes aren't outlined"
+    "changes": {
+      "title": "Changes since Git base",
+      "baseLabel": "Git base",
+      "baseHead": "HEAD",
+      "baseMergeBase": "Merge base with {branch}",
+      "headNote": "Compared with HEAD; changes not yet committed are listed too.",
+      "mergeBaseNote": "Compared with the merge base of HEAD and {branch}; changes not yet committed are listed too.",
+      "noDefaultBranch": "No default branch could be found, so the merge base is unavailable and HEAD stays the base.",
+      "readOnly": "Read-only: nothing here writes, restores or reverts a resource.",
+      "unavailableTitle": "Git cannot supply the base",
+      "loadFailed": "Couldn't load the changes.",
+      "empty": "No changes since the base",
+      "baseCommit": "Base commit {commit}",
+      "select": "Show what changed in {name}",
+      "diffFailed": "Couldn't read what changed in this resource.",
+      "viewEmpty": "This View has no changes since the base"
     }
   },
   "previewFailure": {

@@ -12,10 +12,9 @@ import {
 } from './json-pointer'
 
 /**
- * The semantic diff of the Workspace settings, the manifest (Rule
- * 01a11a5e-102f-7caa-b63f-d7c6fb5189c0): `i18n.defaultLocale`, and viewports and themes by key.
+ * The semantic diff of the Workspace settings, the manifest: `i18n.defaultLocale`, and viewports and themes by key.
  * The manifest holds no Adapters (they are the Product Kit file's). The manifest `schemaVersion`
- * is never reported (Rule 01a11a5e-1085-71ec-ac82-d60263ae8173): it is removed from both sides
+ * is never reported: it is removed from both sides
  * before anything is compared, including the structural fallback.
  */
 export type WorkspaceSettingsDiff = Readonly<{

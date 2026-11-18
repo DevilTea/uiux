@@ -1,15 +1,16 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from '#imports'
-import type { ResourceDiff } from '../../../src/domain/history/diff'
-import { CHANGE_ICONS } from '../../composables/useHistoryLabels'
-import { describeResourceDiff, formatDiffValue, pointerItems } from '../../utils/version-diff'
-import HistoryImage from './HistoryImage.vue'
+import type { ChangeBase } from '../../../src/application/services/git-changes'
+import type { ResourceDiff } from '../../../src/domain/diff'
+import { CHANGE_ICONS } from '../../composables/useChangeLabels'
+import { describeResourceDiff, formatDiffValue, pointerItems } from '../../utils/resource-diff'
+import ChangeImage from './ChangeImage.vue'
 import KitIcon from '~/components/kit/ui/Icon.vue'
 
 /**
- * The semantic diff of one resource (Rule 01a11a5e-11e0-7f39-84a7-fde3faa43340), rendered from the
- * server's B5 model for every kind: View, Flow, Locale, Workspace settings, Asset (with its images
+ * The semantic diff of one resource (Rule 01a1ece7-8f2f-7565-a11f-6d5ac9b5bab3), rendered from the
+ * server's model for every kind: View, Flow, Locale, Workspace settings, Asset (with its images
  * before and after), the structural and digest-only fallbacks, and a kind this build cannot diff.
  * Values are Workspace content and identifiers, so they stay as written (`translate="no"`).
  */
@@ -19,6 +20,9 @@ const props = defineProps<{
 	currentImage?: Readonly<{ digest?: string; url: string }>
 	/** The resource's display name, for image alternative text. */
 	name: string
+	/** The Asset the diff is about and the base it was read at, for the image before. */
+	assetKey: string
+	base: ChangeBase
 }>()
 const { t } = useI18n()
 
@@ -62,11 +66,13 @@ const hasContent = computed(() => described.value.sections.length > 0 || !!descr
         <figcaption class="text-xs font-medium text-muted">
           {{ t('history.diff.before') }}
         </figcaption>
-        <HistoryImage
+        <ChangeImage
           v-if="described.image.before"
           :digest="described.image.before.digest"
           :media-type="described.image.before.mediaType"
           :current="currentImage"
+          :asset-key="assetKey"
+          :base="base"
           :alt="t('history.diff.imageAlt', { name, side: t('history.diff.before') })"
         />
         <p
@@ -80,11 +86,13 @@ const hasContent = computed(() => described.value.sections.length > 0 || !!descr
         <figcaption class="text-xs font-medium text-muted">
           {{ t('history.diff.after') }}
         </figcaption>
-        <HistoryImage
+        <ChangeImage
           v-if="described.image.after"
           :digest="described.image.after.digest"
           :media-type="described.image.after.mediaType"
           :current="currentImage"
+          :asset-key="assetKey"
+          :base="base"
           :alt="t('history.diff.imageAlt', { name, side: t('history.diff.after') })"
         />
         <p

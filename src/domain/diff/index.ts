@@ -1,5 +1,4 @@
-import type { JsonValue } from '../../validation'
-import { HISTORY_RESOURCE_KINDS } from '../constants'
+import type { JsonValue } from '../validation'
 import { diffAsset, type AssetDiff, type AssetFiles } from './asset'
 import { diffFlow, type FlowDiff } from './flow'
 import { compareCodeUnits, diffJson, type JsonPointerChange } from './json-pointer'
@@ -20,28 +19,31 @@ export type ResourceFile = Readonly<{ digest: string; bytes?: Uint8Array }>
 /** A resource's files on one side, by Workspace-relative path; `undefined` when it is absent there. */
 export type ResourceFiles = ReadonlyMap<string, ResourceFile>
 
-/** The JSON-pointer structural diff (Rule 01a11a5e-1134-755c-a740-a619a7943fe0). */
+/** The JSON-pointer structural diff. */
 export type StructuralDiff = Readonly<{ type: 'structural'; changes: readonly JsonPointerChange[] }>
 
 /** Files that are not JSON, compared by digest only. */
 export type OpaqueDiff = Readonly<{ type: 'opaque'; files: readonly Readonly<{ path: string; before?: string; after?: string }>[] }>
 
 /**
- * A resource kind this build does not know (the kind set is open, seam 3): it is listed with its
+ * A resource kind this build does not know (the kind set is open): it is listed with its
  * revision status only, and no diff of its content is made.
  */
 export type UnsupportedKindDiff = Readonly<{ type: 'unsupported_kind' }>
 
 export type ResourceDiff = ViewDiff | FlowDiff | LocaleDiff | WorkspaceSettingsDiff | AssetDiff | StructuralDiff | OpaqueDiff | UnsupportedKindDiff
 
-/** True for a kind this build can diff at all (Clause 01a11a5e-1fc4-7bf0-a402-61c345f454c2's list). */
+/** The canonical resource kinds this build can diff; the kind set is open, and any other kind gets no diff. */
+export const DIFFABLE_RESOURCE_KINDS = Object.freeze(['workspace', 'product-kit', 'access-presets', 'view', 'flow', 'locale', 'asset'] as const)
+
+/** True for a kind this build can diff at all. */
 export function isDiffableResourceKind(kind: string): boolean {
-	return (HISTORY_RESOURCE_KINDS as readonly string[]).includes(kind)
+	return (DIFFABLE_RESOURCE_KINDS as readonly string[]).includes(kind)
 }
 
 /**
- * The semantic diff of one resource between two sides (Rule 01a11a5e-0ddc-7d9d-83b9-5366d0ac44dd),
- * from the files of each side, already upgraded to one schema version by the caller. A View, a
+ * The semantic diff of one resource between two sides (Rule 01a1ece7-8f2f-7565-a11f-6d5ac9b5bab3 of
+ * the Changes since Git base Feature), from the files of each side. A View, a
  * Flow, a Locale, the Workspace settings and an Asset get their semantic diff; any other known kind,
  * and a known kind whose file is JSON of another shape, gets the structural diff; files that are not
  * JSON are compared by digest; an unknown kind gets no diff.

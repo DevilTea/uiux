@@ -1,172 +1,27 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, shallowRef, watch } from 'vue'
-import type { LocationQueryRaw } from 'vue-router'
-import { useI18n, useRoute, useRouter } from '#imports'
+import { useI18n } from '#imports'
 import { isWidgetAnchor, type ReviewActor, type ReviewThread } from '../../../src/domain/reviews/schema'
-import type { VersionListItem } from '../../../src/application/services/history-service'
-import type { HistoryActor } from '../../../src/domain/history/schema'
-import { useAccess } from '../../composables/useAccess'
-import { useReadiness } from '../../composables/useReadiness'
 import { useUiuxClient } from '../../composables/useUiuxClient'
 import { useWorkbench } from '../../composables/useWorkbench'
-import { useWorkbenchShell } from '../../composables/useWorkbenchShell'
-import { useCheckpointAccess } from '../../composables/useCheckpointAccess'
-import { useHistoryLabels } from '../../composables/useHistoryLabels'
-import { readVersionRecord, useVersionTimeline } from '../../composables/useVersionHistory'
 import { describeFetchError, type FetchErrorDetails } from '../../utils/fetch-error'
-import { updatedSince } from '../../utils/readiness'
 import { relativeTime } from '../../utils/widget-inspection'
 import { viewLocation } from '../../utils/workbench-routes'
-import {
-	actorFilterValue,
-	CURRENT_COMPARE,
-	distinctActors,
-	historyQuery,
-	parseHistoryAddress,
-	resolveHistorySelection,
-	revisionIn,
-	TIMELINE_KIND_FILTERS,
-	type HistoryAddress,
-	type TimelineFilters,
-} from '../../utils/version-history'
-import VersionTimeline from '../history/VersionTimeline.vue'
-import VersionComparison from '../history/VersionComparison.vue'
-import DeleteCheckpointModal from '../history/DeleteCheckpointModal.vue'
+import ChangesSince from '../changes/ChangesSince.vue'
 import WbErrorDescription from '../workbench/WbErrorDescription.vue'
-import KitButton from '~/components/kit/ui/Button.vue'
-import KitIcon from '~/components/kit/ui/Icon.vue'
 import KitSkeleton from '~/components/kit/ui/Skeleton.vue'
 
 /**
- * Overview › Activity: the Workspace version timeline (Rules 01a11a5e-1946-7217-aff5-db13df3a2977,
- * 199c, 19f4) with its comparison (Rule 01a11a5e-11e0-7f39-84a7-fde3faa43340), the Views changed
- * since this browser last looked, each linked to a comparison from the version holding the revision
- * last seen to the current state (Rule 01a11a5e-1a4b-72f7-8de9-1fc528aaf6eb), and, in a separate
- * secondary list, the latest Review events read live from the threads (Rules
- * 01a11e0d-db86-7890-ac42-5b4079364ad2 and 01a11a5e-0873-7976-8a48-a9a1a00e4b6d).
- *
- * The selection is the address (Clause 01a11e0d-d74b-701a-9a25-a149e400b7ec): `version`, `compare`
- * and `resource` on `/?tab=activity`, read with the defaults of the owner ruling and never written
- * on the reader's behalf. The filters are view state, not part of the address. The version reads
- * need `history.read`; without it the timeline names the key instead (Rule
- * 01a11485-eba3-7c07-a94f-0d69e610a0b6), and the Review events stay.
+ * Overview › Activity: the changes since the Git base for the whole Workspace (Rule
+ * 01a11a5e-1946-7217-aff5-db13df3a2977), as the Changes since Git base Feature describes, and, in a
+ * separate secondary list, the latest Review events read live from the threads (Rules
+ * 01a11e0d-db86-7890-ac42-5b4079364ad2 and 01a11a5e-0873-7976-8a48-a9a1a00e4b6d). The changes view is
+ * read-only and needs no key beyond reading the Workspace; its base and selection are view state, not
+ * part of the address.
  */
 const { t, locale } = useI18n()
-const route = useRoute()
-const router = useRouter()
 const uiux = useUiuxClient()
-const shell = useWorkbenchShell()
 const { views, reviews } = useWorkbench()
-const readiness = useReadiness()
-const labels = useHistoryLabels()
-const checkpoints = useCheckpointAccess()
-const access = useAccess()
-const canReadHistory = computed(() => access.can('history.read'))
-
-// ----- Address --------------------------------------------------------------------------------
-
-const address = computed(() => parseHistoryAddress(route.query))
-const selection = computed(() => resolveHistorySelection(address.value))
-
-/** `/?tab=activity` with these history keys; other keys of the Overview query are kept. */
-function activityTo(next: HistoryAddress) {
-	const query: LocationQueryRaw = { ...route.query, tab: 'activity' }
-	delete query.version
-	delete query.compare
-	delete query.resource
-	return { path: '/', query: { ...query, ...historyQuery(next, ['version', 'compare', 'resource']) } }
-}
-
-// ----- Timeline -------------------------------------------------------------------------------
-
-const ALL = '__all__'
-const actorFilter = ref(ALL)
-const kindFilter = ref(ALL)
-const checkpointsOnly = ref(false)
-const filters = computed<TimelineFilters>(() => ({
-	...(actorFilter.value !== ALL ? { actor: actorFilter.value } : {}),
-	...(kindFilter.value !== ALL ? { kind: kindFilter.value } : {}),
-	...(checkpointsOnly.value ? { checkpointsOnly: true } : {}),
-}))
-const timeline = useVersionTimeline({ filters, enabled: canReadHistory })
-
-/** Every actor seen so far, so filtering by one keeps the others choosable. */
-const knownActors = shallowRef<readonly HistoryActor[]>([])
-watch(timeline.versions, (versions) => {
-	knownActors.value = distinctActors([...knownActors.value.map(actor => ({ actor })), ...versions])
-})
-const actorItems = computed(() => [
-	{ label: t('history.filter.allActors'), value: ALL },
-	...knownActors.value.map(actor => ({ label: labels.actorName(actor), value: actorFilterValue(actor) })),
-])
-const kindItems = computed(() => [
-	{ label: t('history.filter.allKinds'), value: ALL },
-	...TIMELINE_KIND_FILTERS.map(kind => ({ label: labels.kindLabel(kind), value: kind })),
-])
-
-
-// ----- Delete (`checkpoints.delete` on desktop) ----------------------------------------------------
-
-const deleteOpen = ref(false)
-const deleteTarget = shallowRef<VersionListItem>()
-function askDelete(version: VersionListItem): void {
-	deleteTarget.value = version
-	deleteOpen.value = true
-}
-function onDeleted(id: string): void {
-	if (address.value.version === id || address.value.compare === id) void router.replace(activityTo({}))
-}
-
-// ----- Changes since you last looked ----------------------------------------------------------
-
-const updatedViews = computed(() => views.value.filter(view => updatedSince(readiness.lastSeen.value, `view:${view.key}`, view.revision)))
-/**
- * The version holding a View's last-seen revision is looked up when the reader asks for the
- * comparison: the View's projection is paged until a version records that revision. A lookup that
- * finds none, or fails, is reported beside the View and can be tried again.
- */
-type SinceState = Readonly<{ state: 'resolving' } | { state: 'missing' } | { state: 'failed'; message: string }>
-const sinceStates = shallowRef(new Map<string, SinceState>())
-const SINCE_PAGE_SIZE = 50
-
-async function versionHolding(viewKey: string, revision: string): Promise<string | undefined> {
-	const resource = { kind: 'view', key: viewKey }
-	let cursor: string | undefined
-	do {
-		const page = await $fetch<{ versions: VersionListItem[]; nextCursor?: string }>('/api/history/versions', {
-			query: { resource: `view:${viewKey}`, limit: String(SINCE_PAGE_SIZE), ...(cursor ? { cursor } : {}) },
-			cache: 'no-store',
-		})
-		for (const row of page.versions) {
-			const read = await readVersionRecord(row.id)
-			if (revisionIn(read.version, resource) === revision) return row.id
-		}
-		cursor = page.nextCursor
-	} while (cursor)
-	return undefined
-}
-
-function setSince(viewKey: string, state: SinceState | undefined): void {
-	const next = new Map(sinceStates.value)
-	if (state) next.set(viewKey, state)
-	else next.delete(viewKey)
-	sinceStates.value = next
-}
-
-async function compareSince(viewKey: string): Promise<void> {
-	const revision = readiness.lastSeen.value[`view:${viewKey}`]
-	if (!revision || sinceStates.value.get(viewKey)?.state === 'resolving') return
-	setSince(viewKey, { state: 'resolving' })
-	try {
-		const version = await versionHolding(viewKey, revision)
-		if (!version) return setSince(viewKey, { state: 'missing' })
-		setSince(viewKey, undefined)
-		await router.push(activityTo({ version, compare: CURRENT_COMPARE, resource: { kind: 'view', key: viewKey } }))
-	}
-	catch (cause) {
-		setSince(viewKey, { state: 'failed', message: describeFetchError(cause, t('history.since.failed')).message })
-	}
-}
 
 // ----- Review events (a separate, secondary list) ---------------------------------------------
 
@@ -271,183 +126,7 @@ const reviewTimeline = computed(() => events.value.map(item => ({ ...item, date:
     class="space-y-8"
     data-overview-activity
   >
-    <div
-      class="grid gap-6"
-      :class="selection ? 'lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]' : ''"
-    >
-      <!-- The comparison comes first on narrow layouts and sits beside the timeline from 1024px. -->
-      <div
-        v-if="selection && canReadHistory"
-        class="min-w-0 lg:order-2"
-      >
-        <div class="lg:sticky lg:top-4">
-          <VersionComparison
-            :address="address"
-            :latest-version-id="timeline.versions.value[0]?.id"
-            :timeline-loaded="timeline.loaded.value"
-            :link-for="activityTo"
-            :close-to="activityTo({})"
-          />
-        </div>
-      </div>
-
-      <div class="min-w-0 space-y-6 lg:order-1">
-        <section
-          v-if="updatedViews.length && canReadHistory"
-          class="space-y-2"
-          :aria-label="t('overview.updated')"
-          data-since-last-looked
-        >
-          <h3 class="text-xs font-medium text-muted">
-            {{ t('overview.updated') }}
-          </h3>
-          <ul class="divide-y divide-(--ui-border) rounded-lg border border-default">
-            <li
-              v-for="view in updatedViews"
-              :key="view.key"
-              class="flex items-center gap-2 px-3 py-2 text-sm"
-              :data-since-view="view.key"
-            >
-              <span
-                class="size-2 shrink-0 rounded-full bg-primary"
-                aria-hidden="true"
-              />
-              <span class="min-w-0 flex-1 truncate text-default">{{ view.summary.name || t('common.unnamed') }}</span>
-              <span
-                v-if="sinceStates.get(view.key)?.state === 'missing'"
-                class="shrink-0 text-xs text-muted"
-                data-since-unavailable
-              >{{ t('history.since.unavailable') }}</span>
-              <span
-                v-else-if="sinceStates.get(view.key)?.state === 'failed'"
-                class="shrink-0 text-xs text-error"
-                role="alert"
-                data-since-failed
-              >{{ (sinceStates.get(view.key) as { message: string }).message }}</span>
-              <KitButton
-                size="xs"
-                variant="link-muted"
-                class="shrink-0 underline underline-offset-2"
-                :loading="sinceStates.get(view.key)?.state === 'resolving'"
-                :label="t('history.since.compare')"
-                data-since-compare
-                @click="compareSince(view.key)"
-              />
-              <ULink
-                :to="viewLocation(view.key)"
-                class="shrink-0 text-xs text-muted hover:text-default pointer-coarse:inline-flex pointer-coarse:min-h-11 pointer-coarse:items-center"
-              >
-                {{ t('history.since.openView') }}
-              </ULink>
-            </li>
-          </ul>
-        </section>
-
-        <section
-          class="space-y-3"
-          :aria-label="t('history.timelineLabel')"
-        >
-          <div
-            class="flex flex-wrap items-center gap-2"
-            data-history-filters
-          >
-            <h3 class="me-auto text-sm font-semibold text-highlighted">
-              {{ t('history.title') }}
-            </h3>
-            <template v-if="canReadHistory">
-              <USelect
-                v-model="actorFilter"
-                :items="actorItems"
-                :aria-label="t('history.filter.actor')"
-                class="w-40"
-                data-history-filter="actor"
-              />
-              <USelect
-                v-model="kindFilter"
-                :items="kindItems"
-                :aria-label="t('history.filter.kind')"
-                class="w-40"
-                data-history-filter="kind"
-              />
-              <USwitch
-                v-model="checkpointsOnly"
-                :label="t('history.filter.checkpointsOnly')"
-                data-history-filter="checkpoints"
-              />
-            </template>
-            <KitButton
-              v-if="checkpoints.canCreate.value"
-              icon="flag"
-              :label="t('history.checkpoint.create')"
-              data-create-checkpoint
-              @click="shell.checkpointOpen.value = true"
-            />
-          </div>
-
-          <template v-if="canReadHistory">
-            <VersionTimeline
-              :versions="timeline.rows.value"
-              :loading="timeline.loading.value"
-              :loaded="timeline.loaded.value"
-              :error="timeline.error.value"
-              :has-more="!!timeline.nextCursor.value"
-              :loading-more="timeline.loadingMore.value"
-              :selected="selection?.version"
-              :link-for="(id) => activityTo({ version: id })"
-              :compare-link-for="selection ? (id) => activityTo({ version: selection!.version, compare: id }) : undefined"
-              :can-delete="checkpoints.canDelete.value"
-              :empty-title="filters.actor || filters.kind || filters.checkpointsOnly ? t('history.emptyFiltered') : undefined"
-              :empty-description="filters.actor || filters.kind || filters.checkpointsOnly ? t(timeline.nextCursor.value ? 'history.emptyFilteredMore' : 'history.emptyFilteredDescription') : undefined"
-              @delete="askDelete"
-              @load-more="timeline.loadMore()"
-              @retry="timeline.load()"
-            />
-
-            <section
-              v-if="timeline.invalid.value.length"
-              class="space-y-2"
-              :aria-label="t('history.invalid.title')"
-              data-invalid-records
-            >
-              <UAlert
-                color="warning"
-                variant="subtle"
-                icon="i-lucide-file-warning"
-                :title="t('history.invalid.title')"
-                :description="t('history.invalid.explanation')"
-              />
-              <ul class="space-y-1">
-                <li
-                  v-for="record in timeline.invalid.value"
-                  :key="record.file"
-                  class="rounded-md border border-default px-3 py-2 text-xs"
-                  data-invalid-record
-                >
-                  <code
-                    class="font-mono break-all text-default"
-                    translate="no"
-                  >{{ record.file }}</code>
-                  <WbErrorDescription
-                    class="mt-1"
-                    :headline="t('history.invalid.notDeletable')"
-                    :diagnostics="record.diagnostics"
-                  />
-                </li>
-              </ul>
-            </section>
-          </template>
-          <p
-            v-else
-            class="flex items-center gap-1.5 text-sm text-muted"
-            data-access-notice="history"
-            data-missing-key="history.read"
-          >
-            <KitIcon name="user-lock" />
-            {{ t('access.requiresKey', { key: 'history.read' }) }}
-          </p>
-        </section>
-      </div>
-    </div>
+    <ChangesSince heading-tag="h3" />
 
     <section
       class="space-y-2 border-t border-default pt-6"
@@ -509,12 +188,5 @@ const reviewTimeline = computed(() => events.value.map(item => ({ ...item, date:
         </template>
       </UTimeline>
     </section>
-
-    <DeleteCheckpointModal
-      v-if="checkpoints.canDelete.value"
-      v-model:open="deleteOpen"
-      :version="deleteTarget"
-      @deleted="onDeleted"
-    />
   </div>
 </template>

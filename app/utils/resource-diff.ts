@@ -6,7 +6,7 @@ import type {
 	ResourceDiff,
 	ValueChange,
 	WidgetPosition,
-} from '../../src/domain/history/diff'
+} from '../../src/domain/diff'
 import type { JsonValue } from '../../src/domain/validation'
 
 /**

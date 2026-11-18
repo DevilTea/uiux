@@ -648,8 +648,7 @@
       "bundleInvalid": "預覽 Runtime 不完整。請重新建置 UIUX 後重新載入。",
       "bundleLoadFailed": "無法載入預覽 Runtime。",
       "localeLoadFailed": "無法載入主要 Locale。",
-      "assetsLoadFailed": "無法載入這個 View 使用的 Asset。",
-      "viewNotInVersion": "這個版本中沒有這個 View。"
+      "assetsLoadFailed": "無法載入這個 View 使用的 Asset。"
     }
   },
   "reviews": {
@@ -2055,7 +2054,6 @@
       "gapBadge": "缺少必要權限鍵",
       "domain": {
         "workspace": "Workspace",
-        "history": "歷程",
         "product_kit": "Product Kit",
         "reviews": "Review",
         "decisions": "Decision",
@@ -2066,14 +2064,12 @@
         "settings": "設定",
         "evidence": "Evidence",
         "handoff": "Handoff",
-        "checkpoints": "Checkpoint",
         "locks": "編輯鎖定",
         "presets": "存取預設集",
         "members": "成員"
       },
       "description": {
         "workspace_read": "開啟 Workspace：View、UX Flow、Locale、Asset、Evidence 與預覽。",
-        "history_read": "瀏覽版本歷程並比較版本。",
         "product_kit_source_read": "瀏覽 Product Kit 原始碼、建置輸出與建置記錄。",
         "reviews_write": "建立 Review 討論串、回覆、重新錨定與釘選，並編輯或撤回自己的討論串。",
         "reviews_submit": "將 Review 討論串送出為待審核，並重新開啟討論串。",
@@ -2089,9 +2085,6 @@
         "product_kit_compose": "變更設計系統，以及 Workspace 使用哪些 Adapter 與其順序。",
         "evidence_capture": "擷取正式 Evidence。",
         "handoff_export": "匯出 Handoff。",
-        "checkpoints_create": "建立 Checkpoint。",
-        "history_restore": "從較早的版本還原資源。",
-        "checkpoints_delete": "刪除 Checkpoint。",
         "locks_force_release": "解除其他成員的編輯鎖定。",
         "presets_manage": "編輯存取預設集。",
         "members_manage": "管理成員、Token、登入連結與工作階段。"
@@ -2677,50 +2670,6 @@
       "unresolved_review_thread": "仍有未解決的 Review。",
       "unsubstantiated_readiness_claim": "就緒宣告沒有 Evidence 佐證。"
     },
-    "history": {
-      "unsupported_history_schema_version": "此版本的 UIUX 不支援這筆版本歷程紀錄的格式。",
-      "invalid_version_type": "版本類型無效。",
-      "invalid_checkpoint_name": "Checkpoint 名稱必須為 1 到 120 個字元，且前後不能有空白。",
-      "invalid_checkpoint_note": "Checkpoint 備註最多 2,000 個字元。",
-      "invalid_system_checkpoint_name": "系統 Checkpoint 沒有使用固定名稱。",
-      "invalid_net_change": "版本的淨變更標記無效。",
-      "invalid_recording_gap": "記錄缺漏標記無效。",
-      "invalid_operation": "記錄的變更使用了歷程不記錄的操作。",
-      "missing_revision": "記錄的變更沒有標示變更前後的資源修訂版本。",
-      "duplicate_resource": "版本重複列出同一項資源。",
-      "empty_resource_files": "版本中有資源沒有列出任何檔案。",
-      "invalid_file_path": "版本中的檔案路徑無效。",
-      "duplicate_file": "版本把同一個檔案列在多項資源之下。",
-      "invalid_resource_kind": "版本中的資源類型無效。",
-      "invalid_resource_key": "版本中的資源識別碼無效。",
-      "resource_invalid": "無法讀取這個版本為此資源記錄的檔案。",
-      "invalid_actor_type": "版本的作者類型無效。",
-      "unstamped_actor": "版本沒有記錄是誰做的變更。",
-      "invalid_system_actor": "版本的系統作者無效。",
-      "external_actor_id": "外部變更的作者不能帶有成員 ID。",
-      "invalid_source": "變更來源無效。",
-      "invalid_open_entry": "進行中自動儲存的一筆項目無效。",
-      "unexpected_file": "版本歷程存放區中有一個檔案不是歷程紀錄。",
-      "record_invalid": "一筆版本歷程紀錄無效。",
-      "record_exists": "已有相同 ID 的版本。",
-      "record_missing": "這個版本不存在。",
-      "journal_invalid": "無法讀取進行中的自動儲存。",
-      "blob_corrupt": "一個已存放的歷程檔案與其內容不符。",
-      "store_unsafe": "這台電腦上的版本歷程存放區無法安全使用。請檢查資料夾權限與連結。",
-      "write_failed": "無法儲存版本歷程，未變更任何內容。",
-      "rollback_failed": "無法儲存版本歷程，且中斷的寫入未能完全復原。請檢查版本歷程存放區。",
-      "invalid_cursor": "時間軸中的這個位置無效，請重新載入時間軸。",
-      "invalid_comparison": "無法比較這些版本。請選擇一個版本以及要與它比較的對象。",
-      "blob_missing": "這個版本的某個檔案已不再保存，因此無法比較或還原這個版本，未變更任何內容。",
-      "invalid_listing": "這個版本清單的請求無效。請檢查篩選條件與每頁筆數。",
-      "unavailable": "這台伺服器無法使用版本歷程，因此無法建立 Checkpoint。",
-      "boundary_failed": "無法結束進行中的自動儲存，因此沒有建立 Checkpoint，也未變更任何內容。請再試一次。",
-      "not_checkpoint": "只能刪除 Checkpoint。這個版本是自動儲存的。",
-      "invalid_restore": "這個還原請求無效。請選擇一項資源，並提供它目前的修訂版本。",
-      "restore_unsupported_kind": "無法還原這類資源。Review 討論串一律不會還原。",
-      "resource_not_in_version": "這個版本不包含該資源，因此沒有可還原的內容。",
-      "restore_invalid_content": "這個版本中的內容目前無效，因此沒有還原，也未變更任何內容。"
-    },
     "review": {
       "anchor_history_mismatch": "Review 的位置與其歷程不一致。",
       "current_submission_mismatch": "目前的提交與歷程不一致。",
@@ -2883,6 +2832,18 @@
       "no_ui_invalid": "每筆「noUi」都需要有效的需求 ID，以及 1 到 500 個字元的原因。",
       "unresolved": "需求來源中沒有這個 ID 的規則。",
       "provider_unavailable": "無法讀取需求來源。"
+    },
+    "git": {
+      "unavailable": "無法為這個 Workspace 執行 Git，因此無法提供基準。",
+      "no_commit": "這個儲存庫還沒有任何提交，Git 沒有可比較的基準。",
+      "no_merge_base": "Git 找不到 HEAD 與預設分支的合併基準。",
+      "too_many_changes": "有變更的資源太多，無法全部列出。"
+    },
+    "changes": {
+      "invalid_resource": "這不是 Workspace 的正式資源。",
+      "resource_not_found": "這個資源在基準與工作目錄中都不存在。",
+      "invalid_blob": "讀取圖片需要 Asset 與內容摘要。",
+      "blob_not_found": "基準中這個 Asset 沒有該摘要的檔案。"
     }
   },
   "diagnosticFallback": {
@@ -2899,7 +2860,6 @@
     "evidence": "這個 Evidence 有問題。",
     "flow": "這個 Flow 有問題。",
     "handoff": "有項目阻擋了 Handoff。",
-    "history": "版本歷程紀錄無效。",
     "i18n": "翻譯有問題。",
     "identity": "識別碼無效。",
     "interaction": "無法記錄這次互動重播。",
@@ -2926,7 +2886,9 @@
     "revision": "修訂紀錄無效。",
     "copy_record": "複製紀錄 uiux-components.json 有問題。",
     "checks": "有一項檢查無法完成。",
-    "requirements": "需求參照有問題。"
+    "requirements": "需求參照有問題。",
+    "git": "Git 無法提供基準。",
+    "changes": "無法讀取這些變更。"
   },
   "threadContext": {
     "srPrefix": "記錄的預覽情境：",
@@ -2946,30 +2908,6 @@
     "openInRecordedHint": "將預覽切換為此討論串記錄的 Locale、檢視區與主題"
   },
   "history": {
-    "title": "版本歷程",
-    "timelineLabel": "版本時間軸",
-    "loadFailed": "無法載入版本歷程。",
-    "emptyTitle": "還沒有任何版本",
-    "emptyDescription": "View、Flow、Locale、Asset 與 Workspace 設定的變更都會自動儲存在這裡。",
-    "emptyFiltered": "沒有符合篩選條件的版本",
-    "emptyFilteredDescription": "請調整或清除篩選條件以查看更多版本。",
-    "loadMore": "載入較早的版本",
-    "today": "今天",
-    "yesterday": "昨天",
-    "quiet": "{n} 次沒有淨變更的自動儲存 | {n} 次沒有淨變更的自動儲存",
-    "quietHint": "這些變更彼此抵銷，Workspace 最後回到原本的狀態。",
-    "type": {
-      "autosave": "自動儲存",
-      "checkpoint": "Checkpoint",
-      "external": "在 UIUX 之外變更",
-      "system": "系統變更"
-    },
-    "actor": {
-      "external": "UIUX 之外",
-      "system": "系統",
-      "baseline": "歷程起點",
-      "unknown": "某人"
-    },
     "kind": {
       "workspace": "Workspace 設定",
       "product-kit": "Product Kit",
@@ -2979,90 +2917,14 @@
       "locale": "Locale",
       "asset": "Asset"
     },
-    "operation": {
-      "createView": "建立了 View",
-      "updateViewSpec": "編輯了 Spec",
-      "updateViewStructure": "編輯了結構",
-      "updateViewMetadata": "編輯了名稱或功能標籤",
-      "deleteView": "刪除了 View",
-      "updateWorkspaceSettings": "編輯了 Workspace 設定",
-      "composeProductKit": "組合了 Product Kit",
-      "updateProductKit": "編輯了 Product Kit",
-      "updateComponentRegistry": "編輯了 Component 登錄表",
-      "updateAccessPresets": "編輯了存取預設集",
-      "createLocale": "建立了 Locale",
-      "updateLocale": "編輯了 Locale",
-      "createFlow": "建立了 Flow",
-      "updateFlow": "編輯了 Flow",
-      "deleteFlow": "刪除了 Flow",
-      "createAsset": "新增了 Asset",
-      "replaceAsset": "取代了 Asset",
-      "deleteAsset": "刪除了 Asset",
-      "promoteReviewToDecision": "將 Review 升級為 Decision",
-      "createDecisionFromReview": "從 Review 建立另一個 Decision",
-      "deferDecision": "延後了 Decision",
-      "decideDecision": "決定了 Decision",
-      "reopenDecision": "重新開啟了 Decision",
-      "restoreResourceVersion": "還原了較早的版本"
-    },
-    "row": {
-      "compare": "比較",
-      "compareNamed": "比較 {name} 與前一個版本",
-      "compareWithSelected": "比較所選版本與 {name}",
-      "expand": "顯示 {name} 的變更",
-      "collapse": "隱藏 {name} 的變更",
-      "selected": "已選取",
-      "changed": "{n} 項資源有變更 | {n} 項資源有變更",
-      "noChanges": "沒有資源變更",
-      "changedResources": "變更的資源",
-      "events": "依序列出的變更",
-      "eventsLoadFailed": "無法載入這個版本的變更。",
-      "noEvents": "沒有記錄到任何變更。",
-      "restored": "還原自一個已不在歷程中的較早版本。",
-      "recordingGap": "這個版本可能缺少部分變更。",
-      "restoredFrom": "還原自 {version}"
-    },
-    "filter": {
-      "actor": "變更者",
-      "allActors": "所有人",
-      "kind": "資源類型",
-      "allKinds": "所有類型",
-      "checkpointsOnly": "只顯示 Checkpoint"
-    },
-    "since": {
-      "compare": "與目前比較",
-      "unavailable": "沒有已儲存的版本含有你上次看到的內容",
-      "openView": "開啟 View",
-      "failed": "找不到你上次看到的版本。"
-    },
-    "invalid": {
-      "title": "有些歷程紀錄無法讀取",
-      "explanation": "這些檔案對此版本的 UIUX 而言不是有效的歷程紀錄，因此不會列在時間軸上，也無法在這裡刪除。請更新 UIUX，或檢查歷程檔案。",
-      "notDeletable": "無法讀取這筆紀錄，因此不會刪除。"
-    },
     "compare": {
-      "title": "比較",
-      "failed": "無法比較這些版本。",
       "against": "比較對象",
-      "parent": "前一個版本",
-      "current": "目前狀態",
-      "other": "另一個版本",
-      "otherNamed": "另一個版本：{name}",
-      "to": "到",
-      "nothing": "尚無內容",
-      "close": "關閉比較",
       "summary": "摘要",
       "changedCount": "{n} 項資源有變更 | {n} 項資源有變更",
-      "unchangedCount": "{n} 項未變更 | {n} 項未變更",
-      "noParent": "這是第一個版本，因此其中的內容都算是新增。",
-      "noDifferences": "這兩個版本之間沒有差異。",
-      "allResources": "顯示所有變更的資源",
-      "openInActivity": "在動態中開啟完整比較",
       "status": {
         "added": "新增",
         "removed": "移除",
-        "modified": "修改",
-        "unchanged": "未變更"
+        "modified": "修改"
       }
     },
     "diff": {
@@ -3118,65 +2980,7 @@
       "imageAlt": "{name}，{side}",
       "imageUnavailable": "這張圖片目前還無法在這裡預覽。"
     },
-    "checkpoint": {
-      "create": "建立 Checkpoint",
-      "title": "建立 Checkpoint",
-      "description": "將整個 Workspace 目前的狀態儲存為具名版本。Workspace 中的內容不會有任何變更。",
-      "name": "名稱",
-      "nameHelp": "最多 {max} 個字元。",
-      "nameRequired": "請輸入名稱。",
-      "nameTooLong": "最多只能使用 {max} 個字元。",
-      "note": "備註",
-      "noteHelp": "選填，最多 {max} 個字元。",
-      "noteTooLong": "最多只能使用 {max} 個字元。",
-      "leaseTitle": "仍有人正在編輯",
-      "leaseBody": "Checkpoint 會儲存這些檔案目前的狀態，包括尚未完成的編輯。",
-      "submit": "建立 Checkpoint",
-      "created": "已建立 Checkpoint「{name}」",
-      "failed": "無法建立 Checkpoint。",
-      "retryable": "沒有儲存任何內容，請稍後再試一次。",
-      "blockedUnsupported": "此版本的 UIUX 不支援這個 Workspace 的格式，無法使用"
-    },
-    "delete": {
-      "action": "刪除 Checkpoint",
-      "actionNamed": "刪除 Checkpoint {name}",
-      "title": "要刪除這個 Checkpoint 嗎？",
-      "body": "「{name}」會從所有人的時間軸上移除。Workspace 的檔案不會變更，而且此動作無法復原。",
-      "confirm": "刪除 Checkpoint",
-      "deleted": "已刪除 Checkpoint「{name}」",
-      "failed": "無法刪除 Checkpoint。"
-    },
-    "view": {
-      "title": "這個 View 的版本",
-      "emptyTitle": "這個 View 還沒有任何變更",
-      "emptyDescription": "這個 View 每一次儲存的變更都會列在這裡。"
-    },
-    "emptyFilteredMore": "已載入的版本中沒有符合的項目。請載入較早的版本以繼續查看。",
-    "systemName": {
-      "baseline": "歷程起點"
-    },
     "restore": {
-      "action": "還原這個版本",
-      "actionNamed": "還原這個版本：{resource}",
-      "title": "要還原這個版本嗎？",
-      "thisVersion": "這個版本",
-      "body": "「{resource}」會以 {version}（{time}）的內容寫入新的修訂版本。歷程中的每個版本都會保留，其他資源不會變更。",
-      "bodyNoTime": "「{resource}」會以 {version} 的內容寫入新的修訂版本。歷程中的每個版本都會保留，其他資源不會變更。",
-      "bodyAfterChange": "「{resource}」會回到 {version}（{time}）這次變更之後的內容，而不是變更前的內容。這會寫入新的修訂版本；歷程中的每個版本都會保留，其他資源不會變更。",
-      "bodyAfterChangeNoTime": "「{resource}」會回到 {version} 這次變更之後的內容，而不是變更前的內容。這會寫入新的修訂版本；歷程中的每個版本都會保留，其他資源不會變更。",
-      "unchanged": "「{resource}」目前的內容已與這個版本相同，沒有需要還原的內容。",
-      "keepsDecisions": "這個 View 會保留目前的 Decision。",
-      "keepsSchema": "Workspace 會保留目前的 Schema 版本。",
-      "recreates": "這項資源已不存在，還原後會以原本的識別碼重新建立。",
-      "recreatesView": "這個 View 已不存在，還原後會以原本的識別碼重新建立，並帶回該版本記錄的 Decision。",
-      "impactNote": "如果還原會影響其他資源的參照，寫入前會先列出影響。",
-      "reading": "正在確認目前的修訂版本",
-      "readFailed": "無法讀取目前的 {resource}。",
-      "confirm": "還原",
-      "restored": "已將「{resource}」還原為 {version}",
-      "recreated": "已從 {version} 重新建立「{resource}」",
-      "sourceUnread": "還原自較早的版本。",
-      "sourceLoading": "正在讀取還原來源的版本",
       "impact": {
         "title": "仍要還原嗎？",
         "body": "從 {version} 還原「{resource}」會影響其他資源的參照。目前尚未寫入任何內容。",
@@ -3218,57 +3022,24 @@
             "decided": "View {view} 已決定的 Decision「{question}」將被移除。"
           }
         }
-      },
-      "conflict": {
-        "title": "開啟這個對話方塊後，{resource} 已有變更",
-        "body": "尚未還原任何內容。請重新載入，以最新的修訂版本為基礎再還原。",
-        "reload": "重新載入"
-      },
-      "locked": {
-        "title": "{nickname} 正在編輯 {resource}，持有編輯鎖至 {time}",
-        "body": "尚未還原任何內容。請在編輯鎖解除後再試一次。"
-      },
-      "refused": {
-        "invalid": "無法還原這個版本",
-        "not_found": "沒有可還原的內容",
-        "blocked": "還原已被阻擋",
-        "denied": "你的權限鍵無法還原此資源",
-        "failed": "無法還原這個版本"
       }
     },
-    "canvas": {
-      "label": "畫布",
-      "title": "畫布比較",
-      "stageLabel": "變更前後的畫面",
-      "mode": {
-        "list": "變更清單",
-        "side": "並排比較",
-        "highlight": "標示變更"
-      },
-      "close": "回到即時畫布",
-      "before": "變更前",
-      "after": "變更後",
-      "version": "版本",
-      "frameTitle": "{side}：{name}，{version}",
-      "nothingBefore": "這是第一個版本，之前沒有任何內容。",
-      "viewMissing": "這個版本中沒有這個 View。",
-      "loadFailed": "無法載入這個版本的 View。",
-      "caveatTitle": "以目前的 Widget Runtime 與 Adapter 呈現",
-      "caveat": "自此版本儲存後 Adapter 已有變動，或此版本未記錄當時啟用的 Adapter，因此在這裡看起來可能與儲存當時不同。",
-      "notice": {
-        "variant": "{side}：這裡沒有 Variant {requested}，因此顯示基本狀態。",
-        "locale": "{side}：這個版本沒有 Locale {requested}，因此顯示 {used}。",
-        "viewport": "{side}：這個版本沒有檢視區 {requested}，因此顯示 {used}。",
-        "theme": "{side}：這個版本沒有主題 {requested}，因此顯示 {used}。"
-      },
-      "legend": {
-        "added": "新增",
-        "modified": "修改",
-        "moved": "移動",
-        "removed": "移除"
-      },
-      "unmatched": "這次比較無法依 ID 對應 Widget，因此沒有標示任何變更。",
-      "overCap": "還有 {n} 項變更未標示 | 還有 {n} 項變更未標示"
+    "changes": {
+      "title": "自 Git 基準以來的變更",
+      "baseLabel": "Git 基準",
+      "baseHead": "HEAD",
+      "baseMergeBase": "與 {branch} 的合併基準",
+      "headNote": "與 HEAD 比較；尚未提交的變更也會列出。",
+      "mergeBaseNote": "與 HEAD 和 {branch} 的合併基準比較；尚未提交的變更也會列出。",
+      "noDefaultBranch": "找不到預設分支，所以無法使用合併基準，仍以 HEAD 為基準。",
+      "readOnly": "唯讀：這裡不會寫入、還原或復原任何資源。",
+      "unavailableTitle": "Git 無法提供基準",
+      "loadFailed": "無法載入變更。",
+      "empty": "自基準以來沒有變更",
+      "baseCommit": "基準提交 {commit}",
+      "select": "顯示 {name} 的變更內容",
+      "diffFailed": "無法讀取這個資源的變更內容。",
+      "viewEmpty": "自基準以來，這個 View 沒有變更"
     }
   },
   "previewFailure": {

@@ -1,26 +1,32 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { useI18n } from '#imports'
-import { versionBlobUrl } from '../../composables/useUiuxClient'
+import type { ChangeBase } from '../../../src/application/services/git-changes'
 import { blobToDataUrl } from '../../utils/workspace-authoring'
 import KitIcon from '~/components/kit/ui/Icon.vue'
 import KitSkeleton from '~/components/kit/ui/Skeleton.vue'
 
 /**
- * One side of an Asset image change, fetched by its content digest (Rule
- * 01a11a5e-10df-795e-8fbc-a99de09694a5: fetching by digest is the reader's concern). When the digest
- * is the Asset's current content, the Asset's content address serves it; otherwise the version blob
- * route does, which reads the host history store (an autosave's blobs) and then the artifact store
- * (member Checkpoints' blobs). A blob neither store keeps any more is shown as its digest with a note
- * instead of a broken image. The bytes are shown with the recorded media type, since the blob route
- * answers them untyped.
+ * One side of an Asset image change, fetched by its content digest. When the digest is the Asset's
+ * current content, the Asset's content address serves it; otherwise the base content comes from
+ * `GET /api/changes/blob`, which reads that file of the Asset from Git (nothing is stored). A file
+ * Git no longer has is shown as its digest with a note instead of a broken image. The bytes are
+ * shown with the recorded media type, since the route answers them untyped.
  *
  * The image is a `data:` URL, not an object URL: an object URL shares the Workbench origin, so
  * opening it on its own would show the stored markup (an SVG, say) as a Workbench document, while a
  * `data:` document has an opaque origin (and Chromium and Firefox refuse a page's own top-level
  * navigation to one).
  */
-const props = defineProps<{ digest: string; mediaType: string; alt: string; current?: Readonly<{ digest?: string; url: string }> }>()
+const props = defineProps<{
+	digest: string
+	mediaType: string
+	alt: string
+	/** The Asset the change is about, and the base its before image is read at. */
+	assetKey: string
+	base: ChangeBase
+	current?: Readonly<{ digest?: string; url: string }>
+}>()
 const { t } = useI18n()
 
 const url = ref<string>()
@@ -40,7 +46,7 @@ async function load(): Promise<void> {
 	try {
 		const blob = props.current?.digest === props.digest
 			? await fetchBlob(props.current.url)
-			: await fetchBlob(versionBlobUrl(props.digest))
+			: await fetchBlob(`/api/changes/blob?${new URLSearchParams({ base: props.base, key: props.assetKey, digest: props.digest })}`)
 		const dataUrl = blob ? await blobToDataUrl(new Blob([blob], { type: props.mediaType })) : undefined
 		if (current !== generation) return
 		if (dataUrl) url.value = dataUrl
@@ -51,7 +57,7 @@ async function load(): Promise<void> {
 	}
 }
 
-watch(() => [props.digest, props.current?.digest, props.current?.url], () => { void load() }, { immediate: true })
+watch(() => [props.digest, props.base, props.assetKey, props.current?.digest, props.current?.url], () => { void load() }, { immediate: true })
 </script>
 
 <template>

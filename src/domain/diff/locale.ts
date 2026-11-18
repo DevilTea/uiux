@@ -1,8 +1,8 @@
-import type { JsonValue } from '../../validation'
+import type { JsonValue } from '../validation'
 import { asRecord, diffJson, jsonEqual, unionKeys, type JsonPointerChange, type Side } from './json-pointer'
 
 /**
- * The semantic diff of a Locale (Rule 01a11a5e-0fd9-7b50-a7c1-41a3091d9e0d): the message keys
+ * The semantic diff of a Locale : the message keys
  * added, removed or changed. A Locale file added or removed is the summary status of the
  * resource. When a side is not a flat object the file is reported structurally in `changes`.
  */

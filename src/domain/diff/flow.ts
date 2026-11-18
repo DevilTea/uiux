@@ -1,4 +1,4 @@
-import type { JsonValue } from '../../validation'
+import type { JsonValue } from '../validation'
 import {
 	asRecord,
 	diffJson,
@@ -14,7 +14,7 @@ import {
 } from './json-pointer'
 
 /**
- * The semantic diff of a UX Flow (Rule 01a11a5e-0f87-7bc0-b557-4f0b0b4886a3): steps matched by
+ * The semantic diff of a UX Flow : steps matched by
  * their key, each kept step's target and transition changes, and the entry step change.
  * Transitions have no identity of their own, so they are matched by value. When `steps` is not an
  * object on both sides it is reported structurally in `stepsChanges` instead.

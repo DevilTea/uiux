@@ -1,4 +1,4 @@
-import type { JsonValue } from '../../validation'
+import type { JsonValue } from '../validation'
 import {
 	asRecord,
 	asString,
@@ -15,9 +15,7 @@ import {
 } from './json-pointer'
 
 /**
- * The semantic diff of a View (Rules 01a11a5e-0e37-754b-bea2-a15716749c0c,
- * 01a11a5e-0e8d-7d8a-84f1-3195ac7719e7, 01a11a5e-0edf-7ea0-8d15-cc2a028d2a14 and
- * 01a11a5e-0f31-7635-aeb2-16a1e9673b20). Field names beyond the Rules are implementation-defined.
+ * The semantic diff of a View. Field names are implementation-defined.
  *
  * - Widgets are matched by their stable `id`. A Widget is `moved` when its parent or Slot changed,
  *   or when its order among the siblings it kept changed (siblings that only shifted because

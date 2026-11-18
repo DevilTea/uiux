@@ -11,7 +11,7 @@ import {
 	type AssetFile,
 	type AssetFiles,
 	type ResourceFiles,
-} from '../src/domain/history/diff'
+} from '../src/domain/diff'
 import type { JsonValue } from '../src/domain/validation'
 
 /**

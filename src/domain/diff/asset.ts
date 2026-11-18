@@ -1,4 +1,4 @@
-import type { JsonValue } from '../../validation'
+import type { JsonValue } from '../validation'
 import { asRecord, asString, compareCodeUnits, diffJson, type JsonPointerChange } from './json-pointer'
 
 /** One file of an Asset directory: its content digest and, when it was read, its bytes. */
@@ -10,7 +10,7 @@ export type AssetFiles = ReadonlyMap<string, AssetFile>
 export type AssetImageRef = Readonly<{ digest: string; mediaType: string }>
 
 /**
- * The semantic diff of an Asset (Rule 01a11a5e-10df-795e-8fbc-a99de09694a5): the metadata changes
+ * The semantic diff of an Asset : the metadata changes
  * (`asset.json`, relative pointers), the content digest change and, when either side's media type
  * is an image, the before and after images as content digests. Fetching an image by digest is the
  * reader's concern. Files the metadata does not explain (an unreadable `asset.json`, a stray file)
