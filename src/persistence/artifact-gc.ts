@@ -270,6 +270,11 @@ export function keptChecksRuns(records: readonly Readonly<{ identity: string; ra
  * For each Evidence kind and execution context, the records that name the View's current revision,
  * or every record of the group when that cannot be decided; for `checks_run`, the newest
  * CHECKS_RUN_RETENTION records by `ranAt`.
+ *
+ * Conservative on purpose (Rule 01a14e30-31c0-7289-a944-74af9556eabf): without a version timeline,
+ * only a group with a record naming the View's current revision loses its older records. The
+ * Evidence of a View that no longer exists, and of a View that was edited and never recaptured, has
+ * no such record, so it is never collected; Git keeps its history and `gc` never guesses.
  */
 async function latestEvidenceUnlocked(persistence: FileNativePersistence, blobs: Iterable<StoredBlob>): Promise<string[]> {
 	const groups = new Map<string, { viewId?: string; records: { identity: string; revision?: string }[] }>()

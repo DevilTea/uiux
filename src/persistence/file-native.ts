@@ -1849,7 +1849,7 @@ export class ImmutableArtifactStore {
 
 	/**
 	 * `put` for a producer that already holds the exclusive persistence lock and has decided whether
-	 * the Workspace state allows it (a checkpoint writer).
+	 * the Workspace state allows it (the transaction machinery).
 	 */
 	async putUnlocked(bytes: Uint8Array): Promise<ArtifactWriteResult> {
 		if (!(bytes instanceof Uint8Array))
@@ -1890,7 +1890,7 @@ export class ImmutableArtifactStore {
 	/**
 	 * Every artifact that is a JSON object or array within `maxBytes`, read under ONE shared lock so
 	 * the listing is a single snapshot and the cross-process lock is taken once, not once per artifact
-	 * (issue #318). Sorted by identity. `select` maps each parsed value to what the caller keeps (`undefined` drops it), so unwanted artifacts, such as Checkpoint version blobs, are not held until the loop ends. With `tolerateErrors`, an artifact that cannot be read is
+	 * (issue #318). Sorted by identity. `select` maps each parsed value to what the caller keeps (`undefined` drops it), so unwanted artifacts are not held until the loop ends. With `tolerateErrors`, an artifact that cannot be read is
 	 * skipped; otherwise its error is thrown, as `readCandidateJson` does.
 	 */
 	async readAllCandidateJson<T = unknown, R = T>(options: Readonly<{ maxBytes?: number; tolerateErrors?: boolean; select?: (value: T) => R | undefined }> = {}): Promise<readonly Readonly<{ identity: string; value: R }>[]> {

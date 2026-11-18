@@ -100,7 +100,7 @@ export function createWorkspaceAuthoringService(persistence: FileNativePersisten
 		if (refused !== undefined) return refused
 
 		// Rule 01a172ce-2e97-7d83-b175-f0d15f846768: removing or renaming a viewport or theme key needs
-		// the caller to acknowledge the impact a restore of the settings would list.
+		// the caller to acknowledge the impact the removal or rename would have.
 		let impacts: readonly ImpactItem[] = []
 		if (removesRenderKey(current.resource, next)) {
 			const before = await readImpactWorkspace(persistence, { evidence: true })

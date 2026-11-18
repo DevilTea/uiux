@@ -3,7 +3,7 @@ import { appendResponseHeader, setResponseHeader, type H3Event } from 'h3'
 import { detectSignatureMediaType } from '../domain/assets/schema'
 
 /**
- * Content-Security-Policy for stored bytes served inline (Asset content, artifacts, version blobs).
+ * Content-Security-Policy for stored bytes served inline (Asset content, artifacts, a changed Asset's image at the Git base).
  * Opened as a top-level document, such content gets an opaque origin and runs no script; inline
  * styles and `data:` images and fonts still render, so an SVG looks the same as it does in `<img>`.
  */

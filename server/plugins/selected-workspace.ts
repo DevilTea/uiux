@@ -33,8 +33,8 @@ export default defineNitroPlugin((nitroApp) => {
 			process.exit(2)
 		}
 		const runtime = getSelectedWorkspaceServerRuntime()
-		// A live server holds its selected Workspace so `uiux access copy` and `uiux artifacts gc`
-		// refuse to run underneath it, and `uiux invite create` can name its port.
+		// A live server holds its selected Workspace so `uiux artifacts gc` refuses to run underneath
+		// it, and `uiux invite create` can name its port.
 		if (!import.meta.prerender) {
 			// The graceful shutdown waits for open connections before the `close` hook runs, and an
 			// event stream never ends by itself: close the streams as soon as the signal arrives.

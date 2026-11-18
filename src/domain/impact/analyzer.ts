@@ -409,8 +409,8 @@ function stalenessContext(workspace: ImpactWorkspace): EvidenceStalenessContext 
 		if (revision !== undefined) localeRevisions[locale] = revision
 	}
 	return {
-		// Rule 01a115cd-c5a5-…: a capture follows its View's render-input digest, so a restore that
-		// changes only a View's Spec or metadata leaves its Evidence fresh.
+		// Rule 01a115cd-c5a5-…: a capture follows its View's render-input digest, so a change
+		// that touches only a View's Spec or metadata leaves its Evidence fresh.
 		allViews: sortedKeys(workspace.views).flatMap((key) => {
 			const view = asRecord(workspace.views.get(key))
 			return view === undefined ? [] : [{ key, renderInputDigest: renderInputDigest(view) }]

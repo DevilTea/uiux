@@ -18,8 +18,6 @@ export const GLOSSARY_NOUNS = [
 	// Owner decision, 2026-10-06: these technical nouns also stay English in zh-TW.
 	// (Checks → 「檢查」 and Catalog → 「型錄」 are translated, so they are not listed.)
 	'Token', 'Agent', 'Slot', 'Runtime', 'Manifest', 'Bundle', 'Schema',
-	// Owner decision, 2026-10-09: the version timeline's Checkpoint stays English in zh-TW.
-	'Checkpoint',
 	// Owner ruling, 2026-10-11 (Discussion #139, ruling 4): Product Kit stays English, since 「套件」 means a package.
 	'Product Kit',
 	// Owner ruling, 2026-10-15 (Discussion #139, https://github.com/DevilTea/uiux/discussions/139#discussioncomment-18942505):

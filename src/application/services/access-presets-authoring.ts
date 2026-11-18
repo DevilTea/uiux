@@ -99,8 +99,7 @@ export function normalizeAccessPresets(presets: readonly unknown[]): unknown[] {
  * The checks a presets write makes on the file it writes, `current` being the file it replaces (or
  * `undefined` or `null`): its shape, the rules of Clause 01a11c09-a57d-7d3d-a46f-1e9512200f74 and
  * the keys outside the catalog that the preset of the same `id` in the current file does not
- * already hold, so a write cannot move such a key to another preset. Also used by a restore of the
- * `access-presets` resource, which writes a version's file through the same checks.
+ * already hold, so a write cannot move such a key to another preset.
  */
 export function accessPresetsWriteDiagnostics(next: unknown, current: unknown): readonly Diagnostic[] {
 	const shape = validateAccessPresetsShape(next)
